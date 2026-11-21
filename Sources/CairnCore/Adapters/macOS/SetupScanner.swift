@@ -8,7 +8,7 @@ public struct ScanReport: Sendable {
 /// Runs the selected scanners and assembles a manifest. Read-only.
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
-        case brew, mas, dock, defaults
+        case brew, mas, dock, displays, defaults
 
         /// Human-readable name for progress messages.
         public var title: String {
@@ -16,6 +16,7 @@ public struct SetupScanner: Sendable {
             case .brew: return "Homebrew"
             case .mas: return "App Store apps"
             case .dock: return "the Dock"
+            case .displays: return "displays"
             case .defaults: return "preferences"
             }
         }
@@ -23,11 +24,13 @@ public struct SetupScanner: Sendable {
 
     public var runner: CommandRunner
     public var extraDomains: [String]
+    public var displays: DisplaySystem
     public var now: @Sendable () -> Date
 
-    public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = CoreGraphicsDisplays(), now: @escaping @Sendable () -> Date = { Date() }) {
         self.runner = runner
         self.extraDomains = extraDomains
+        self.displays = displays
         self.now = now
     }
 
@@ -63,6 +66,7 @@ public struct SetupScanner: Sendable {
                 manifest.apps += found.apps
                 manifest.settings += found.settings
                 if let dock = found.dock { manifest.layout.dock = dock }
+                if let displays = found.displays { manifest.layout.displays = displays }
                 warnings += found.warnings
             } catch {
                 warnings.append("\(source.rawValue): skipped: \(error)")
@@ -80,6 +84,7 @@ public struct SetupScanner: Sendable {
         case .brew: return HomebrewScanner()
         case .mas: return MASScanner()
         case .dock: return DockScanner()
+        case .displays: return DisplayScanner(system: displays)
         case .defaults: return DefaultsScanner(extraDomains: extraDomains)
         }
     }

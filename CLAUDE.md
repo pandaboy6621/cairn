@@ -54,6 +54,7 @@ Each category expands into individual items with their own checkboxes, a search 
 1. Packages: Homebrew formulae, casks, taps, services (`brew bundle dump`, `brew list`).
 2. Mac App Store apps (`mas list`). Stored as pending; installed after the user signs in to the App Store.
 3. Look and layout: Dock order and settings, Finder, menu bar, Mission Control, default apps, login items.
+   - Displays: monitor arrangement (positions, main display, resolution, refresh rate, mirroring), matched by monitor id (vendor-model-hashed serial, `builtin` for the laptop screen), then by model. Read with CoreGraphics, restored with `cairn displays --from <manifest> [--apply]`. Rotation has no public API: it goes in the post-restore checklist.
 4. System settings: keyboard, trackpad, display, sound, energy, accessibility.
 5. App preferences: per-domain list from `defaults domains`, exported with `defaults export <domain> -`. Allowlist-first with a denylist for caches, window state, machine IDs, and anything containing tokens.
 6. Developer: shell config, git config, SSH config (never private keys unless in the Sensitive tier).

@@ -40,7 +40,7 @@ import Testing
 
     @Test func reportsEachScannerThenDone() {
         let recorder = Recorder()
-        _ = SetupScanner(runner: Fixtures.fullRunner()).scan([.mas, .dock]) { recorder.events.append($0) }
+        _ = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays).scan([.mas, .dock]) { recorder.events.append($0) }
         #expect(recorder.events.map(\.current) == [.mas, .dock, nil])
         #expect(recorder.events.map(\.completed) == [0, 1, 2])
         #expect(recorder.events.last?.fraction == 1)

@@ -475,6 +475,7 @@ private struct ItemIcon: View {
         default: break
         }
         if item.id == "layout:dock" { return "dock.rectangle" }
+        if item.id == "layout:displays" { return "display.2" }
         return category == .appStore ? "app" : "slider.horizontal.below.rectangle"
     }
 }

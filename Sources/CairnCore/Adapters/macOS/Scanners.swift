@@ -7,6 +7,7 @@ public struct ScanContribution: Sendable {
     public var apps: [AppItem] = []
     public var settings: [SettingItem] = []
     public var dock: DockLayout?
+    public var displays: DisplayLayout?
     public var warnings: [String] = []
 
     public init() {}

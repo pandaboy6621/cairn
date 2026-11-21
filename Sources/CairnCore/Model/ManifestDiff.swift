@@ -43,6 +43,7 @@ public struct ManifestDiff: Equatable, Sendable {
                 return parts
             },
             dock(old.layout.dock, new.layout.dock),
+            displays(old.layout.displays, new.layout.displays),
             keyed("sensitive", old.sensitive, new.sensitive, id: \.ref) { a, b in
                 a.include != b.include ? [Change(id: "\(a.ref) include", from: "\(a.include)", to: "\(b.include)")] : []
             },
@@ -91,6 +92,23 @@ public struct ManifestDiff: Equatable, Sendable {
         let orderA = a.filter(common.contains), orderB = b.filter(common.contains)
         if orderA != orderB {
             section.changed.append(Change(id: "order", from: orderA.map(shortName).joined(separator: ", "), to: orderB.map(shortName).joined(separator: ", ")))
+        }
+        if let o = old, let n = new, o.include != n.include {
+            section.changed.append(Change(id: "include", from: "\(o.include)", to: "\(n.include)"))
+        }
+        return section
+    }
+
+    private static func displays(_ old: DisplayLayout?, _ new: DisplayLayout?) -> Section {
+        var section = keyed("layout.displays", old?.displays ?? [], new?.displays ?? [],
+                            id: { "\($0.name) (\($0.id))" }, matchOn: \.id) { a, b in
+            var parts: [Change] = []
+            if (a.x, a.y) != (b.x, b.y) { parts.append(Change(id: "\(a.name) position", from: "(\(a.x), \(a.y))", to: "(\(b.x), \(b.y))")) }
+            if a.modeSummary != b.modeSummary { parts.append(Change(id: "\(a.name) resolution", from: a.modeSummary, to: b.modeSummary)) }
+            if a.rotation != b.rotation { parts.append(Change(id: "\(a.name) rotation", from: "\(a.rotation)°", to: "\(b.rotation)°")) }
+            if a.main != b.main { parts.append(Change(id: "\(a.name) main", from: "\(a.main)", to: "\(b.main)")) }
+            if a.mirrorOf != b.mirrorOf { parts.append(Change(id: "\(a.name) mirrors", from: a.mirrorOf ?? "none", to: b.mirrorOf ?? "none")) }
+            return parts
         }
         if let o = old, let n = new, o.include != n.include {
             section.changed.append(Change(id: "include", from: "\(o.include)", to: "\(n.include)"))

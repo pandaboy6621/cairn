@@ -164,7 +164,7 @@ import Testing
 @Suite struct SetupScannerTests {
     @Test func fullScanAssemblesANormalizedManifest() throws {
         let fixed = Samples.date
-        let report = SetupScanner(runner: Fixtures.fullRunner(), now: { fixed }).scan()
+        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan()
         let m = report.manifest
         #expect(m.device == Device(name: "test-mac", os: "macos", osVersion: "14.5"))
         #expect(m.created == fixed)
@@ -179,14 +179,14 @@ import Testing
 
     @Test func scanIsDeterministic() throws {
         let fixed = Samples.date
-        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), now: { fixed }).scan().manifest)
-        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), now: { fixed }).scan().manifest)
+        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan().manifest)
+        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan().manifest)
         #expect(a == b)
     }
 
     @Test func missingToolBecomesAWarningNotAFailure() {
         let empty = FixtureRunner() // nothing stubbed: brew/mas "not installed"
-        let report = SetupScanner(runner: empty).scan([.brew, .mas])
+        let report = SetupScanner(runner: empty, displays: Fixtures.displays).scan([.brew, .mas])
         #expect(report.manifest.packages.isEmpty && report.manifest.apps.isEmpty)
         #expect(report.manifest.device.name == "unknown")
         #expect(report.warnings.count == 2)
@@ -194,7 +194,7 @@ import Testing
 
     @Test func onlyRequestedSourcesRun() {
         let runner = Fixtures.fullRunner()
-        let report = SetupScanner(runner: runner).scan([.mas])
+        let report = SetupScanner(runner: runner, displays: Fixtures.displays).scan([.mas])
         #expect(report.manifest.apps.count == 3)
         #expect(report.manifest.packages.isEmpty)
         #expect(!runner.invoked.contains { $0.program == "brew" || $0.program == "defaults" })

@@ -6,7 +6,7 @@ import Testing
     /// Fixture scan plus one sensitive ref, so locking can be tested.
     func makeChecklist() -> Checklist {
         let fixed = Samples.date
-        var m = SetupScanner(runner: Fixtures.fullRunner(), now: { fixed }).scan().manifest
+        var m = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan().manifest
         m.sensitive = [SensitiveRef(type: "wifi", ref: "vault://wifi/ExampleNet")]
         return Checklist(manifest: m)
     }
@@ -18,10 +18,10 @@ import Testing
         #expect(c.count(in: .developer).total == 0)
         #expect(c.count(in: .fonts).total == 0)
         #expect(c.count(in: .sensitive) == (0, 1))
-        // Every setting and the dock layout land in exactly one category.
+        // Every setting, the dock layout and the display layout land in exactly one category.
         let settingCategories: [ChecklistCategory] = [.lookAndLayout, .systemSettings, .appPreferences]
         let settingItems = settingCategories.map { c.count(in: $0).total }.reduce(0, +)
-        #expect(settingItems == c.source.settings.count + 1)
+        #expect(settingItems == c.source.settings.count + 2)
     }
 
     @Test func classifiesSettings() {

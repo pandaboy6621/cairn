@@ -60,6 +60,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         m.apps.sort { $0.id < $1.id }
         m.settings.sort { $0.key < $1.key }
         m.sensitive.sort { ($0.type, $0.ref) < ($1.type, $1.ref) }
+        m.layout.displays?.displays.sort { $0.id < $1.id }
         // Whole seconds only: sub-second noise would make every snapshot differ.
         m.created = Date(timeIntervalSince1970: m.created.timeIntervalSince1970.rounded(.down))
         return m
@@ -179,9 +180,113 @@ public struct PreferenceRef: Codable, Equatable, Sendable {
 
 public struct Layout: Codable, Equatable, Sendable {
     public var dock: DockLayout?
+    public var displays: DisplayLayout?
 
-    public init(dock: DockLayout? = nil) {
+    public init(dock: DockLayout? = nil, displays: DisplayLayout? = nil) {
         self.dock = dock
+        self.displays = displays
+    }
+}
+
+/// How monitors are arranged: positions, resolution, main display, mirroring.
+///
+/// Coordinates are in points with a top-left origin and the main display at
+/// (0, 0), which is how macOS, Windows and X11/Wayland all describe a desktop.
+public struct DisplayLayout: Codable, Equatable, Sendable {
+    public var displays: [DisplayItem]
+    public var include: Bool
+
+    public init(displays: [DisplayItem], include: Bool = true) {
+        self.displays = displays
+        self.include = include
+    }
+
+    public var main: DisplayItem? { displays.first(where: \.main) }
+}
+
+public struct DisplayItem: Codable, Equatable, Sendable {
+    /// `builtin` for a laptop's own screen, otherwise `<vendor>-<model>-<serial hash>`
+    /// (hex). The serial is hashed so the manifest never holds a hardware serial,
+    /// yet two identical monitors still get different ids.
+    public var id: String
+    public var name: String
+    public var builtin: Bool
+    public var main: Bool
+    public var x: Int
+    public var y: Int
+    /// Size in points ("looks like" resolution).
+    public var width: Int
+    public var height: Int
+    public var pixelWidth: Int
+    public var pixelHeight: Int
+    public var refreshHz: Double?
+    /// Degrees clockwise: 0, 90, 180 or 270.
+    public var rotation: Int
+    /// Id of the display this one mirrors, if any.
+    public var mirrorOf: String?
+
+    public init(
+        id: String, name: String, builtin: Bool = false, main: Bool = false,
+        x: Int, y: Int, width: Int, height: Int, pixelWidth: Int? = nil, pixelHeight: Int? = nil,
+        refreshHz: Double? = nil, rotation: Int = 0, mirrorOf: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.builtin = builtin
+        self.main = main
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.pixelWidth = pixelWidth ?? width
+        self.pixelHeight = pixelHeight ?? height
+        self.refreshHz = refreshHz
+        self.rotation = rotation
+        self.mirrorOf = mirrorOf
+    }
+
+    /// `<vendor>-<model>` without the serial part: the monitor model.
+    public var modelID: String? {
+        guard !builtin else { return nil }
+        let parts = id.split(separator: "-")
+        return parts.count >= 2 ? "\(parts[0])-\(parts[1])" : nil
+    }
+
+    /// e.g. `1920×1080 @ 144 Hz`.
+    public var modeSummary: String {
+        var s = "\(width)×\(height)"
+        if pixelWidth != width { s += " (\(pixelWidth)×\(pixelHeight) px)" }
+        if let hz = refreshHz, hz > 0 { s += " @ \(hz.rounded() == hz ? String(Int(hz)) : String(hz)) Hz" }
+        return s
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, builtin, main, x, y, width, height, rotation
+        case pixelWidth = "pixel_width"
+        case pixelHeight = "pixel_height"
+        case refreshHz = "refresh_hz"
+        case mirrorOf = "mirror_of"
+    }
+
+    // Hand-written only so a whole refresh rate is written as `144`, not `1.44e+2`.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(builtin, forKey: .builtin)
+        try c.encode(main, forKey: .main)
+        try c.encode(x, forKey: .x)
+        try c.encode(y, forKey: .y)
+        try c.encode(width, forKey: .width)
+        try c.encode(height, forKey: .height)
+        try c.encode(pixelWidth, forKey: .pixelWidth)
+        try c.encode(pixelHeight, forKey: .pixelHeight)
+        if let hz = refreshHz {
+            if hz.rounded() == hz, abs(hz) < 100_000 { try c.encode(Int(hz), forKey: .refreshHz) }
+            else { try c.encode(hz, forKey: .refreshHz) }
+        }
+        try c.encode(rotation, forKey: .rotation)
+        try c.encodeIfPresent(mirrorOf, forKey: .mirrorOf)
     }
 }
 

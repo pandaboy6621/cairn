@@ -166,6 +166,11 @@ public struct Checklist: Sendable {
         } else {
             m.layout.dock = nil
         }
+        if let displays = source.layout.displays, checked.contains(Self.displaysID) {
+            m.layout.displays = DisplayLayout(displays: displays.displays, include: true)
+        } else {
+            m.layout.displays = nil
+        }
         m.sensitive = sensitiveUnlocked ? source.sensitive.filter { checked.contains(Self.id(sensitive: $0)) } : []
         return m
     }
@@ -173,6 +178,7 @@ public struct Checklist: Sendable {
     // MARK: Building
 
     static let dockID = "layout:dock"
+    static let displaysID = "layout:displays"
     static func id(package p: PackageItem) -> String { "package:\(p.uid)" }
     static func id(app a: AppItem) -> String { "app:\(a.id)" }
     static func id(setting s: SettingItem) -> String { "setting:\(s.key)" }
@@ -196,6 +202,10 @@ public struct Checklist: Sendable {
             out.append(ChecklistItem(id: dockID, category: .lookAndLayout, group: "Dock",
                                      title: "Dock app order", detail: "\(dock.apps.count) tiles", isChecked: dock.include))
         }
+        if let displays = m.layout.displays {
+            out.append(ChecklistItem(id: displaysID, category: .lookAndLayout, group: "Displays",
+                                     title: "Display arrangement", detail: Self.describe(displays), isChecked: displays.include))
+        }
         let settingItems = m.settings.map { s -> ChecklistItem in
             let category = SettingCategory.classify(s)
             let domain = s.adapter.macos?.domain ?? "other"
@@ -214,6 +224,14 @@ public struct Checklist: Sendable {
                                      title: s.ref, detail: "", isChecked: false))
         }
         return out
+    }
+
+    /// e.g. "2 displays · main: Example 27 Monitor".
+    static func describe(_ layout: DisplayLayout) -> String {
+        let n = layout.displays.count
+        var s = n == 1 ? "1 display" : "\(n) displays"
+        if n > 1, let main = layout.main { s += " · main: \(main.name)" }
+        return s
     }
 
     static func preset(_ preset: ChecklistPreset, includes item: ChecklistItem, in m: Manifest) -> Bool {

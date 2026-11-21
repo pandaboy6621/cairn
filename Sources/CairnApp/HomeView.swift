@@ -455,6 +455,7 @@ struct RestorePreviewSheet: View {
         case "apps": return "App Store apps"
         case "settings": return "Settings"
         case "layout.dock": return "Dock"
+        case "layout.displays": return "Displays"
         case "sensitive": return "Sensitive"
         default: return section
         }

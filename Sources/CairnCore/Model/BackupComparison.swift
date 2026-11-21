@@ -15,11 +15,13 @@ public struct BackupComparison: Equatable, Sendable {
         diff = ManifestDiff.between(current, backup)
         let included = Self.includedItemCount(backup)
         backupItemCount = included
-        let toInstall = diff.sections.filter { $0.name != "layout.dock" }.reduce(0) { $0 + $1.added.count }
-        let toChange = diff.sections.filter { $0.name != "layout.dock" }
+        let wholeItems: Set<String> = ["layout.dock", "layout.displays"]
+        let toInstall = diff.sections.filter { !wholeItems.contains($0.name) }.reduce(0) { $0 + $1.added.count }
+        let toChange = diff.sections.filter { !wholeItems.contains($0.name) }
             .reduce(0) { $0 + Set($1.changed.map { Self.itemID($0.id) }).count }
-        let dockDiffers = diff.sections.contains { $0.name == "layout.dock" } ? 1 : 0
-        matchingCount = max(0, included - toInstall - toChange - dockDiffers)
+        // The Dock and the display layout each count as one item.
+        let layoutDiffers = diff.sections.filter { wholeItems.contains($0.name) }.count
+        matchingCount = max(0, included - toInstall - toChange - layoutDiffers)
     }
 
     /// 0...1; 1 means restoring this backup would change nothing.
@@ -34,6 +36,7 @@ public struct BackupComparison: Equatable, Sendable {
             + m.apps.filter(\.include).count
             + m.settings.filter(\.include).count
             + (m.layout.dock?.include == true ? 1 : 0)
+            + (m.layout.displays?.include == true ? 1 : 0)
     }
 
     /// Change ids look like "dock.autohide" or "dock.autohide include"; one item may

@@ -1,0 +1,22 @@
+{
+  "SPDisplaysDataType" : [
+    {
+      "_name" : "Example GPU",
+      "spdisplays_ndrvs" : [
+        {
+          "_name" : "Color LCD",
+          "_spdisplays_displayID" : "1",
+          "_spdisplays_display-product-id" : "a04f",
+          "_spdisplays_display-vendor-id" : "610",
+          "spdisplays_main" : "spdisplays_yes"
+        },
+        {
+          "_name" : "Example 27 Monitor",
+          "_spdisplays_displayID" : "4",
+          "_spdisplays_display-product-id" : "5b10",
+          "_spdisplays_display-vendor-id" : "1e6d"
+        }
+      ]
+    }
+  ]
+}

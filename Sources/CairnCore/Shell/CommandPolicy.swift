@@ -31,6 +31,8 @@ public struct CommandPolicy: Sendable {
             return args.count == 2 && args[0] == "--get"
         case "sw_vers":
             return true
+        case "system_profiler":
+            return args == ["SPDisplaysDataType", "-json"]
         default:
             return false
         }
