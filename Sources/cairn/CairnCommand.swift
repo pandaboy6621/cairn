@@ -8,8 +8,57 @@ struct CairnCommand: ParsableCommand {
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
         version: Cairn.version,
-        subcommands: [Scan.self, Diff.self, Displays.self]
+        subcommands: [Scan.self, Diff.self, Restore.self, Displays.self]
     )
+}
+
+struct Restore: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Make this Mac match a backup. Dry run unless you pass --apply.",
+        discussion: """
+            Scans this Mac, then prints what would change to match the backup.
+            With --apply it writes settings and the Dock, restarts the affected apps,
+            scans again, and checks every item it wrote.
+            Packages, App Store apps and secrets are listed but not restored yet.
+            """
+    )
+
+    @Option(name: .long, help: "The backup manifest to restore.")
+    var from: String
+
+    @Flag(name: .long, help: "Actually change this Mac (after showing the plan).")
+    var apply = false
+
+    @Option(name: .long, help: "With --apply: also write a verification report here.")
+    var report: String?
+
+    func run() throws {
+        let backup = try ManifestCoder.read(from: URL(fileURLWithPath: from))
+        let scanner = SetupScanner()
+        let before = scanner.scan()
+        let plan = RestorePlan.make(backup: backup, current: before.manifest, manual: MacRestorer.manualStep)
+        print(plan.render(), terminator: "")
+
+        guard apply else {
+            if !plan.changes.isEmpty { stderr("Dry run: nothing changed. Add --apply to make these changes.") }
+            return
+        }
+        guard !plan.changes.isEmpty else { return }
+
+        print("\nApplying…")
+        let result = MacRestorer().apply(plan)
+        if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
+        for w in result.warnings { stderr("note: \(w)") }
+
+        // Let restarted apps settle before checking.
+        Thread.sleep(forTimeInterval: 3)
+        let after = scanner.scan().manifest
+        let checks = RestoreVerification.check(result, after: after)
+        let text = "\nVerification\n" + RestoreVerification.render(checks)
+        print(text, terminator: "")
+        if let report { try text.write(toFile: report, atomically: true, encoding: .utf8) }
+        if checks.contains(where: { $0.status == .mismatch || $0.status == .failed }) { throw ExitCode(1) }
+    }
 }
 
 struct Scan: ParsableCommand {

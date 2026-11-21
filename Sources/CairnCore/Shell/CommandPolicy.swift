@@ -38,6 +38,21 @@ public struct CommandPolicy: Sendable {
         }
     }
 
+    /// Restore: everything `readOnly` allows, plus writing one preference key at a
+    /// time and restarting the few processes that cache preferences.
+    public static let restore = CommandPolicy { command in
+        if readOnly.allows(command) { return true }
+        let args = command.arguments
+        switch command.program {
+        case "defaults":
+            return args.count == 4 && args[0] == "write"
+        case "killall":
+            return args.count == 1 && ["Dock", "Finder", "SystemUIServer", "ControlCenter"].contains(args[0])
+        default:
+            return false
+        }
+    }
+
     /// For tests only.
     public static let allowAll = CommandPolicy { _ in true }
 }
