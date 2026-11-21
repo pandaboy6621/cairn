@@ -32,6 +32,20 @@ struct CairnIconView: View {
 }
 
 enum CairnIcon {
+    /// Renders the icon edge to edge (macOS icons carry their own margin) as a PNG.
+    @MainActor
+    static func writePNG(to path: String, size: CGFloat) -> Bool {
+        let content = CairnIconView()
+            .frame(width: size * 0.82, height: size * 0.82)
+            .frame(width: size, height: size)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 1
+        guard let cg = renderer.cgImage else { return false }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
     @MainActor
     static func image(size: CGFloat) -> NSImage? {
         let renderer = ImageRenderer(content: CairnIconView().frame(width: size, height: size).padding(size * 0.05))

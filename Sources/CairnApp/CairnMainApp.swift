@@ -7,7 +7,17 @@ struct CairnMainApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     // A plain constant instead of @State: the app struct is created once, and
     // @State is a macro whose plugin the Command Line Tools don't ship.
-    private let model = AppModel()
+    private let model: AppModel
+
+    init() {
+        // Used by scripts/build-app.sh to make the .icns: render the icon and quit
+        // before any window or scan starts.
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--render-icon"), i + 1 < args.count {
+            exit(CairnIcon.writePNG(to: args[i + 1], size: 1024) ? 0 : 1)
+        }
+        model = AppModel()
+    }
 
     var body: some Scene {
         WindowGroup("Cairn") {

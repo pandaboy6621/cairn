@@ -34,6 +34,18 @@ swift run cairn diff old.yaml new.yaml
 
 ## App
 
+Build a real `Cairn.app` (release build, icon, ad-hoc signed for this Mac) and put it in `~/Applications`,
+so it shows up in Launchpad and Spotlight:
+
+```bash
+scripts/build-app.sh --install
+```
+
+Without `--install` it only builds `dist/Cairn.app`. Run the script again after pulling changes. The
+bundle also contains the CLI at `Cairn.app/Contents/MacOS/cairn`.
+
+While developing, you can skip the bundle:
+
 ```bash
 swift run CairnApp
 ```
