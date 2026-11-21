@@ -58,7 +58,8 @@ Each category expands into individual items with their own checkboxes, a search 
 5. App preferences: per-domain list from `defaults domains`, exported with `defaults export <domain> -`. Allowlist-first with a denylist for caches, window state, machine IDs, and anything containing tokens.
 6. Developer: shell config, git config, SSH config (never private keys unless in the Sensitive tier).
 7. Fonts (user-installed only).
-8. Sensitive (locked until encryption is enabled): Wi-Fi networks, VPN profiles, SSH keys, API tokens.
+8. Network shares: mapped network drives and file shares (SMB, AFP, NFS, WebDAV). Capture the share URL (`smb://server/share`), the username (never the password), whether it mounts at login, and Finder's "Connect to Server" favorites. Sources: current mounts (`mount`, filtered to network filesystems), Finder favorite servers (the `com.apple.LSSharedFileList.FavoriteServers` shared file list), and login items that point at shares. Restore reconnects via `open smb://...` (the Keychain or the user supplies the password) and recreates favorites and auto-mount login items. Share passwords belong in the Sensitive tier. System-wide autofs maps (`/etc/auto_master`) need admin rights: list them in the post-restore checklist, don't write them.
+9. Sensitive (locked until encryption is enabled): Wi-Fi networks, VPN profiles, SSH keys, API tokens, network share passwords.
 
 ## Encryption design
 - Two tiers. Ordinary items are plaintext YAML so snapshots can be diffed. Sensitive items are encrypted per item.
@@ -91,6 +92,7 @@ Each category expands into individual items with their own checkboxes, a search 
 1. Manifest schema + `cairn scan` and `cairn diff` for Homebrew, MAS, Dock, `defaults` (read-only, unencrypted).
 2. SwiftUI checklist UI over a live scan, export unencrypted manifest.
 3. Snapshots + local/NAS store + `launchd` auto-backup.
+   - Network shares scanner (read-only): mounts, Finder favorite servers, share login items.
 4. Encryption vault + Sensitive tier (Wi-Fi first).
 5. Restore (dry-run diff, then apply) in dependency order.
 6. Sync tab.
