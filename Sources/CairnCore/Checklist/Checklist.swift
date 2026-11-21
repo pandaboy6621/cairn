@@ -1,0 +1,234 @@
+import Foundation
+
+/// The eight top-level groups in the checklist tree (see CLAUDE.md).
+public enum ChecklistCategory: String, CaseIterable, Identifiable, Sendable {
+    case packages, appStore, lookAndLayout, systemSettings, appPreferences, developer, fonts, sensitive
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .packages: return "Packages"
+        case .appStore: return "Mac App Store"
+        case .lookAndLayout: return "Look and layout"
+        case .systemSettings: return "System settings"
+        case .appPreferences: return "App preferences"
+        case .developer: return "Developer"
+        case .fonts: return "Fonts"
+        case .sensitive: return "Sensitive"
+        }
+    }
+
+    /// SF Symbol name (a plain string, so the model stays UI-free).
+    public var symbol: String {
+        switch self {
+        case .packages: return "shippingbox"
+        case .appStore: return "bag"
+        case .lookAndLayout: return "dock.rectangle"
+        case .systemSettings: return "gearshape"
+        case .appPreferences: return "slider.horizontal.3"
+        case .developer: return "terminal"
+        case .fonts: return "textformat"
+        case .sensitive: return "lock"
+        }
+    }
+
+    /// Categories with no scanner yet. They show as "not scanned yet".
+    public var isScanned: Bool {
+        switch self {
+        case .developer, .fonts, .sensitive: return false
+        default: return true
+        }
+    }
+}
+
+public enum ChecklistPreset: String, CaseIterable, Identifiable, Sendable {
+    case minimal, developer, everything
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .minimal: return "Minimal"
+        case .developer: return "Developer"
+        case .everything: return "Everything"
+        }
+    }
+
+    public var summary: String {
+        switch self {
+        case .minimal: return "Look and layout plus system settings. No software."
+        case .developer: return "Packages, settings, and developer tools' preferences."
+        case .everything: return "Everything that was scanned."
+        }
+    }
+}
+
+public enum CheckState: Sendable {
+    case on, off, mixed
+}
+
+public struct ChecklistItem: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let category: ChecklistCategory
+    /// Sub-heading inside the category (e.g. "Casks", or a preferences domain).
+    public let group: String
+    public let title: String
+    public let detail: String
+    public var isChecked: Bool
+
+    func matches(_ query: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        return [title, detail, group].contains { $0.localizedCaseInsensitiveContains(q) }
+    }
+}
+
+/// The selection model behind the checklist UI: which scanned items are
+/// included. Lives in CairnCore so the CLI and tests can use it too.
+public struct Checklist: Sendable {
+    public private(set) var source: Manifest
+    public private(set) var items: [ChecklistItem]
+    /// Sensitive items stay locked until a vault password exists (Milestone 4).
+    public private(set) var sensitiveUnlocked = false
+
+    public init(manifest: Manifest) {
+        source = manifest.normalized()
+        items = Self.buildItems(source)
+    }
+
+    // MARK: Queries
+
+    public func items(in category: ChecklistCategory, matching query: String = "") -> [ChecklistItem] {
+        items.filter { $0.category == category && $0.matches(query) }
+    }
+
+    /// Items in a category grouped by sub-heading, in display order.
+    public func groups(in category: ChecklistCategory, matching query: String = "") -> [(name: String, items: [ChecklistItem])] {
+        var order: [String] = []
+        var byGroup: [String: [ChecklistItem]] = [:]
+        for item in items(in: category, matching: query) {
+            if byGroup[item.group] == nil { order.append(item.group) }
+            byGroup[item.group, default: []].append(item)
+        }
+        return order.map { ($0, byGroup[$0]!) }
+    }
+
+    public func count(in category: ChecklistCategory, matching query: String = "") -> (checked: Int, total: Int) {
+        let list = items(in: category, matching: query)
+        return (list.filter(\.isChecked).count, list.count)
+    }
+
+    public func state(of category: ChecklistCategory, matching query: String = "") -> CheckState {
+        let c = count(in: category, matching: query)
+        if c.checked == 0 { return .off }
+        return c.checked == c.total ? .on : .mixed
+    }
+
+    public var checkedCount: Int { items.filter(\.isChecked).count }
+
+    public func isLocked(_ category: ChecklistCategory) -> Bool {
+        category == .sensitive && !sensitiveUnlocked
+    }
+
+    // MARK: Changes
+
+    public mutating func setChecked(_ id: String, _ checked: Bool) {
+        guard let i = items.firstIndex(where: { $0.id == id }), !isLocked(items[i].category) else { return }
+        items[i].isChecked = checked
+    }
+
+    /// Checks or unchecks every item in a category that matches the search.
+    public mutating func setAll(in category: ChecklistCategory, matching query: String = "", to checked: Bool) {
+        guard !isLocked(category) else { return }
+        for i in items.indices where items[i].category == category && items[i].matches(query) {
+            items[i].isChecked = checked
+        }
+    }
+
+    public mutating func apply(_ preset: ChecklistPreset) {
+        for i in items.indices where !isLocked(items[i].category) {
+            items[i].isChecked = Self.preset(preset, includes: items[i], in: source)
+        }
+    }
+
+    // MARK: Export
+
+    /// A manifest containing only the checked items.
+    public func exportManifest() -> Manifest {
+        let checked = Set(items.filter(\.isChecked).map(\.id))
+        var m = source
+        m.packages = source.packages.filter { checked.contains(Self.id(package: $0)) }.map { var p = $0; p.include = true; return p }
+        m.apps = source.apps.filter { checked.contains(Self.id(app: $0)) }.map { var a = $0; a.include = true; return a }
+        m.settings = source.settings.filter { checked.contains(Self.id(setting: $0)) }.map { var s = $0; s.include = true; return s }
+        if let dock = source.layout.dock, checked.contains(Self.dockID) {
+            m.layout.dock = DockLayout(apps: dock.apps, include: true)
+        } else {
+            m.layout.dock = nil
+        }
+        m.sensitive = sensitiveUnlocked ? source.sensitive.filter { checked.contains(Self.id(sensitive: $0)) } : []
+        return m
+    }
+
+    // MARK: Building
+
+    static let dockID = "layout:dock"
+    static func id(package p: PackageItem) -> String { "package:\(p.uid)" }
+    static func id(app a: AppItem) -> String { "app:\(a.id)" }
+    static func id(setting s: SettingItem) -> String { "setting:\(s.key)" }
+    static func id(sensitive s: SensitiveRef) -> String { "sensitive:\(s.ref)" }
+
+    static func buildItems(_ m: Manifest) -> [ChecklistItem] {
+        var out: [ChecklistItem] = []
+        let kindTitles: [PackageItem.Kind: String] = [.formula: "Formulae", .cask: "Casks", .tap: "Taps"]
+        for kind in PackageItem.Kind.allCases {
+            for p in m.packages where p.kind == kind {
+                let brew = p.resolvers["brew"] ?? p.id
+                out.append(ChecklistItem(id: id(package: p), category: .packages, group: kindTitles[kind]!,
+                                         title: p.id, detail: brew == p.id ? "" : brew, isChecked: p.include))
+            }
+        }
+        for a in m.apps.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
+            out.append(ChecklistItem(id: id(app: a), category: .appStore, group: "Installed after App Store sign-in",
+                                     title: a.name, detail: a.id, isChecked: a.include))
+        }
+        if let dock = m.layout.dock {
+            out.append(ChecklistItem(id: dockID, category: .lookAndLayout, group: "Dock",
+                                     title: "Dock app order", detail: "\(dock.apps.count) tiles", isChecked: dock.include))
+        }
+        let settingItems = m.settings.map { s -> ChecklistItem in
+            let category = SettingCategory.classify(s)
+            let domain = s.adapter.macos?.domain ?? "other"
+            let known = !s.key.hasPrefix("macos.")
+            return ChecklistItem(
+                id: id(setting: s), category: category,
+                group: SettingCategory.groupName(for: s, in: category),
+                title: known ? s.key : (s.adapter.macos?.key ?? s.key),
+                detail: known ? s.value.summary : "\(s.value.summary) · \(domain)",
+                isChecked: s.include)
+        }
+        // Group by sub-heading so related settings sit together.
+        out += settingItems.sorted { ($0.category.rawValue, $0.group, $0.title) < ($1.category.rawValue, $1.group, $1.title) }
+        for s in m.sensitive {
+            out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive, group: s.type,
+                                     title: s.ref, detail: "", isChecked: false))
+        }
+        return out
+    }
+
+    static func preset(_ preset: ChecklistPreset, includes item: ChecklistItem, in m: Manifest) -> Bool {
+        switch preset {
+        case .everything:
+            return true
+        case .minimal:
+            return [.lookAndLayout, .systemSettings].contains(item.category)
+        case .developer:
+            switch item.category {
+            case .packages, .lookAndLayout, .systemSettings, .developer: return true
+            case .appPreferences:
+                return SettingCategory.developerDomains.contains { item.group == SettingCategory.displayName(domain: $0) }
+            default: return false
+            }
+        }
+    }
+}
