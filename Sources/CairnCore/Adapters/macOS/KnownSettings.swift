@@ -1,0 +1,110 @@
+/// Maps macOS preference keys to portable abstract keys.
+///
+/// Anything not listed becomes `macos.<domain>.<key>`. All keys are flagged
+/// `platforms: [macos]` until another platform's adapter exists.
+public enum KnownSettings {
+    public static func abstractKey(domain: String, key: String) -> String {
+        table[domain]?[key] ?? "macos.\(domain).\(key)"
+    }
+
+    static let table: [String: [String: String]] = [
+        "com.apple.dock": [
+            "autohide": "dock.autohide",
+            "autohide-delay": "dock.autohide_delay",
+            "autohide-time-modifier": "dock.autohide_animation_time",
+            "tilesize": "dock.tile_size",
+            "largesize": "dock.magnified_size",
+            "magnification": "dock.magnification",
+            "orientation": "dock.position",
+            "mineffect": "dock.minimize_effect",
+            "minimize-to-application": "dock.minimize_into_app",
+            "show-recents": "dock.show_recents",
+            "show-process-indicators": "dock.show_indicators",
+            "static-only": "dock.show_only_open_apps",
+            "launchanim": "dock.animate_launch",
+            "mru-spaces": "mission_control.rearrange_spaces",
+            "expose-group-apps": "mission_control.group_by_app",
+            "wvous-tl-corner": "mission_control.hot_corner_top_left",
+            "wvous-tr-corner": "mission_control.hot_corner_top_right",
+            "wvous-bl-corner": "mission_control.hot_corner_bottom_left",
+            "wvous-br-corner": "mission_control.hot_corner_bottom_right",
+            "wvous-tl-modifier": "mission_control.hot_corner_top_left_modifier",
+            "wvous-tr-modifier": "mission_control.hot_corner_top_right_modifier",
+            "wvous-bl-modifier": "mission_control.hot_corner_bottom_left_modifier",
+            "wvous-br-modifier": "mission_control.hot_corner_bottom_right_modifier",
+        ],
+        "com.apple.finder": [
+            "AppleShowAllFiles": "finder.show_hidden_files",
+            "ShowPathbar": "finder.show_path_bar",
+            "ShowStatusBar": "finder.show_status_bar",
+            "FXPreferredViewStyle": "finder.default_view",
+            "FXDefaultSearchScope": "finder.search_scope",
+            "FXEnableExtensionChangeWarning": "finder.warn_on_extension_change",
+            "_FXShowPosixPathInTitle": "finder.posix_path_in_title",
+            "_FXSortFoldersFirst": "finder.folders_first",
+            "NewWindowTarget": "finder.new_window_target",
+            "ShowExternalHardDrivesOnDesktop": "finder.desktop_show_external_drives",
+            "ShowHardDrivesOnDesktop": "finder.desktop_show_internal_drives",
+            "ShowRemovableMediaOnDesktop": "finder.desktop_show_removable_media",
+            "ShowMountedServersOnDesktop": "finder.desktop_show_servers",
+        ],
+        "NSGlobalDomain": [
+            "AppleShowAllExtensions": "finder.show_all_extensions",
+            "AppleInterfaceStyle": "appearance.style",
+            "AppleAccentColor": "appearance.accent_color",
+            "AppleHighlightColor": "appearance.highlight_color",
+            "AppleShowScrollBars": "appearance.show_scroll_bars",
+            "NSTableViewDefaultSizeMode": "appearance.sidebar_icon_size",
+            "_HIHideMenuBar": "menubar.autohide",
+            "KeyRepeat": "keyboard.key_repeat",
+            "InitialKeyRepeat": "keyboard.initial_key_repeat",
+            "ApplePressAndHoldEnabled": "keyboard.press_and_hold",
+            "AppleKeyboardUIMode": "keyboard.full_keyboard_access",
+            "com.apple.keyboard.fnState": "keyboard.fn_keys_standard",
+            "NSAutomaticSpellingCorrectionEnabled": "keyboard.autocorrect",
+            "NSAutomaticCapitalizationEnabled": "keyboard.auto_capitalize",
+            "NSAutomaticPeriodSubstitutionEnabled": "keyboard.double_space_period",
+            "NSAutomaticQuoteSubstitutionEnabled": "keyboard.smart_quotes",
+            "NSAutomaticDashSubstitutionEnabled": "keyboard.smart_dashes",
+            "com.apple.swipescrolldirection": "trackpad.natural_scrolling",
+            "com.apple.trackpad.scaling": "trackpad.speed",
+            "com.apple.mouse.scaling": "mouse.speed",
+            "com.apple.sound.beep.volume": "sound.alert_volume",
+            "com.apple.sound.uiaudio.enabled": "sound.ui_sounds",
+            "AppleMeasurementUnits": "region.measurement_units",
+            "AppleTemperatureUnit": "region.temperature_unit",
+            "AppleLanguages": "region.languages",
+            "AppleLocale": "region.locale",
+        ],
+        "com.apple.screencapture": [
+            "location": "screenshots.location",
+            "type": "screenshots.format",
+            "disable-shadow": "screenshots.disable_shadow",
+            "show-thumbnail": "screenshots.show_thumbnail",
+        ],
+        "com.apple.AppleMultitouchTrackpad": [
+            "Clicking": "trackpad.tap_to_click",
+            "TrackpadThreeFingerDrag": "trackpad.three_finger_drag",
+            "TrackpadRightClick": "trackpad.secondary_click",
+        ],
+        "com.apple.menuextra.clock": [
+            "DateFormat": "menubar.clock_format",
+            "ShowSeconds": "menubar.clock_show_seconds",
+            "ShowAMPM": "menubar.clock_show_am_pm",
+            "ShowDate": "menubar.clock_show_date",
+            "ShowDayOfWeek": "menubar.clock_show_day_of_week",
+        ],
+        "com.apple.spaces": [
+            "spans-displays": "mission_control.spaces_span_displays",
+        ],
+        "com.apple.WindowManager": [
+            "GloballyEnabled": "stage_manager.enabled",
+            "EnableStandardClickToShowDesktop": "desktop.click_wallpaper_to_reveal",
+            "EnableTiledWindowMargins": "windows.tiled_margins",
+        ],
+        "com.apple.desktopservices": [
+            "DSDontWriteNetworkStores": "finder.no_ds_store_on_network",
+            "DSDontWriteUSBStores": "finder.no_ds_store_on_usb",
+        ],
+    ]
+}

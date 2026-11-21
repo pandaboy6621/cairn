@@ -1,0 +1,3 @@
+vlc
+visual-studio-code
+example/tools/gadget

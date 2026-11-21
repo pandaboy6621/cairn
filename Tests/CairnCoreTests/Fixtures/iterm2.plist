@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>TabStyleWithAutomaticOption</key><integer>5</integer>
+	<key>LoadPrefsFromCustomFolder</key><true/>
+	<key>PrefsCustomFolder</key><string>/Users/test/Sync/iterm2</string>
+	<key>Default Bookmark Guid</key><string>0A1B2C3D-0000-1111-2222-333344445555</string>
+	<key>SUEnableAutomaticChecks</key><true/>
+	<key>OpenAIAPIKey</key><string>not-a-real-key</string>
+	<key>Notes</key><string>ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000</string>
+	<key>Profiles</key>
+	<array>
+		<dict>
+			<key>Name</key><string>Default</string>
+			<key>Session Token</key><string>abc</string>
+		</dict>
+	</array>
+	<key>HotkeyChar</key><string>b3Blbi1zZXNhbWUtZmFrZS10b2tlbi12YWx1ZS0xMjM0NTY3ODkw</string>
+</dict>
+</plist>

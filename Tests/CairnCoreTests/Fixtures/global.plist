@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AppleShowAllExtensions</key><true/>
+	<key>AppleInterfaceStyle</key><string>Dark</string>
+	<key>KeyRepeat</key><integer>2</integer>
+	<key>com.apple.swipescrolldirection</key><false/>
+	<key>com.apple.trackpad.scaling</key><real>1.5</real>
+	<key>AppleLanguages</key><array><string>en-US</string><string>fr-CA</string></array>
+	<key>NSNavLastRootDirectory</key><string>~/Documents</string>
+	<key>AKLastIDMSEnvironment</key><integer>0</integer>
+	<key>SomeTimestamp</key><date>2026-11-01T08:00:00Z</date>
+	<key>SmallBlob</key><data>AQID</data>
+</dict>
+</plist>
