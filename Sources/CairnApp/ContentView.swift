@@ -1,3 +1,4 @@
+import AppKit
 import CairnCore
 import SwiftUI
 
@@ -8,13 +9,13 @@ struct ContentView: View {
         @Bindable var model = model
         NavigationSplitView {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+                .navigationSplitViewColumnWidth(min: 230, ideal: 260)
         } detail: {
             Group {
                 if let checklist = model.checklist, let category = model.selectedCategory {
                     CategoryDetail(checklist: checklist, category: category)
                 } else if model.isScanning {
-                    ProgressView("Scanning this Mac…")
+                    ScanningView()
                 } else {
                     ContentUnavailableView("Choose a category", systemImage: "sidebar.left")
                 }
@@ -32,6 +33,56 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Shared pieces
+
+extension ChecklistCategory {
+    var tint: Color {
+        switch self {
+        case .packages: return .orange
+        case .appStore: return .blue
+        case .lookAndLayout: return .purple
+        case .systemSettings: return Color(nsColor: .systemGray)
+        case .appPreferences: return .teal
+        case .developer: return .indigo
+        case .fonts: return .pink
+        case .sensitive: return .red
+        }
+    }
+}
+
+/// A System Settings-style rounded tile with a white symbol.
+struct SymbolTile: View {
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 22
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+            .fill(tint.gradient)
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.52, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+    }
+}
+
+/// A small rounded count badge, e.g. "12/40".
+struct CountBadge: View {
+    let text: String
+    var prominent = false
+
+    var body: some View {
+        Text(text)
+            .font(.caption.monospacedDigit().weight(.medium))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .foregroundStyle(prominent ? Color.white : Color.secondary)
+            .background(Capsule().fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary)))
+    }
+}
+
 // MARK: - Sidebar
 
 private struct Sidebar: View {
@@ -40,7 +91,7 @@ private struct Sidebar: View {
     var body: some View {
         @Bindable var model = model
         List(selection: $model.selectedCategory) {
-            Section("Categories") {
+            Section("Setup") {
                 ForEach(ChecklistCategory.allCases) { category in
                     SidebarRow(category: category)
                         .tag(category)
@@ -48,6 +99,31 @@ private struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .top, spacing: 0) { BrandHeader() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { SelectionSummary() }
+    }
+}
+
+private struct BrandHeader: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 10) {
+            CairnIconView()
+                .frame(width: 34, height: 34)
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Cairn").font(.headline)
+                Text(model.checklist?.source.device.name ?? "This Mac")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 }
 
@@ -56,23 +132,50 @@ private struct SidebarRow: View {
     let category: ChecklistCategory
 
     var body: some View {
-        HStack {
-            Label(category.title, systemImage: category.symbol)
+        HStack(spacing: 9) {
+            SymbolTile(symbol: category.symbol, tint: category.tint)
+            Text(category.title)
             Spacer()
             if let checklist = model.checklist {
                 if checklist.isLocked(category) {
                     Image(systemName: "lock.fill")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .help("Set a password to enable Sensitive items")
                 } else if category.isScanned || checklist.count(in: category).total > 0 {
                     let c = checklist.count(in: category, matching: model.query)
-                    Text("\(c.checked)/\(c.total)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    CountBadge(text: c.checked == c.total ? "\(c.total)" : "\(c.checked)/\(c.total)")
                 } else {
-                    Text("—").foregroundStyle(.tertiary)
+                    Text("Soon")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct SelectionSummary: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let checklist = model.checklist {
+            let total = max(checklist.items.count, 1)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Selected for backup").font(.caption.weight(.medium))
+                    Spacer()
+                    Text("\(checklist.checkedCount) of \(checklist.items.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: Double(checklist.checkedCount), total: Double(total))
+                    .progressViewStyle(.linear)
+                    .tint(.teal)
+            }
+            .padding(12)
+            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(12)
         }
     }
 }
@@ -94,29 +197,35 @@ private struct CategoryDetail: View {
                 LockedNotice()
                 Spacer()
             } else if groups.isEmpty {
-                emptyState(locked: locked)
+                emptyState
             } else {
                 List {
                     ForEach(groups, id: \.name) { group in
                         GroupSection(key: "\(category.rawValue)/\(group.name)", name: group.name, items: group.items,
+                                     category: category,
                                      expandedByDefault: groups.count <= 4 || !model.query.isEmpty)
                     }
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
     @ViewBuilder
-    private func emptyState(locked: Bool) -> some View {
+    private var emptyState: some View {
         if !model.query.isEmpty {
             ContentUnavailableView.search(text: model.query)
         } else if !category.isScanned {
-            ContentUnavailableView(
-                "Not scanned yet",
-                systemImage: category.symbol,
-                description: Text("\(category.title) scanning comes in a later milestone."))
+            ContentUnavailableView {
+                Label { Text("Coming in a later milestone") } icon: {
+                    SymbolTile(symbol: category.symbol, tint: category.tint, size: 56)
+                }
+            } description: {
+                Text("Cairn doesn't scan \(category.title.lowercased()) yet.")
+            }
         } else {
             ContentUnavailableView("Nothing found", systemImage: category.symbol,
                                    description: Text("The scan found no \(category.title.lowercased()) items on this Mac."))
@@ -132,47 +241,75 @@ private struct CategoryHeader: View {
     var body: some View {
         let count = checklist.count(in: category, matching: model.query)
         let state = checklist.state(of: category, matching: model.query)
-        HStack(spacing: 12) {
-            Button {
-                model.toggleAll(in: category)
-            } label: {
-                Image(systemName: state.symbol)
-                    .font(.title2)
-                    .foregroundStyle(state == .off ? Color.secondary : Color.accentColor)
-            }
-            .buttonStyle(.plain)
-            .disabled(count.total == 0 || checklist.isLocked(category))
-            .help(state == .on ? "Uncheck all" : "Check all")
+        let locked = checklist.isLocked(category)
+        HStack(spacing: 14) {
+            SymbolTile(symbol: category.symbol, tint: category.tint, size: 44)
+                .shadow(color: category.tint.opacity(0.35), radius: 6, y: 2)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(category.title).font(.title2.bold())
-                Text(model.query.isEmpty
-                     ? "\(count.checked) of \(count.total) selected"
-                     : "\(count.checked) of \(count.total) matching items selected")
+            VStack(alignment: .leading, spacing: 3) {
+                Text(category.title).font(.title2.weight(.semibold))
+                Text(subtitle(count))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
             Spacer()
+
+            if count.total > 0 && !locked {
+                Gauge(value: Double(count.checked), in: 0...Double(count.total)) {
+                    EmptyView()
+                } currentValueLabel: {
+                    Text("\(Int((Double(count.checked) / Double(count.total) * 100).rounded()))%")
+                        .font(.caption2.monospacedDigit())
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+                .tint(category.tint)
+                .scaleEffect(0.8)
+
+                Button {
+                    model.toggleAll(in: category)
+                } label: {
+                    Label(state == .on ? "Deselect All" : "Select All", systemImage: state.symbol)
+                }
+                .controlSize(.large)
+                .help(model.query.isEmpty ? "Applies to every item in this category" : "Applies to the items matching your search")
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(
+            LinearGradient(colors: [category.tint.opacity(0.12), category.tint.opacity(0.02)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing))
+    }
+
+    private func subtitle(_ count: (checked: Int, total: Int)) -> String {
+        if checklist.isLocked(category) { return "Locked until you set a password" }
+        if count.total == 0 && !category.isScanned { return "Not scanned yet" }
+        return model.query.isEmpty
+            ? "\(count.checked) of \(count.total) selected"
+            : "\(count.checked) of \(count.total) matching items selected"
     }
 }
 
 private struct LockedNotice: View {
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "lock.fill")
-            Text("Set a password to enable Sensitive items. Wi-Fi networks, VPN profiles, SSH keys, and API tokens are always encrypted (coming in Milestone 4).")
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(alignment: .top, spacing: 14) {
+            SymbolTile(symbol: "lock.fill", tint: .orange, size: 36)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sensitive items are encrypted").font(.headline)
+                Text("Wi-Fi networks, VPN profiles, SSH keys, and API tokens are only ever stored encrypted with your password. Setting a password arrives in Milestone 4.")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Set Password…") {}
+                    .disabled(true)
+                    .padding(.top, 4)
+            }
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
         .padding(16)
+        .frame(maxWidth: 560, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(22)
     }
 }
 
@@ -181,24 +318,25 @@ private struct GroupSection: View {
     let key: String
     let name: String
     let items: [ChecklistItem]
+    let category: ChecklistCategory
     let expandedByDefault: Bool
 
     var body: some View {
         let isExpanded = Binding(
             get: { model.expandedGroups[key] ?? expandedByDefault },
             set: { model.expandedGroups[key] = $0 })
+        let checked = items.filter(\.isChecked).count
         DisclosureGroup(isExpanded: isExpanded) {
             ForEach(items) { item in
-                ItemRow(item: item)
+                ItemRow(item: item, category: category)
             }
         } label: {
             HStack {
                 Text(name).font(.headline)
                 Spacer()
-                Text("\(items.filter(\.isChecked).count)/\(items.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                CountBadge(text: checked == items.count ? "\(items.count)" : "\(checked)/\(items.count)")
             }
+            .padding(.vertical, 4)
         }
     }
 }
@@ -206,24 +344,96 @@ private struct GroupSection: View {
 private struct ItemRow: View {
     @Environment(AppModel.self) private var model
     let item: ChecklistItem
+    let category: ChecklistCategory
 
     var body: some View {
-        Toggle(isOn: Binding(get: { item.isChecked }, set: { model.setChecked(item.id, $0) })) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(item.title)
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(get: { item.isChecked }, set: { model.setChecked(item.id, $0) }))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+
+            ItemIcon(item: item, category: category)
+
+            Text(item.title)
+                .lineLimit(1)
+                .foregroundStyle(item.isChecked ? .primary : .secondary)
+
+            Spacer(minLength: 12)
+
+            if !item.detail.isEmpty {
+                Text(item.detail)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if !item.detail.isEmpty {
-                    Text(item.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer()
+                    .truncationMode(.middle)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(.quaternary.opacity(0.7)))
+                    .frame(maxWidth: 320, alignment: .trailing)
             }
         }
-        .toggleStyle(.checkbox)
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { model.setChecked(item.id, !item.isChecked) }
+    }
+}
+
+/// The real app icon for App Store apps that are installed in /Applications,
+/// otherwise a small symbol for the item's kind.
+private struct ItemIcon: View {
+    let item: ChecklistItem
+    let category: ChecklistCategory
+
+    var body: some View {
+        if let icon = AppIcons.icon(for: item, in: category) {
+            Image(nsImage: icon)
+                .resizable()
+                .frame(width: 18, height: 18)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: 12))
+                .foregroundStyle(category.tint)
+                .frame(width: 18, height: 18)
+        }
+    }
+
+    private var symbol: String {
+        switch item.group {
+        case "Formulae": return "terminal"
+        case "Casks": return "macwindow"
+        case "Taps": return "spigot"
+        default: break
+        }
+        if item.id == "layout:dock" { return "dock.rectangle" }
+        return category == .appStore ? "app" : "slider.horizontal.below.rectangle"
+    }
+}
+
+@MainActor
+enum AppIcons {
+    private static var cache: [String: NSImage?] = [:]
+
+    static func icon(for item: ChecklistItem, in category: ChecklistCategory) -> NSImage? {
+        guard category == .appStore else { return nil }
+        if let cached = cache[item.title] { return cached }
+        let path = "/Applications/\(item.title).app"
+        let image = FileManager.default.fileExists(atPath: path) ? NSWorkspace.shared.icon(forFile: path) : nil
+        cache[item.title] = image
+        return image
+    }
+}
+
+private struct ScanningView: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            CairnIconView()
+                .frame(width: 84, height: 84)
+                .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+            Text("Scanning this Mac…").font(.title3.weight(.medium))
+            Text("Read-only. Nothing on your Mac is changed.")
+                .foregroundStyle(.secondary)
+            ProgressView().controlSize(.small).padding(.top, 4)
+        }
     }
 }
 
@@ -252,7 +462,7 @@ private struct Toolbar: ToolbarContent {
                     }
                 }
             } label: {
-                Label("Preset", systemImage: "list.bullet.rectangle")
+                Label("Preset", systemImage: "wand.and.stars")
             }
             .help("Apply a preset selection")
             .disabled(model.checklist == nil)
@@ -276,14 +486,12 @@ private struct StatusBar: View {
             if model.isScanning {
                 ProgressView().controlSize(.small)
                 Text("Scanning…")
-            } else if let checklist = model.checklist {
-                Text("\(checklist.checkedCount) of \(checklist.items.count) items selected")
-                if let lastScan = model.lastScan {
-                    Text("· scanned \(lastScan.formatted(date: .omitted, time: .shortened))")
-                }
+            } else if let lastScan = model.lastScan {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Scanned at \(lastScan.formatted(date: .omitted, time: .shortened))")
             }
             if !model.warnings.isEmpty {
-                Label("\(model.warnings.count) warning\(model.warnings.count == 1 ? "" : "s")", systemImage: "exclamationmark.triangle")
+                Label("\(model.warnings.count) warning\(model.warnings.count == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .help(model.warnings.joined(separator: "\n"))
             }
@@ -294,9 +502,10 @@ private struct StatusBar: View {
         }
         .font(.callout)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
         .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 }
 
