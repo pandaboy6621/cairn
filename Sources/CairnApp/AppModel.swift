@@ -42,6 +42,23 @@ final class AppModel {
     /// Most recent export ("backup"), remembered across launches.
     var lastBackupDate: Date?
     var lastBackupName: String?
+    var lastBackupURL: URL?
+
+    /// Where "Back Up Now" saves and where restore looks for backups.
+    var backupFolder: URL {
+        didSet { defaults.set(backupFolder.path, forKey: "backupFolder"); refreshFoundBackups() }
+    }
+    var isDefaultBackupFolder: Bool { backupFolder.standardizedFileURL == BackupFolder.defaultURL.standardizedFileURL }
+    /// Show a save panel for every backup instead of saving straight into `backupFolder`.
+    var askWhereToSave: Bool {
+        didSet { defaults.set(askWhereToSave, forKey: "askWhereToSave") }
+    }
+    /// List the backups already in `backupFolder` on the Restore card.
+    var findBackupsAutomatically: Bool {
+        didSet { defaults.set(findBackupsAutomatically, forKey: "findBackupsAutomatically"); refreshFoundBackups() }
+    }
+    /// Backups in `backupFolder`, newest first (empty when auto-find is off).
+    var foundBackups: [BackupFile] = []
 
     /// Latest restore preview; `showingRestorePreview` drives the sheet.
     var restorePreview: RestorePreview?
@@ -53,9 +70,22 @@ final class AppModel {
     private let defaults = UserDefaults.standard
 
     init() {
+        let stored = UserDefaults.standard
+        backupFolder = stored.string(forKey: "backupFolder").map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? BackupFolder.defaultURL
+        askWhereToSave = stored.bool(forKey: "askWhereToSave")
+        findBackupsAutomatically = stored.object(forKey: "findBackupsAutomatically") as? Bool ?? true
+        #if DEBUG
+        // Snapshot runs use a scratch folder instead of the real one (didSet doesn't run in init).
+        if let path = ProcessInfo.processInfo.environment["CAIRN_SNAPSHOT_BACKUP_FOLDER"] {
+            backupFolder = URL(fileURLWithPath: path, isDirectory: true)
+        }
+        #endif
         AppModel.current = self
         lastBackupDate = defaults.object(forKey: "lastBackupDate") as? Date
         lastBackupName = defaults.string(forKey: "lastBackupName")
+        lastBackupURL = defaults.string(forKey: "lastBackupPath").map { URL(fileURLWithPath: $0) }
+        refreshFoundBackups()
         #if DEBUG
         let env = ProcessInfo.processInfo.environment
         if let raw = env["CAIRN_SNAPSHOT_CATEGORY"], let category = ChecklistCategory(rawValue: raw) {
@@ -141,24 +171,99 @@ final class AppModel {
 
     // MARK: Backup (export)
 
-    func export() {
+    /// Backs up the checked items: straight into the backup folder, or wherever the
+    /// user picks when `askWhereToSave` is on.
+    func backUp() {
+        askWhereToSave ? backUpChoosingLocation() : backUp(into: backupFolder)
+    }
+
+    /// Always asks where to save.
+    func backUpChoosingLocation() {
         guard let checklist else { return }
         let panel = NSSavePanel()
         panel.title = "Back Up"
         panel.message = "Saves the checked items as a manifest file. Nothing on this Mac is changed."
-        panel.nameFieldStringValue = "cairn-\(checklist.source.device.name)-\(Self.fileDate.string(from: Date())).yaml"
-        panel.allowedContentTypes = [UTType(filenameExtension: "yaml") ?? .plainText]
+        panel.nameFieldStringValue = BackupFolder.fileName(device: checklist.source.device.name, date: Date())
+        panel.directoryURL = backupFolder
+        panel.allowedContentTypes = [Self.yamlType]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        write(to: url)
+    }
+
+    /// Saves a new backup file inside `folder` (used by Back Up Now and by dropping a folder).
+    func backUp(into folder: URL) {
+        guard let checklist else { return }
+        do {
+            try BackupFolder.ensureExists(folder)
+        } catch {
+            errorMessage = "Couldn't create \(BackupFolder.displayPath(folder)): \(error.localizedDescription)"
+            return
+        }
+        write(to: folder.appendingPathComponent(BackupFolder.fileName(device: checklist.source.device.name, date: Date())))
+    }
+
+    private func write(to url: URL) {
+        guard let checklist else { return }
         do {
             try ManifestCoder.write(checklist.exportManifest(), to: url)
             lastBackupDate = Date()
             lastBackupName = url.lastPathComponent
+            lastBackupURL = url
             defaults.set(lastBackupDate, forKey: "lastBackupDate")
             defaults.set(lastBackupName, forKey: "lastBackupName")
-            statusMessage = "Backed up \(checklist.checkedCount) items to \(url.lastPathComponent)."
+            defaults.set(url.path, forKey: "lastBackupPath")
+            statusMessage = "Backed up \(checklist.checkedCount) items to \(BackupFolder.displayPath(url))."
+            refreshFoundBackups()
         } catch {
             errorMessage = "Backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// The last backup file, if it still exists.
+    var existingLastBackup: URL? {
+        lastBackupURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
+
+    // MARK: Backup folder
+
+    func chooseBackupFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Backup Folder"
+        panel.message = "Cairn saves backups here and looks here for backups to restore. A NAS share works too."
+        panel.prompt = "Use This Folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = backupFolder
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        backupFolder = url
+    }
+
+    func resetBackupFolder() { backupFolder = BackupFolder.defaultURL }
+
+    /// Opens the backup folder in Finder (creating the default one if needed).
+    func showBackupFolder() {
+        if isDefaultBackupFolder { try? BackupFolder.ensureExists(backupFolder) }
+        guard FileManager.default.fileExists(atPath: backupFolder.path) else {
+            errorMessage = "\(BackupFolder.displayPath(backupFolder)) isn't available. Is the drive or NAS connected?"
+            return
+        }
+        NSWorkspace.shared.open(backupFolder)
+    }
+
+    /// Selects a backup file in Finder.
+    func showInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func refreshFoundBackups() {
+        guard findBackupsAutomatically else { foundBackups = []; return }
+        let folder = backupFolder
+        Task {
+            let found = await Task.detached(priority: .utility) { BackupFolder.list(in: folder) }.value
+            // Ignore a slow listing for a folder the user has since changed.
+            if folder == backupFolder { foundBackups = found }
         }
     }
 
@@ -166,13 +271,19 @@ final class AppModel {
 
     /// Picks a manifest and compares it with this Mac. Read-only.
     func previewRestore() {
-        guard let checklist else { return }
         let panel = NSOpenPanel()
         panel.title = "Preview Restore"
         panel.message = "Choose a Cairn backup to see what restoring it would change. Nothing is changed yet."
-        panel.allowedContentTypes = [UTType(filenameExtension: "yaml") ?? .plainText, UTType(filenameExtension: "yml") ?? .plainText]
+        panel.allowedContentTypes = [Self.yamlType, UTType(filenameExtension: "yml") ?? .plainText]
         panel.allowsMultipleSelection = false
+        panel.directoryURL = backupFolder
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        previewRestore(url)
+    }
+
+    /// Compares a backup file (picked, dropped, or found) with this Mac. Read-only.
+    func previewRestore(_ url: URL) {
+        guard let checklist else { return }
         do {
             let backup = try ManifestCoder.read(from: url)
             restorePreview = RestorePreview(
@@ -184,9 +295,28 @@ final class AppModel {
         }
     }
 
-    private static let fileDate: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
+    // MARK: Drag and drop
+
+    /// Dropped on Back Up: a folder means "back up into this folder".
+    func handleBackupDrop(_ urls: [URL]) -> Bool {
+        guard let folder = urls.first(where: \.hasDirectoryPath) else {
+            errorMessage = "Drop a folder here to save a backup into it."
+            return false
+        }
+        backUp(into: folder)
+        return true
+    }
+
+    /// Dropped on Restore: a backup file to preview.
+    func handleRestoreDrop(_ urls: [URL]) -> Bool {
+        guard let file = urls.first(where: BackupFolder.isBackupFile) else {
+            errorMessage = "Drop a Cairn backup (.yaml) here to preview it."
+            return false
+        }
+        previewRestore(file)
+        return true
+    }
+
+    static let yamlType = UTType(filenameExtension: "yaml") ?? .plainText
+
 }

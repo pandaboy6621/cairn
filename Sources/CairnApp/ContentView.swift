@@ -539,11 +539,11 @@ private struct Toolbar: ToolbarContent {
             .disabled(model.checklist == nil)
 
             Button {
-                model.export()
+                model.backUp()
             } label: {
                 Label("Back Up", systemImage: "arrow.down.doc")
             }
-            .help("Save the checked items as a manifest file")
+            .help("Save the checked items as a backup in \(BackupFolder.displayPath(model.backupFolder))")
             .disabled(model.checklist == nil)
         }
     }

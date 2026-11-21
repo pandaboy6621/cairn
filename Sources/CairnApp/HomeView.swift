@@ -31,11 +31,23 @@ private struct Header: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Your Mac's setup")
-                .font(.largeTitle.weight(.semibold))
-            Text(subtitle)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your Mac's setup")
+                    .font(.largeTitle.weight(.semibold))
+                Text(subtitle)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings (⌘,)")
         }
     }
 
@@ -110,18 +122,41 @@ private struct BackupCard: View {
             tint: .teal,
             ring: ring,
             status: status,
-            detail: detail
+            detail: detail,
+            footer: { FolderRow(caption: "Saves to") },
+            dropHint: "Drop a folder to back up into it",
+            onDrop: model.checklist == nil || model.isScanning ? nil : { model.handleBackupDrop($0) }
         ) {
-            Button {
-                model.export()
-            } label: {
-                Label("Back Up Now…", systemImage: "arrow.down.doc")
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                Button {
+                    model.backUp()
+                } label: {
+                    Label(model.askWhereToSave ? "Back Up Now…" : "Back Up Now", systemImage: "arrow.down.doc")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .disabled(model.checklist == nil || model.isScanning)
+
+                if let last = model.existingLastBackup {
+                    Button {
+                        model.showInFinder(last)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Show \(last.lastPathComponent) in Finder")
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.teal)
-            .disabled(model.checklist == nil || model.isScanning)
         } menu: {
+            Button("Back Up To…") { model.backUpChoosingLocation() }
+                .disabled(model.checklist == nil || model.isScanning)
+            if let last = model.existingLastBackup {
+                Button("Show Last Backup in Finder") { model.showInFinder(last) }
+            }
+            Button("Open Backup Folder") { model.showBackupFolder() }
+            Button("Change Backup Folder…") { model.chooseBackupFolder() }
+            Divider()
             Button("Choose What to Back Up") { model.selection = .category(.packages) }
             Menu("Apply Preset") {
                 ForEach(ChecklistPreset.allCases) { preset in
@@ -131,6 +166,7 @@ private struct BackupCard: View {
             Button("Scan Again") { model.scan() }
                 .disabled(model.isScanning)
             Divider()
+            SettingsLink { Text("Backup Settings…") }
             Button("Automatic Backups (Milestone 3)") {}
                 .disabled(true)
         }
@@ -169,6 +205,8 @@ private struct RestoreCard: View {
 
     var body: some View {
         let preview = model.restorePreview
+        let latest = model.foundBackups.first
+        let busy = model.checklist == nil || model.isScanning
         DashboardCard(
             title: "Restore",
             tint: .blue,
@@ -179,40 +217,109 @@ private struct RestoreCard: View {
                 p.comparison.itemsToRestore == 0
                     ? "This Mac already matches"
                     : "\(p.comparison.itemsToRestore) item\(p.comparison.itemsToRestore == 1 ? "" : "s") would change"
-            } ?? "Preview a backup",
+            } ?? (latest == nil ? "Preview a backup" : "\(model.foundBackups.count) backup\(model.foundBackups.count == 1 ? "" : "s") found"),
             detail: preview.map { "Compared with \($0.fileName)" }
-                ?? "See what restoring a backup would install or change. Nothing is changed."
+                ?? latest.map { "Latest: \($0.deviceName), \($0.created.formatted(.relative(presentation: .named))). Or drop a backup file here." }
+                ?? "Choose a backup file, or drop one here, to see what restoring it would change.",
+            footer: { FolderRow(caption: "Looks in") },
+            dropHint: "Drop a backup file to preview it",
+            onDrop: busy ? nil : { model.handleRestoreDrop($0) }
         ) {
-            if preview != nil {
-                Button {
-                    model.showingRestorePreview = true
-                } label: {
-                    Label("View Changes", systemImage: "list.bullet.rectangle")
-                        .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                if preview != nil {
+                    Button {
+                        model.showingRestorePreview = true
+                    } label: {
+                        Label("View Changes", systemImage: "list.bullet.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                } else if let latest {
+                    Button {
+                        model.previewRestore(latest.url)
+                    } label: {
+                        Label("Preview Latest", systemImage: "doc.text.magnifyingglass")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .disabled(busy)
+                    .help("Compare \(latest.fileName) with this Mac")
+                } else {
+                    Button {
+                        model.previewRestore()
+                    } label: {
+                        Label("Choose Backup…", systemImage: "doc.text.magnifyingglass")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .disabled(busy)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-            } else {
-                Button {
-                    model.previewRestore()
-                } label: {
-                    Label("Preview Restore…", systemImage: "doc.text.magnifyingglass")
-                        .frame(maxWidth: .infinity)
+                if preview != nil || latest != nil {
+                    Button {
+                        model.previewRestore()
+                    } label: {
+                        Image(systemName: "doc.badge.ellipsis")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                    .help("Choose another backup file")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .disabled(model.checklist == nil || model.isScanning)
             }
         } menu: {
-            Button("Preview Another Backup…") { model.previewRestore() }
-                .disabled(model.checklist == nil || model.isScanning)
-            if preview != nil {
+            Button("Choose Backup File…") { model.previewRestore() }
+                .disabled(busy)
+            if !model.foundBackups.isEmpty {
+                Menu("Recent Backups") {
+                    ForEach(model.foundBackups.prefix(10)) { file in
+                        Button("\(file.deviceName) · \(file.created.formatted(date: .abbreviated, time: .shortened))") {
+                            model.previewRestore(file.url)
+                        }
+                        .disabled(busy)
+                    }
+                }
+            }
+            if let preview {
+                if let url = model.foundBackups.first(where: { $0.fileName == preview.fileName })?.url {
+                    Button("Show Backup in Finder") { model.showInFinder(url) }
+                }
                 Button("Clear Preview") { model.restorePreview = nil }
             }
+            Divider()
+            Button("Open Backup Folder") { model.showBackupFolder() }
+            Button("Refresh Backup List") { model.refreshFoundBackups() }
+                .disabled(!model.findBackupsAutomatically)
             Divider()
             Button("Apply Restore (Milestone 5)") {}
                 .disabled(true)
         }
+    }
+}
+
+/// The backup folder's path; click to open it in Finder.
+private struct FolderRow: View {
+    @Environment(AppModel.self) private var model
+    let caption: String
+
+    var body: some View {
+        Button {
+            model.showBackupFolder()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "folder.fill").foregroundStyle(.secondary)
+                Text("\(caption) \(model.isDefaultBackupFolder ? "Cairn's backup folder" : model.backupFolder.lastPathComponent)")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(BackupFolder.displayPath(model.backupFolder)), click to open in Finder")
     }
 }
 
@@ -223,7 +330,12 @@ private struct SyncCard: View {
             tint: .purple,
             ring: .disabled(symbol: "arrow.triangle.2.circlepath"),
             status: "Coming later",
-            detail: "Keep settings in step across your Macs through your NAS."
+            detail: "Keep settings in step across your Macs through your NAS.",
+            footer: {
+                Label("Later milestone", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         ) {
             Button {} label: {
                 Text("Coming Soon").frame(maxWidth: .infinity)
@@ -244,14 +356,40 @@ enum RingState {
     case disabled(symbol: String)
 }
 
-private struct DashboardCard<Actions: View, MenuItems: View>: View {
+private struct DashboardCard<Actions: View, MenuItems: View, Footer: View>: View {
     let title: String
     let tint: Color
     let ring: RingState
     let status: String
     let detail: String
-    @ViewBuilder let actions: Actions
-    @ViewBuilder let menu: MenuItems
+    let footer: Footer
+    /// Shown over the card while something droppable hovers over it.
+    let dropHint: String?
+    /// Receives dropped files and folders; nil means the card takes no drops.
+    let onDrop: (([URL]) -> Bool)?
+    let actions: Actions
+    let menu: MenuItems
+    // Plain State, not @State: the Command Line Tools lack SwiftUI's macro plugin.
+    private let dropTarget = State(initialValue: false)
+    private var isDropTarget: Bool { dropTarget.wrappedValue }
+
+    init(
+        title: String, tint: Color, ring: RingState, status: String, detail: String,
+        @ViewBuilder footer: () -> Footer = { EmptyView() },
+        dropHint: String? = nil, onDrop: (([URL]) -> Bool)? = nil,
+        @ViewBuilder actions: () -> Actions, @ViewBuilder menu: () -> MenuItems
+    ) {
+        self.title = title
+        self.tint = tint
+        self.ring = ring
+        self.status = status
+        self.detail = detail
+        self.footer = footer()
+        self.dropHint = dropHint
+        self.onDrop = onDrop
+        self.actions = actions()
+        self.menu = menu()
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -275,10 +413,35 @@ private struct DashboardCard<Actions: View, MenuItems: View>: View {
 
             actions
                 .controlSize(.large)
+
+            footer
         }
         .padding(18)
         .frame(maxWidth: .infinity)
         .background(CardBackground(tint: tint))
+        .overlay {
+            if isDropTarget {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(tint.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(tint, style: StrokeStyle(lineWidth: 2.5, dash: [8, 5]))
+                    Label(dropHint ?? "Drop here", systemImage: "tray.and.arrow.down.fill")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .allowsHitTesting(false)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let onDrop else { return false }
+            return onDrop(urls.filter(\.isFileURL))
+        } isTargeted: { targeted in
+            dropTarget.wrappedValue = targeted && onDrop != nil
+        }
         .overlay(alignment: .topTrailing) {
             if MenuItems.self != EmptyView.self {
                 Menu {

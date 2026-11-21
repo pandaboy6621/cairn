@@ -9,6 +9,7 @@ import CairnCore
 /// `CAIRN_SNAPSHOT_QUERY=<text>` pre-fills the search field.
 /// `CAIRN_SNAPSHOT_PREVIEW=<manifest.yaml>` opens a restore preview of that file after the scan.
 /// `CAIRN_SNAPSHOT_SELECT=<home | category rawValue>` selects a sidebar item after launch, like a click.
+/// `CAIRN_SNAPSHOT_BACKUP_FOLDER=<dir>` uses that folder for backups instead of the saved setting.
 enum DebugSnapshot {
     @MainActor
     static func scheduleIfRequested() {

@@ -32,10 +32,19 @@ struct CairnMainApp: App {
                 Button("Scan Again") { model.scan() }
                     .keyboardShortcut("r")
                     .disabled(model.isScanning)
-                Button("Back Up…") { model.export() }
+                Button("Back Up Now") { model.backUp() }
                     .keyboardShortcut("e")
                     .disabled(model.checklist == nil)
+                Button("Back Up To…") { model.backUpChoosingLocation() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(model.checklist == nil)
+                Button("Show Backup Folder") { model.showBackupFolder() }
             }
+        }
+
+        Settings {
+            SettingsView()
+                .environment(model)
         }
     }
 }
