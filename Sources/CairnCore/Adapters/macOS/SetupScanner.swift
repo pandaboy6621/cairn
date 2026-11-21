@@ -9,6 +9,16 @@ public struct ScanReport: Sendable {
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
         case brew, mas, dock, defaults
+
+        /// Human-readable name for progress messages.
+        public var title: String {
+            switch self {
+            case .brew: return "Homebrew"
+            case .mas: return "App Store apps"
+            case .dock: return "the Dock"
+            case .defaults: return "preferences"
+            }
+        }
     }
 
     public var runner: CommandRunner
@@ -21,11 +31,26 @@ public struct SetupScanner: Sendable {
         self.now = now
     }
 
-    public func scan(_ sources: Set<Source> = Set(Source.allCases)) -> ScanReport {
+    /// Progress through a scan: `completed` of `total` scanners are done and
+    /// `current` is running (nil once finished).
+    public struct Progress: Sendable, Equatable {
+        public var completed: Int
+        public var total: Int
+        public var current: Source?
+
+        public var fraction: Double { total == 0 ? 1 : Double(completed) / Double(total) }
+    }
+
+    public func scan(
+        _ sources: Set<Source> = Set(Source.allCases),
+        progress: (@Sendable (Progress) -> Void)? = nil
+    ) -> ScanReport {
         var manifest = Manifest(device: device(), created: now())
         var warnings: [String] = []
+        let ordered = Source.allCases.filter(sources.contains)
 
-        for source in Source.allCases where sources.contains(source) {
+        for (index, source) in ordered.enumerated() {
+            progress?(Progress(completed: index, total: ordered.count, current: source))
             do {
                 let found = try scanner(for: source).scan(using: runner)
                 manifest.packages += found.packages
@@ -37,6 +62,7 @@ public struct SetupScanner: Sendable {
                 warnings.append("\(source.rawValue): skipped: \(error)")
             }
         }
+        progress?(Progress(completed: ordered.count, total: ordered.count, current: nil))
         // Two domains can map to the same abstract key; keep the first.
         var seen = Set<String>()
         manifest.settings = manifest.settings.filter { seen.insert($0.key).inserted }
