@@ -12,8 +12,13 @@ public enum PreferenceFilter {
         "cache", "uuid", "guid", "identifier", "deviceid", "installid", "userid", "machine", "serial", "hardware",
         "token", "secret", "password", "passwd", "apikey", "api_key", "api-key", "auth", "cookie", "session",
         "credential", "license", "account", "email",
-        "recent", "mru", "history", "lastlaunch", "lastupdate", "lastcheck", "lastrun", "lastopened", "lastused",
-        "telemetry", "analytics", "crash", "launchcount", "firstlaunch",
+        "providerid", "displayid", "loggedin", "signedin", "useragent", "user_agent", "build_version",
+        "recent", "mru", "history", "last", "heartbeat",
+        "telemetry", "analytics", "crash", "launchcount", "firstlaunch", "tooltipcount", "hint-count",
+        // one-time migration / onboarding bookkeeping
+        "migrat", "upgraded", "transitioncomplete", "eligibility", "snapshot", "education",
+        "hasattempted", "hasdisplayed", "notified", "dataassets", "liveactivitystate",
+        "bulkrename", // Finder's rename dialog remembers the last text typed
     ]
 
     /// Key prefixes that disqualify a key (case-sensitive).
@@ -23,6 +28,7 @@ public enum PreferenceFilter {
         "MSAppCenter", // telemetry SDK
         "NSStatusItem Visible", // menu-bar item visibility churns with every app launch
         "com.apple.ids",
+        "BNC_",        // Branch SDK
     ]
 
     /// Binary values bigger than this are usually bookmarks or archived state.
@@ -32,6 +38,7 @@ public enum PreferenceFilter {
         let lower = key.lowercased()
         if deniedKeyFragments.contains(where: lower.contains) { return false }
         if deniedKeyPrefixes.contains(where: key.hasPrefix) { return false }
+        if lower.hasSuffix("version") { return false } // prefs-format bookkeeping, not a choice
         if value is Date { return false } // timestamps make every snapshot differ
         if let data = value as? Data, data.count > maxDataBytes { return false }
         return !containsSecretLookingString(value)

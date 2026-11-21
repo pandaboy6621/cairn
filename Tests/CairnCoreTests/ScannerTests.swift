@@ -141,6 +141,20 @@ import Testing
         #expect(!PreferenceFilter.looksLikeSecret(s))
     }
 
+    @Test(arguments: ["LastHeartbeatDateString.daily", "NSOSPLastRootDirectory", "iinaLastPlayedFilePath",
+                      "FXSidebarUpgradedToSixteen", "HasMigratedDefaults", "BNC_USER_AGENT", "version",
+                      "AppleLanguagesSchemaVersion", "BulkRenameFindText", "FXDetachedDesktopProviderID",
+                      "visual-intelligence-hint-count", "HasDisplayedShowDesktopEducation"])
+    func dropsBookkeepingKeys(_ key: String) {
+        #expect(!PreferenceFilter.allows(key: key, value: "x"))
+    }
+
+    @Test(arguments: ["AppleSelectedInputSources", "TrackpadThreeFingerDrag", "NSStatusItem Preferred Position WiFi",
+                      "FXPreferredViewStyle", "ShowPathbar", "slowKeyDelay", "AppleEnabledInputSources"])
+    func keepsRealSettings(_ key: String) {
+        #expect(PreferenceFilter.allows(key: key, value: true))
+    }
+
     @Test func dropsLargeData() {
         #expect(!PreferenceFilter.allows(key: "Blob", value: Data(count: 2048)))
         #expect(PreferenceFilter.allows(key: "Blob", value: Data(count: 16)))
