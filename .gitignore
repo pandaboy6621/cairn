@@ -1,0 +1,10 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/
+*.xcodeproj
+# Never commit real manifests, snapshots, or vault files
+*.cairn-vault
+/snapshots/
