@@ -21,14 +21,33 @@ public enum SettingCategory {
         "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.sublimetext.4",
     ]
 
+    /// Group names for known abstract-key prefixes, matching the domain names
+    /// below so known and unknown settings from one place land in one group.
+    static let prefixGroupNames: [String: String] = [
+        "dock": "Dock",
+        "finder": "Finder",
+        "mission_control": "Mission Control",
+        "appearance": "Appearance",
+        "menubar": "Menu bar",
+        "screenshots": "Screenshots",
+        "desktop": "Desktop & Stage Manager",
+        "stage_manager": "Desktop & Stage Manager",
+        "windows": "Desktop & Stage Manager",
+        "keyboard": "Keyboard",
+        "trackpad": "Trackpad",
+        "mouse": "Mouse",
+        "sound": "Sound",
+        "region": "Language & region",
+    ]
+
     static let friendlyDomainNames: [String: String] = [
         "NSGlobalDomain": "Global",
         "com.apple.dock": "Dock",
         "com.apple.finder": "Finder",
-        "com.apple.spaces": "Spaces",
+        "com.apple.spaces": "Mission Control",
         "com.apple.WindowManager": "Desktop & Stage Manager",
-        "com.apple.controlcenter": "Control Center & menu bar",
-        "com.apple.menuextra.clock": "Menu bar clock",
+        "com.apple.controlcenter": "Menu bar",
+        "com.apple.menuextra.clock": "Menu bar",
         "com.apple.screencapture": "Screenshots",
         "com.apple.desktopservices": "Finder (network & USB)",
         "com.apple.LaunchServices/com.apple.launchservices.secure": "Default apps",
@@ -53,8 +72,8 @@ public enum SettingCategory {
 
     /// Known settings group by their key prefix ("dock", "keyboard"); others by domain.
     static func groupName(for s: SettingItem, in category: ChecklistCategory) -> String {
-        if !s.key.hasPrefix("macos."), let prefix = s.key.split(separator: ".").first {
-            return prefix.replacingOccurrences(of: "_", with: " ").capitalized
+        if !s.key.hasPrefix("macos."), let prefix = s.key.split(separator: ".").first.map(String.init) {
+            return prefixGroupNames[prefix] ?? prefix.replacingOccurrences(of: "_", with: " ").capitalized
         }
         return displayName(domain: s.adapter.macos?.domain ?? "Other")
     }
