@@ -106,7 +106,7 @@ public struct RestorePlan: Equatable, Sendable {
         return out
     }
 
-    static func shortName(_ path: String) -> String {
+    public static func shortName(_ path: String) -> String {
         guard path.hasPrefix("/") else { return path }
         return (path as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
     }
@@ -153,11 +153,15 @@ public struct RestoreReport: Equatable, Sendable {
     /// Processes restarted so changes take effect.
     public var restarted: [String] = []
     public var warnings: [String] = []
+    /// Dock tiles left out because their app isn't installed yet; `cairn dock --resume` adds them later.
+    public var waitingForDock: [PendingDock.Entry] = []
 
-    public init(entries: [Entry] = [], restarted: [String] = [], warnings: [String] = []) {
+    public init(entries: [Entry] = [], restarted: [String] = [], warnings: [String] = [],
+                waitingForDock: [PendingDock.Entry] = []) {
         self.entries = entries
         self.restarted = restarted
         self.warnings = warnings
+        self.waitingForDock = waitingForDock
     }
 }
 

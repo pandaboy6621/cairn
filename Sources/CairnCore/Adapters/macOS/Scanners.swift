@@ -114,24 +114,27 @@ public struct DockScanner: SetupScanning {
     /// Dock tile order as app paths, with spacers kept so restore can rebuild it.
     static func tiles(_ value: Any?) -> [String] {
         guard let tiles = value as? [[String: Any]] else { return [] }
-        return tiles.compactMap { tile in
-            switch tile["tile-type"] as? String {
-            case "spacer-tile": return "spacer"
-            case "small-spacer-tile": return "small-spacer"
-            case "flex-spacer-tile": return "flex-spacer"
-            default: break
-            }
-            guard let data = tile["tile-data"] as? [String: Any],
-                  let file = data["file-data"] as? [String: Any],
-                  let urlString = file["_CFURLString"] as? String
-            else { return nil }
-            if let url = URL(string: urlString), url.isFileURL {
-                var path = url.path
-                if path.count > 1, path.hasSuffix("/") { path.removeLast() }
-                return path
-            }
-            return urlString
+        return tiles.compactMap(tile)
+    }
+
+    /// One tile's app path or spacer name; nil for tiles that aren't files.
+    static func tile(_ tile: [String: Any]) -> String? {
+        switch tile["tile-type"] as? String {
+        case "spacer-tile": return "spacer"
+        case "small-spacer-tile": return "small-spacer"
+        case "flex-spacer-tile": return "flex-spacer"
+        default: break
         }
+        guard let data = tile["tile-data"] as? [String: Any],
+              let file = data["file-data"] as? [String: Any],
+              let urlString = file["_CFURLString"] as? String
+        else { return nil }
+        if let url = URL(string: urlString), url.isFileURL {
+            var path = url.path
+            if path.count > 1, path.hasSuffix("/") { path.removeLast() }
+            return path
+        }
+        return urlString
     }
 }
 

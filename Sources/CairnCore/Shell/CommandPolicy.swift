@@ -39,7 +39,8 @@ public struct CommandPolicy: Sendable {
     }
 
     /// Restore: everything `readOnly` allows, plus writing one preference key at a
-    /// time and restarting the few processes that cache preferences.
+    /// time, restarting the few processes that cache preferences, and loading or
+    /// unloading Cairn's own Dock-resume LaunchAgent.
     public static let restore = CommandPolicy { command in
         if readOnly.allows(command) { return true }
         let args = command.arguments
@@ -48,6 +49,12 @@ public struct CommandPolicy: Sendable {
             return args.count == 4 && args[0] == "write"
         case "killall":
             return args.count == 1 && ["Dock", "Finder", "SystemUIServer", "ControlCenter"].contains(args[0])
+        case "launchctl":
+            // Only Cairn's own Dock-resume agent, in the user's GUI session.
+            let label = DockAgent.label
+            if args.count == 3, args[0] == "bootstrap", args[1].hasPrefix("gui/"),
+               args[2].hasSuffix("/Library/LaunchAgents/\(label).plist") { return true }
+            return args.count == 2 && args[0] == "bootout" && args[1].hasPrefix("gui/") && args[1].hasSuffix("/\(label)")
         default:
             return false
         }

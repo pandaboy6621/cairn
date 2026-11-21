@@ -56,7 +56,8 @@ public struct MacRestorer: Sendable {
         return nil
     }
 
-    public func apply(_ plan: RestorePlan) -> RestoreReport {
+    /// `backup` names the manifest, recorded with any Dock tiles left out for later.
+    public func apply(_ plan: RestorePlan, backup: String = "", now: Date = Date()) -> RestoreReport {
         var report = RestoreReport()
         var touched: [String] = []
 
@@ -88,6 +89,8 @@ public struct MacRestorer: Sendable {
                         : .partial("left out \(missing.count) not installed: "
                                    + missing.map(RestorePlan.shortName).joined(separator: ", "))
                     report.entries.append(.init(step: step, outcome: outcome, written: .dock(tiles)))
+                    report.waitingForDock = PendingDock.entries(missing: missing, backupDock: layout.apps,
+                                                                backup: backup, now: now)
                 } catch {
                     report.entries.append(.init(step: step, outcome: .failed("\(error)"), written: nil))
                 }
@@ -111,7 +114,7 @@ public struct MacRestorer: Sendable {
     }
 
     /// Tiles that can be restored here, plus the apps that aren't installed.
-    func dockTiles(_ apps: [String]) -> (tiles: [String], missing: [String]) {
+    public func dockTiles(_ apps: [String]) -> (tiles: [String], missing: [String]) {
         var tiles: [String] = []
         var missing: [String] = []
         for app in apps {

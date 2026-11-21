@@ -8,7 +8,7 @@ struct CairnCommand: ParsableCommand {
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
         version: Cairn.version,
-        subcommands: [Scan.self, Diff.self, Restore.self, Displays.self]
+        subcommands: [Scan.self, Diff.self, Restore.self, Dock.self, Displays.self]
     )
 }
 
@@ -38,6 +38,14 @@ struct Restore: ParsableCommand {
         let before = scanner.scan()
         let plan = RestorePlan.make(backup: backup, current: before.manifest, manual: MacRestorer.manualStep)
         print(plan.render(), terminator: "")
+        let restorer = MacRestorer()
+        for case .dock(let layout, _) in plan.changes {
+            let missing = restorer.dockTiles(layout.apps).missing.filter { $0.hasPrefix("/") }
+            if !missing.isEmpty {
+                print("dock tiles waiting for their app (added once installed): "
+                      + missing.map(RestorePlan.shortName).joined(separator: ", "))
+            }
+        }
 
         guard apply else {
             if !plan.changes.isEmpty { stderr("Dry run: nothing changed. Add --apply to make these changes.") }
@@ -46,9 +54,17 @@ struct Restore: ParsableCommand {
         guard !plan.changes.isEmpty else { return }
 
         print("\nApplying…")
-        let result = MacRestorer().apply(plan)
+        let result = restorer.apply(plan, backup: URL(fileURLWithPath: from).standardized.path)
         if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
         for w in result.warnings { stderr("note: \(w)") }
+        if !result.waitingForDock.isEmpty {
+            var pending = try PendingDock.read()
+            pending.merge(result.waitingForDock)
+            try pending.write()
+            try Dock.syncAgent(pending)
+            print("Waiting to add to Dock: " + result.waitingForDock.map { RestorePlan.shortName($0.app) }.joined(separator: ", "))
+            print("They're added within 5 minutes of being installed (or run `cairn dock --resume --apply`).")
+        }
 
         // Let restarted apps settle before checking.
         Thread.sleep(forTimeInterval: 3)
@@ -58,6 +74,77 @@ struct Restore: ParsableCommand {
         print(text, terminator: "")
         if let report { try text.write(toFile: report, atomically: true, encoding: .utf8) }
         if checks.contains(where: { $0.status == .mismatch || $0.status == .failed }) { throw ExitCode(1) }
+    }
+}
+
+struct Dock: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Add Dock tiles a restore left out, once their apps are installed.",
+        discussion: """
+            With no options, lists the tiles waiting for their app.
+            With --resume, prints which waiting apps are now installed and where they'd go.
+            Nothing changes unless you also pass --apply. While tiles are waiting, a
+            background agent runs `cairn dock --resume --apply` every 5 minutes.
+            """
+    )
+
+    @Flag(name: .long, help: "Work out which waiting tiles can be added now.")
+    var resume = false
+
+    @Flag(name: .long, help: "With --resume: actually add them to the Dock.")
+    var apply = false
+
+    func validate() throws {
+        if apply && !resume { throw ValidationError("--apply needs --resume.") }
+    }
+
+    func run() throws {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        var pending = try PendingDock.read()
+        guard resume else {
+            if pending.isEmpty { print("No Dock tiles are waiting.") }
+            for e in pending.entries { print("\(RestorePlan.shortName(e.app))  (\(e.app), since \(e.added.formatted(date: .abbreviated, time: .omitted)))") }
+            return
+        }
+        guard !pending.isEmpty else {
+            print("No Dock tiles are waiting.")
+            if apply { DockAgent().remove() }
+            return
+        }
+
+        let dock = MacDock()
+        let (raw, tiles) = try dock.current()
+        let plan = pending.resume(current: tiles, isInstalled: dock.appExists, now: Date())
+        for (index, app) in plan.inserts {
+            let left = index > 0 ? RestorePlan.shortName(plan.dock[index - 1]) : "the start"
+            print("+ \(RestorePlan.shortName(app)) after \(left)")
+        }
+        for (app, why) in plan.dropped { print("- \(RestorePlan.shortName(app)): \(why)") }
+        // The agent runs every 5 minutes: keep its log quiet when nothing changed.
+        if !plan.waiting.isEmpty && !(apply && plan.isEmpty) {
+            print("still waiting: " + plan.waiting.map { RestorePlan.shortName($0.app) }.joined(separator: ", "))
+        }
+        guard apply else {
+            if !plan.isEmpty { stderr("Dry run: nothing changed. Add --apply to update the Dock.") }
+            return
+        }
+        guard !plan.isEmpty else { return }
+
+        if !plan.inserts.isEmpty { try dock.write(raw: raw, inserts: plan.inserts) }
+        pending.entries = plan.waiting
+        try pending.write()
+        print("[\(stamp)] Dock updated; \(plan.waiting.count) still waiting.")
+        // The agent may be the one running this, so never reinstall it here: just
+        // remove it once nothing is waiting. Last, because removing it stops this process.
+        if pending.isEmpty { DockAgent().remove() }
+    }
+
+    /// After a restore: installs the agent while tiles are waiting, removes it once none are.
+    static func syncAgent(_ pending: PendingDock) throws {
+        let agent = DockAgent()
+        if pending.isEmpty { agent.remove(); return }
+        guard let cairn = Bundle.main.executableURL?.resolvingSymlinksInPath().path else { return }
+        try agent.install(cairn: cairn)
     }
 }
 
