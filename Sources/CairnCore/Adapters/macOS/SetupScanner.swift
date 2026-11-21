@@ -38,6 +38,12 @@ public struct SetupScanner: Sendable {
         public var total: Int
         public var current: Source?
 
+        public init(completed: Int, total: Int, current: Source?) {
+            self.completed = completed
+            self.total = total
+            self.current = current
+        }
+
         public var fraction: Double { total == 0 ? 1 : Double(completed) / Double(total) }
     }
 

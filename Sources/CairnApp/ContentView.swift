@@ -12,7 +12,9 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 230, ideal: 260)
         } detail: {
             Group {
-                if let checklist = model.checklist, let category = model.selectedCategory {
+                if model.selection == .home {
+                    HomeView()
+                } else if let checklist = model.checklist, let category = model.selectedCategory {
                     CategoryDetail(checklist: checklist, category: category)
                 } else if model.isScanning {
                     ScanningView()
@@ -25,6 +27,12 @@ struct ContentView: View {
         }
         .searchable(text: $model.query, placement: .toolbar, prompt: "Search items")
         .toolbar { Toolbar() }
+        .sheet(isPresented: $model.showingRestorePreview) {
+            if let preview = model.restorePreview {
+                RestorePreviewSheet(preview: preview)
+                    .environment(model)
+            }
+        }
         .alert("Something went wrong", isPresented: .constant(model.errorMessage != nil)) {
             Button("OK") { model.errorMessage = nil }
         } message: {
@@ -90,41 +98,103 @@ private struct Sidebar: View {
 
     var body: some View {
         @Bindable var model = model
-        List(selection: $model.selectedCategory) {
+        List(selection: $model.selection) {
+            HStack(spacing: 9) {
+                SymbolTile(symbol: "house.fill", tint: .teal)
+                Text("Home")
+            }
+            .padding(.vertical, 2)
+            .tag(SidebarItem.home)
+
             Section("Setup") {
                 ForEach(ChecklistCategory.allCases) { category in
                     SidebarRow(category: category)
-                        .tag(category)
+                        .tag(SidebarItem.category(category))
                 }
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .top, spacing: 0) { BrandHeader() }
+        .safeAreaInset(edge: .top, spacing: 0) { DeviceHeader() }
         .safeAreaInset(edge: .bottom, spacing: 0) { SelectionSummary() }
     }
 }
 
-private struct BrandHeader: View {
+/// This Mac: its real icon, friendly name, and a small ring while a task runs.
+private struct DeviceHeader: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         HStack(spacing: 10) {
-            CairnIconView()
-                .frame(width: 34, height: 34)
-                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+            Image(nsImage: DeviceInfo.icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Cairn").font(.headline)
-                Text(model.checklist?.source.device.name ?? "This Mac")
+                Text(DeviceInfo.friendlyName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(model.activity?.label ?? DeviceInfo.systemDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 4)
+            if let activity = model.activity {
+                ActivityRing(activity: activity)
+                    .frame(width: 24, height: 24)
+                    .help(activity.label)
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: model.activity?.label)
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 4)
     }
+}
+
+/// A small circular progress ring with an icon in the middle. Spins while the
+/// task has no measurable progress.
+struct ActivityRing: View {
+    let activity: AppModel.Activity
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(activity.tint.opacity(0.2), lineWidth: 3)
+            if let fraction = activity.fraction {
+                Circle()
+                    .trim(from: 0, to: max(0.02, fraction))
+                    .stroke(activity.tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.3), value: fraction)
+            } else {
+                TimelineView(.animation) { context in
+                    Circle()
+                        .trim(from: 0, to: 0.3)
+                        .stroke(activity.tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate * 360))
+                }
+            }
+            Image(systemName: activity.symbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(activity.tint)
+        }
+    }
+}
+
+/// Facts about this Mac for display (UI only; the manifest keeps its own device record).
+enum DeviceInfo {
+    /// The name from System Settings > General > Sharing, e.g. "Aidan's MacBook Pro".
+    static let friendlyName = Host.current().localizedName ?? "This Mac"
+
+    /// The system's own picture of this Mac model.
+    static let icon: NSImage = NSImage(named: NSImage.computerName) ?? NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")
+
+    static let systemDescription: String = {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "macOS \(v.majorVersion).\(v.minorVersion)" + (v.patchVersion > 0 ? ".\(v.patchVersion)" : "")
+    }()
 }
 
 private struct SidebarRow: View {
@@ -470,9 +540,9 @@ private struct Toolbar: ToolbarContent {
             Button {
                 model.export()
             } label: {
-                Label("Export Manifest", systemImage: "square.and.arrow.up")
+                Label("Back Up", systemImage: "arrow.down.doc")
             }
-            .help("Write a manifest with only the checked items")
+            .help("Save the checked items as a manifest file")
             .disabled(model.checklist == nil)
         }
     }

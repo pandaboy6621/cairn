@@ -50,8 +50,9 @@ While developing, you can skip the bundle:
 swift run CairnApp
 ```
 
-The app scans on launch. Pick a category, check or uncheck items, use a preset (Minimal, Developer,
-Everything), and click **Export Manifest** to save only the checked items. ⌘R scans again, ⌘E exports.
+The app opens on **Home**: setup stats plus Back Up, Restore (preview a backup against this Mac), and
+Sync cards. It scans on launch. Pick a category, check or uncheck items, use a preset (Minimal, Developer,
+Everything), and click **Back Up** to save only the checked items. ⌘R scans again, ⌘E backs up.
 
 Debug builds can save a picture of the window without Screen Recording permission:
 

@@ -23,16 +23,16 @@ struct CairnMainApp: App {
         WindowGroup("Cairn") {
             ContentView()
                 .environment(model)
-                .frame(minWidth: 820, minHeight: 520)
+                .frame(minWidth: 960, minHeight: 600)
         }
-        .defaultSize(width: 1000, height: 680)
+        .defaultSize(width: 1120, height: 740)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .newItem) {
                 Button("Scan Again") { model.scan() }
                     .keyboardShortcut("r")
                     .disabled(model.isScanning)
-                Button("Export Manifest…") { model.export() }
+                Button("Back Up…") { model.export() }
                     .keyboardShortcut("e")
                     .disabled(model.checklist == nil)
             }
