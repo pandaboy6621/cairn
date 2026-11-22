@@ -86,6 +86,11 @@ public struct ProcessRunner: CommandRunner {
         env["PATH"] = searchPath.joined(separator: ":")
         env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
         env["HOMEBREW_NO_ANALYTICS"] = "1"
+        // Never let a child wait on a password prompt it can't receive: the child
+        // runs in its own process group, so sudo's terminal prompt takes no input and
+        // would hang forever (seen in VM testing with a pkg cask). Homebrew runs
+        // `sudo -A` when SUDO_ASKPASS is set, and this askpass fails at once.
+        env["SUDO_ASKPASS"] = "/usr/bin/false"
         process.environment = env
         process.standardInput = FileHandle.nullDevice
 

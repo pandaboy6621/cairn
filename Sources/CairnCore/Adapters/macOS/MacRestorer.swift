@@ -140,7 +140,10 @@ public struct MacRestorer: Sendable {
                     if r?.exitCode == 0 { done.append(p.uid) } else {
                         failed.append(name)
                         let why = r.map { Self.lastLine($0.stderr) } ?? "couldn't run brew"
-                        report.manualSteps.append(.init(category: "packages", text: "\(p.kind.rawValue) \(name) didn't install: \(why)"))
+                        let text = r.map { Self.needsPassword($0) } == true
+                            ? "\(p.kind.rawValue) \(name) needs your Mac's password to install: run `\(Self.installCommand(p).description)` in Terminal"
+                            : "\(p.kind.rawValue) \(name) didn't install: \(why)"
+                        report.manualSteps.append(.init(category: "packages", text: text))
                     }
                 }
                 let outcome: RestoreReport.Outcome = failed.isEmpty ? .applied
@@ -149,20 +152,11 @@ public struct MacRestorer: Sendable {
                 report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .packages(done)))
 
             case .appStore(let apps):
-                var done: [String] = [], failed: [String] = []
-                for (i, a) in apps.enumerated() {
-                    progress?("Installing \(a.name) from the App Store (\(i + 1) of \(apps.count))")
-                    let r = try? runner.run(Command("mas", ["install", a.id]))
-                    if r?.exitCode == 0 { done.append(a.id) } else {
-                        failed.append(a.name)
-                        report.manualSteps.append(.init(category: "app store",
-                            text: "install \(a.name) from the App Store (sign in first; it must be on your Apple Account)"))
-                    }
-                }
-                let outcome: RestoreReport.Outcome = failed.isEmpty ? .applied
-                    : done.isEmpty ? .failed("none installed (signed in to the App Store?)")
-                    : .partial("\(failed.count) didn't install: " + failed.prefix(5).joined(separator: ", "))
-                report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .appStore(done)))
+                // `mas install` needs root (mas 2 and later) and asks for the password
+                // on a terminal it can't read from under Cairn, so it would hang (seen
+                // in VM testing with mas 7). Hand the user one command instead.
+                report.entries.append(.init(step: step, outcome: .skipped("needs your password; listed to do by hand"), written: nil))
+                report.manualSteps.append(.init(category: "app store", text: Self.appStoreStep(apps)))
 
             case .pending(_, _, let reason):
                 report.entries.append(.init(step: step, outcome: .skipped(reason), written: nil))
@@ -345,6 +339,12 @@ public struct MacRestorer: Sendable {
 
     static let commandLineToolsCommand = Command("xcode-select", ["--install"])
 
+    /// The App Store apps to install by hand.
+    static func appStoreStep(_ apps: [AppItem]) -> String {
+        "sign in to the App Store, then run `sudo mas install \(apps.map(\.id).joined(separator: " "))` in Terminal, "
+            + "or get them from App Store > Purchased: " + apps.map(\.name).joined(separator: ", ")
+    }
+
     /// `brew tap x`, `brew install --formula x`, or `brew install --cask x`.
     public static func installCommand(_ p: PackageItem) -> Command {
         let name = p.resolvers["brew"] ?? p.id
@@ -353,6 +353,12 @@ public struct MacRestorer: Sendable {
         case .formula: return Command("brew", ["install", "--formula", name])
         case .cask: return Command("brew", ["install", "--cask", name])
         }
+    }
+
+    /// brew failed because a step needed sudo (a pkg-based cask, for example).
+    static func needsPassword(_ r: CommandResult) -> Bool {
+        let t = (r.stderr + r.stdout).lowercased()
+        return t.contains("sudo") && (t.contains("password") || t.contains("askpass") || t.contains("terminal is required"))
     }
 
     static func lastLine(_ text: String) -> String {

@@ -183,7 +183,7 @@ public struct RestorePlan: Equatable, Sendable {
                 out += "packages (\(items.count) to install)\n"
                 for p in items { out += "  + \(p.kind.rawValue) \(p.resolvers["brew"] ?? p.id)\n" }
             case .appStore(let apps):
-                out += "app store (\(apps.count) to install; sign in to the App Store first)\n"
+                out += "app store (\(apps.count) to install by hand: needs App Store sign-in and your password)\n"
                 for a in apps { out += "  + \(a.name) (\(a.id))\n" }
             case .dock(let d, let c):
                 out += "dock (\(c.count) tiles → \(d.apps.count) tiles)\n"

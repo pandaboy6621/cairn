@@ -46,16 +46,17 @@ import Testing
         runner.stub(Command("brew", ["tap", "example/tools"]), stdout: "")
         runner.stub(Command("brew", ["install", "--formula", "git"]), stdout: "")
         runner.stub(Command("brew", ["install", "--cask", "vlc"]), stdout: "", stderr: "Error: sudo: a password is required\n", exitCode: 1)
-        runner.stub(Command("mas", ["install", "1111111111"]), stdout: "", stderr: "Error: Not signed in", exitCode: 1)
         let ordered = RestorePlan.make(backup: Self.manifest(packages: Self.pkgs, apps: Self.apps), current: Self.manifest())
         var lines: [String] = []
         let lock = NSLock()
         let report = MacRestorer(runner: runner).apply(ordered) { line in lock.lock(); lines.append(line); lock.unlock() }
         #expect(report.entries[0].outcome == .partial("1 didn't install: vlc"))
         #expect(report.entries[0].written == .packages(["tap:example/tools", "formula:git"]))
-        #expect(report.entries[1].outcome == .failed("none installed (signed in to the App Store?)"))
-        #expect(report.manualSteps.contains { $0.text == "cask vlc didn't install: Error: sudo: a password is required" })
-        #expect(report.manualSteps.contains { $0.category == "app store" && $0.text.contains("Example Notes") })
+        #expect(report.entries[1].outcome == .skipped("needs your password; listed to do by hand"))
+        #expect(!runner.invoked.contains { $0.program == "mas" })
+        #expect(report.manualSteps.contains { $0.text == "cask vlc needs your Mac's password to install: run `brew install --cask vlc` in Terminal" })
+        #expect(report.manualSteps.contains { $0.category == "app store" && $0.text.contains("sudo mas install 1111111111")
+            && $0.text.contains("Example Notes") })
         #expect(lines.first == "Installing tap example/tools (1 of 3)")
     }
 
@@ -63,7 +64,7 @@ import Testing
         let p = CommandPolicy.restore
         #expect(p.allows(Command("brew", ["install", "--cask", "vlc"])))
         #expect(p.allows(Command("brew", ["tap", "example/tools"])))
-        #expect(p.allows(Command("mas", ["install", "1111111111"])))
+        #expect(!p.allows(Command("mas", ["install", "1111111111"]))) // needs root; listed instead
         #expect(p.allows(Command("xcode-select", ["--install"])))
         #expect(!p.allows(Command("brew", ["install", "--cask", "--force", "vlc"])))
         #expect(!p.allows(Command("brew", ["install", "--formula", "/tmp/evil.rb"])))

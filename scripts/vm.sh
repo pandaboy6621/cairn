@@ -77,7 +77,7 @@ stage)
     scripts/build-app.sh
     # The VM's shared-folder mount caches files by path, so a rebuilt app at the
     # same path can still run the old binary. Give every build a new folder.
-    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/secrets-*.txt "$SHARE"/secrets-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
+    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/secrets-*.txt "$SHARE"/secrets-test "$SHARE"/install-*.txt "$SHARE"/install-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
     BUILD_DIR="build-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$SHARE/$BUILD_DIR"
     cp -R dist/Cairn.app "$SHARE/$BUILD_DIR/"
@@ -181,6 +181,36 @@ EOF2
     KEYS="$(mktemp -d)"
     ssh-keygen -q -t ed25519 -N "" -C cairn-test -f "$KEYS/cairn_test_ed25519"
     ssh-keygen -q -t ed25519 -N "made-up-passphrase" -C cairn-test-locked -f "$KEYS/cairn_test_locked"
+    # Milestone 5 install test (VM only): a tap, small formulae, a cask that needs
+    # no sudo and one that does, an App Store app, a Dock tile for the cask, and a
+    # made-up ~/.npmrc. Run it before and after installing Homebrew in the VM.
+    CAIRN_VM_INSTALL_FIXTURE="$SHARE/install-test" swift test --filter VMInstallFixture >/dev/null
+    cat > "$SHARE/Install restore test.command" <<EOF2
+#!/bin/sh
+# Runs inside cairn-test only: installs packages and writes ~/.npmrc. Made-up token.
+D="/Volumes/My Shared Files/cairn"
+cd "\$D" || exit 1
+out="\$D/install-restore-\$(date +%H%M%S).txt"
+seen="\$D/install-argv.txt"; : > "\$seen"
+( while :; do ps -axww -o args= | grep -c "made-up-npm-token-55" | grep -v '^1\$' >> "\$seen"; sleep 0.05; done ) &
+watcher=\$!
+{
+  echo "== tools: \$(xcode-select -p 2>&1) | brew: \$(command -v brew || ls /opt/homebrew/bin/brew 2>&1)"
+  echo "== restore"
+  date
+  echo vm-test-vault-pass | "$CAIRN_VM" restore --from install-test/manifest.yaml --apply --password-stdin
+  echo "exit: \$?"; date
+  echo "== ~/.npmrc"; ls -le ~/.npmrc 2>&1
+  echo "== change ~/.npmrc, restore again: it must be left alone"
+  [ -f ~/.npmrc ] && printf 'registry=https://example.invalid/\n' > ~/.npmrc
+  echo vm-test-vault-pass | "$CAIRN_VM" restore --from install-test/manifest.yaml --apply --password-stdin 2>&1 | sed -n '/Still to do/,\$p'
+  echo "== ~/.npmrc after"; ls -le ~/.npmrc 2>&1; head -c 40 ~/.npmrc 2>/dev/null; echo
+  echo "== Dock"; defaults export com.apple.dock - | grep -o 'file:///[^<]*'
+  echo "== cairn dock"; "$CAIRN_VM" dock
+} 2>&1 | tee "\$out"
+kill \$watcher
+echo "== ps lines showing the token (other than the watcher's own grep): \$(wc -l < "\$seen" | tr -d ' ')" | tee -a "\$out"
+EOF2
     CAIRN_VM_SECRETS_FIXTURE="$SHARE/secrets-test" CAIRN_VM_SSH_KEYS="$KEYS" swift test --filter VMSecretsFixture >/dev/null
     # A line of the unprotected key's body, to look for in process arguments.
     KEYLINE="$(sed -n 2p "$KEYS/cairn_test_ed25519" | cut -c1-40)"

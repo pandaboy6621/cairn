@@ -106,6 +106,7 @@ final class AppModel {
         backupFolder = stored.string(forKey: "backupFolder").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? BackupFolder.defaultURL
         askWhereToSave = stored.bool(forKey: "askWhereToSave")
+        showInMenuBar = Self.showsMenuBarIcon
         findBackupsAutomatically = stored.object(forKey: "findBackupsAutomatically") as? Bool ?? true
         #if DEBUG
         // Snapshot runs use a scratch folder instead of the real one (didSet doesn't run in init).
@@ -151,7 +152,8 @@ final class AppModel {
     // MARK: Scan
 
     /// Runs a read-only scan off the main thread, reporting progress.
-    func scan() {
+    /// `then` runs on the main actor once the new checklist is in place.
+    func scan(then: (@MainActor () -> Void)? = nil) {
         guard !isScanning else { return }
         isScanning = true
         statusMessage = nil
@@ -188,6 +190,31 @@ final class AppModel {
             if let preview = restorePreview {
                 restorePreview = RestorePreview(url: preview.url, backup: preview.backup, current: report.manifest)
             }
+            then?()
+        }
+    }
+
+    // MARK: Menu bar
+
+    /// Show Cairn's icon in the menu bar (and keep running when the window closes).
+    var showInMenuBar: Bool {
+        didSet { defaults.set(showInMenuBar, forKey: Self.menuBarKey) }
+    }
+    static let menuBarKey = "showInMenuBar"
+    static var showsMenuBarIcon: Bool { UserDefaults.standard.object(forKey: menuBarKey) as? Bool ?? true }
+
+    var isQuickBackingUp = false
+
+    /// Back Up Now from the menu bar: scans first so the snapshot is current,
+    /// keeping whatever the user unchecked in the window since the last backup.
+    func quickBackUp() {
+        guard !isQuickBackingUp, !isScanning else { return }
+        isQuickBackingUp = true
+        let unchecked = checklist.map { list in list.items.filter { !$0.isChecked }.map(\.id) } ?? []
+        scan { [weak self] in
+            guard let self else { return }
+            for id in unchecked { self.checklist?.setChecked(id, false) }
+            self.backUp(into: self.backupFolder) { self.isQuickBackingUp = false }
         }
     }
 
@@ -235,8 +262,8 @@ final class AppModel {
 
     /// Saves a snapshot in `folder` if anything changed (used by Back Up Now and by
     /// dropping a folder). An offline NAS share queues it on this Mac instead.
-    func backUp(into folder: URL) {
-        guard let checklist else { return }
+    func backUp(into folder: URL, done: (@MainActor () -> Void)? = nil) {
+        guard let checklist else { done?(); return }
         let ids = Set(checklist.items.map(\.id))
         // Sensitive items without a saved secret aren't a choice the user made yet.
         let captured = vault.captured
@@ -267,6 +294,7 @@ final class AppModel {
                 if !run.flushed.isEmpty { statusMessage! += " Copied \(run.flushed.count) queued snapshot\(run.flushed.count == 1 ? "" : "s") too." }
                 refreshFoundBackups()
             }
+            done?()
         }
     }
 

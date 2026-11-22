@@ -10,6 +10,13 @@ struct CairnCommand: ParsableCommand {
         version: Cairn.version,
         subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self, VaultCommand.self]
     )
+
+    static func main() {
+        // Line-buffer stdout even into a pipe or log file, so progress shows up as
+        // it happens (a long brew install otherwise looks like a hang).
+        setvbuf(stdout, nil, _IOLBF, 0)
+        main(nil)
+    }
 }
 
 struct Restore: ParsableCommand {
@@ -184,9 +191,16 @@ struct Dock: ParsableCommand {
     }
 }
 
+/// The app's settings. The `cairn` inside Cairn.app shares the app's bundle id,
+/// so there they're the standard defaults (macOS refuses a suite named after
+/// one's own bundle id); a separately built `cairn` reads them as a suite.
+var appDefaults: UserDefaults? {
+    Bundle.main.bundleIdentifier == "dev.cairn.Cairn" ? .standard : UserDefaults(suiteName: "dev.cairn.Cairn")
+}
+
 /// The backup folder the app uses, so the CLI and the app agree.
 func appBackupFolder() -> URL {
-    UserDefaults(suiteName: "dev.cairn.Cairn")?.string(forKey: "backupFolder")
+    appDefaults?.string(forKey: "backupFolder")
         .map { URL(fileURLWithPath: $0, isDirectory: true) } ?? BackupFolder.defaultURL
 }
 

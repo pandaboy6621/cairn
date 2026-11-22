@@ -160,3 +160,35 @@ final class FakeSharePasswords: SharePasswordSystem, @unchecked Sendable {
         try SecretsFile(secrets: sealed).write(to: folder.appendingPathComponent(VaultStore.secretsFileName))
     }
 }
+
+/// Writes the VM's milestone 5 restore test backup (small packages, an App Store
+/// app, a Dock tile for a cask, a made-up ~/.npmrc) when `scripts/vm.sh stage`
+/// asks for it; otherwise does nothing.
+@Suite struct VMInstallFixture {
+    @Test func writeWhenAsked() throws {
+        guard let dir = ProcessInfo.processInfo.environment["CAIRN_VM_INSTALL_FIXTURE"] else { return }
+        let folder = URL(fileURLWithPath: dir, isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let vault = try Vault.create(password: "vm-test-vault-pass", iterations: 100_000)
+        try VaultStore.write(vault.envelope, in: folder)
+        let npm = CredentialFiles.ref(path: ".npmrc")
+        let manifest = Manifest(
+            device: Device(name: "vm-install-test", os: "macos", osVersion: "27"), created: Date(),
+            packages: [
+                PackageItem(id: "buo/cask-upgrade", kind: .tap, resolvers: ["brew": "buo/cask-upgrade"]),
+                PackageItem(id: "jq", kind: .formula, resolvers: ["brew": "jq"]),
+                PackageItem(id: "tree", kind: .formula, resolvers: ["brew": "tree"]),
+                PackageItem(id: "mas", kind: .formula, resolvers: ["brew": "mas"]),
+                PackageItem(id: "rectangle", kind: .cask, resolvers: ["brew": "rectangle"]),       // no sudo
+                PackageItem(id: "blackhole-2ch", kind: .cask, resolvers: ["brew": "blackhole-2ch"]), // pkg: needs sudo
+            ],
+            apps: [AppItem(id: "937984704", name: "Amphetamine", source: "mas")],
+            layout: Layout(dock: DockLayout(apps: ["/System/Applications/Mail.app", "/Applications/Rectangle.app",
+                                                   "/System/Applications/System Settings.app"])),
+            sensitive: [SensitiveRef(type: CredentialFiles.type, ref: npm)])
+        try ManifestCoder.write(manifest, to: folder.appendingPathComponent("manifest.yaml"))
+        try SecretsFile(secrets: [npm: try vault.key.seal(Data("//registry.npmjs.org/:_authToken=made-up-npm-token-55\n".utf8), ref: npm)])
+            .write(to: folder.appendingPathComponent(VaultStore.secretsFileName))
+    }
+}

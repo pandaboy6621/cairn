@@ -8,6 +8,7 @@ struct CairnMainApp: App {
     // A plain constant instead of @State: the app struct is created once, and
     // @State is a macro whose plugin the Command Line Tools don't ship.
     private let model: AppModel
+    static let mainWindowID = "main"
 
     init() {
         // Used by scripts/build-app.sh to make the .icns: render the icon and quit
@@ -20,7 +21,7 @@ struct CairnMainApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Cairn") {
+        WindowGroup("Cairn", id: Self.mainWindowID) {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 600)
@@ -46,6 +47,14 @@ struct CairnMainApp: App {
             SettingsView()
                 .environment(model)
         }
+
+        MenuBarExtra(isInserted: Binding(get: { model.showInMenuBar }, set: { model.showInMenuBar = $0 })) {
+            MenuBarMenu()
+                .environment(model)
+        } label: {
+            Image(nsImage: MenuBarIcon.image)
+                .accessibilityLabel("Cairn")
+        }
     }
 }
 
@@ -60,5 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// With the menu bar icon showing, closing the window leaves Cairn running there.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !AppModel.showsMenuBarIcon }
 }

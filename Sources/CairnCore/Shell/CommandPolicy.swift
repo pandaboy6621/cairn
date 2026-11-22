@@ -72,7 +72,9 @@ public struct CommandPolicy: Sendable {
             if args.count == 2 && args[0] == "tap" { return isName(args[1]) }
             return args.count == 3 && args[0] == "install" && ["--formula", "--cask"].contains(args[1]) && isName(args[2])
         case "mas":
-            return args.count == 2 && args[0] == "install" && !args[1].isEmpty && args[1].allSatisfy(\.isNumber)
+            // `mas install` needs root and would hang waiting for a password, so
+            // App Store apps are listed for the user instead (mas 7, VM testing).
+            return false
         case "xcode-select":
             return args == ["--install"]
         case "ssh-keygen":

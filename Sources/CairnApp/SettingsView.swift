@@ -72,6 +72,13 @@ private struct BackupSettings: View {
             }
 
             Section {
+                Toggle("Show Cairn in the menu bar", isOn: $model.showInMenuBar)
+            } footer: {
+                Text("Back up from the menu bar without opening the window. While it's showing, closing the window keeps Cairn running there.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Ask where to save each backup", isOn: $model.askWhereToSave)
                 Toggle("Find backups in the backup folder automatically", isOn: $model.findBackupsAutomatically)
             } footer: {
