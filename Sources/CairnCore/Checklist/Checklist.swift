@@ -168,6 +168,11 @@ public struct Checklist: Sendable {
         } else {
             m.layout.dock = nil
         }
+        if let w = source.layout.wallpaper, checked.contains(Self.wallpaperID) {
+            m.layout.wallpaper = WallpaperLayout(pictures: w.pictures, include: true)
+        } else {
+            m.layout.wallpaper = nil
+        }
         if let displays = source.layout.displays, checked.contains(Self.displaysID) {
             m.layout.displays = DisplayLayout(displays: displays.displays, include: true)
         } else {
@@ -182,6 +187,7 @@ public struct Checklist: Sendable {
 
     static let dockID = "layout:dock"
     static let displaysID = "layout:displays"
+    static let wallpaperID = "layout:wallpaper"
     static func id(package p: PackageItem) -> String { "package:\(p.uid)" }
     static func id(app a: AppItem) -> String { "app:\(a.id)" }
     static func id(setting s: SettingItem) -> String { "setting:\(s.key)" }
@@ -209,6 +215,12 @@ public struct Checklist: Sendable {
         if let displays = m.layout.displays {
             out.append(ChecklistItem(id: displaysID, category: .lookAndLayout, group: "Displays",
                                      title: "Display arrangement", detail: Self.describe(displays), isChecked: displays.include))
+        }
+        if let w = m.layout.wallpaper {
+            let names = Set(w.pictures.map { ($0.path as NSString).lastPathComponent })
+            out.append(ChecklistItem(id: wallpaperID, category: .lookAndLayout, group: "Wallpaper",
+                                     title: "Desktop picture", detail: names.sorted().joined(separator: ", "),
+                                     isChecked: w.include))
         }
         let settingItems = m.settings.map { s -> ChecklistItem in
             let category = SettingCategory.classify(s)

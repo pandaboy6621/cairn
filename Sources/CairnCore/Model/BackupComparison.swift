@@ -15,7 +15,7 @@ public struct BackupComparison: Equatable, Sendable {
         diff = ManifestDiff.between(current, backup)
         let included = Self.includedItemCount(backup)
         backupItemCount = included
-        let wholeItems: Set<String> = ["layout.dock", "layout.displays"]
+        let wholeItems: Set<String> = ["layout.dock", "layout.displays", "layout.wallpaper"]
         let toInstall = diff.sections.filter { !wholeItems.contains($0.name) }.reduce(0) { $0 + $1.added.count }
         let toChange = diff.sections.filter { !wholeItems.contains($0.name) }
             .reduce(0) { $0 + Set($1.changed.map { Self.itemID($0.id) }).count }
@@ -37,6 +37,8 @@ public struct BackupComparison: Equatable, Sendable {
             + m.settings.filter(\.include).count
             + (m.layout.dock?.include == true ? 1 : 0)
             + (m.layout.displays?.include == true ? 1 : 0)
+            + (m.layout.wallpaper?.include == true ? 1 : 0)
+            + m.shares.filter(\.include).count
     }
 
     /// Change ids look like "dock.autohide" or "dock.autohide include"; one item may

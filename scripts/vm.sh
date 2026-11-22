@@ -77,7 +77,7 @@ stage)
     scripts/build-app.sh
     # The VM's shared-folder mount caches files by path, so a rebuilt app at the
     # same path can still run the old binary. Give every build a new folder.
-    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
+    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
     BUILD_DIR="build-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$SHARE/$BUILD_DIR"
     cp -R dist/Cairn.app "$SHARE/$BUILD_DIR/"
@@ -157,6 +157,20 @@ EOF2
     xattr -c "$SHARE"/*.command 2>/dev/null || true
     echo "==> Scanning this Mac (read-only) → $SHARE/host.yaml"
     dist/Cairn.app/Contents/MacOS/cairn scan -o "$SHARE/host.yaml"
+    # Restore test manifests (VM only): first force Light, then restore this Mac's
+    # backup with a visibly different wallpaper, so the live Dark Mode switch and
+    # the wallpaper change both show.
+    sed 's/^  value: Dark$/  value: Light/' "$SHARE/host.yaml" > "$SHARE/restore-light.yaml"
+    sed 's#path: /System/Library/CoreServices/DefaultDesktop.heic#path: /System/Library/Desktop Pictures/Mac Purple.heic#' \
+        "$SHARE/host.yaml" > "$SHARE/restore-test.yaml"
+    cat > "$SHARE/Restore test (light, then backup).command" <<EOF2
+#!/bin/sh
+# Runs inside cairn-test only: writes system state.
+D="/Volumes/My Shared Files/cairn"
+cd "\$D" || exit 1
+{ "$CAIRN_VM" restore --from restore-light.yaml --apply; echo "== now the backup"; "$CAIRN_VM" restore --from restore-test.yaml --apply; echo "exit: \$?"; } 2>&1 | tee "\$D/restore-test.txt"
+EOF2
+    chmod +x "$SHARE"/*.command; xattr -c "$SHARE"/*.command 2>/dev/null || true
     ;;
 run)
     need_tart

@@ -74,6 +74,7 @@ public struct SetupScanner: Sendable {
                 manifest.shares += found.shares
                 if let dock = found.dock { manifest.layout.dock = dock }
                 if let displays = found.displays { manifest.layout.displays = displays }
+                if let wallpaper = found.wallpaper { manifest.layout.wallpaper = wallpaper }
                 warnings += found.warnings
             } catch {
                 warnings.append("\(source.rawValue): skipped: \(error)")

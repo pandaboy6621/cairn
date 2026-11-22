@@ -8,6 +8,7 @@ public struct ScanContribution: Sendable {
     public var settings: [SettingItem] = []
     public var dock: DockLayout?
     public var displays: DisplayLayout?
+    public var wallpaper: WallpaperLayout?
     public var shares: [ShareItem] = []
     public var warnings: [String] = []
 

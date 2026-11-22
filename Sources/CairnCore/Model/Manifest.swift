@@ -68,6 +68,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         m.shares.sort { $0.url < $1.url }
         m.sensitive.sort { ($0.type, $0.ref) < ($1.type, $1.ref) }
         m.layout.displays?.displays.sort { $0.id < $1.id }
+        m.layout.wallpaper?.pictures.sort { $0.display < $1.display }
         // Whole seconds only: sub-second noise would make every snapshot differ.
         m.created = Date(timeIntervalSince1970: m.created.timeIntervalSince1970.rounded(.down))
         return m
@@ -188,10 +189,37 @@ public struct PreferenceRef: Codable, Equatable, Sendable {
 public struct Layout: Codable, Equatable, Sendable {
     public var dock: DockLayout?
     public var displays: DisplayLayout?
+    /// Desktop pictures. Optional: older manifests have none.
+    public var wallpaper: WallpaperLayout?
 
-    public init(dock: DockLayout? = nil, displays: DisplayLayout? = nil) {
+    public init(dock: DockLayout? = nil, displays: DisplayLayout? = nil, wallpaper: WallpaperLayout? = nil) {
         self.dock = dock
         self.displays = displays
+        self.wallpaper = wallpaper
+    }
+}
+
+/// The desktop picture on each display. Holds image paths only: Cairn never
+/// copies the images themselves (they're the user's files).
+public struct WallpaperLayout: Codable, Equatable, Sendable {
+    public var pictures: [DesktopPicture]
+    public var include: Bool
+
+    public init(pictures: [DesktopPicture], include: Bool = true) {
+        self.pictures = pictures
+        self.include = include
+    }
+}
+
+public struct DesktopPicture: Codable, Equatable, Sendable {
+    /// A `DisplayItem` id (`builtin`, or `<vendor>-<model>-<serial hash>`).
+    public var display: String
+    /// The image's path on the machine that was scanned.
+    public var path: String
+
+    public init(display: String, path: String) {
+        self.display = display
+        self.path = path
     }
 }
 

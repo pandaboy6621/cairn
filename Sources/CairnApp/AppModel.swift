@@ -21,6 +21,16 @@ struct RestorePreview: Identifiable {
     let fileName: String
     let backup: Manifest
     let comparison: BackupComparison
+    /// Settings a restore would write that need a log out to take effect.
+    let logoutSettings: [String]
+
+    init(fileName: String, backup: Manifest, current: Manifest) {
+        self.fileName = fileName
+        self.backup = backup
+        comparison = BackupComparison(backup: backup, current: current)
+        logoutSettings = MacRestorer.logoutSettings(
+            in: RestorePlan.make(backup: backup, current: current, manual: MacRestorer.manualStep))
+    }
 }
 
 /// UI state over CairnCore. All real logic lives in `Checklist`, `SetupScanner`,
@@ -158,7 +168,7 @@ final class AppModel {
             if restorePreview == nil, let path = ProcessInfo.processInfo.environment["CAIRN_SNAPSHOT_PREVIEW"],
                let backup = try? ManifestCoder.read(from: URL(fileURLWithPath: path)) {
                 restorePreview = RestorePreview(fileName: URL(fileURLWithPath: path).lastPathComponent, backup: backup,
-                                                comparison: BackupComparison(backup: backup, current: report.manifest))
+                                                current: report.manifest)
                 showingRestorePreview = true
             }
             #endif
@@ -166,7 +176,7 @@ final class AppModel {
             if let preview = restorePreview {
                 restorePreview = RestorePreview(
                     fileName: preview.fileName, backup: preview.backup,
-                    comparison: BackupComparison(backup: preview.backup, current: report.manifest))
+                    current: report.manifest)
             }
         }
     }
@@ -369,7 +379,7 @@ final class AppModel {
             let backup = try ManifestCoder.read(from: url)
             restorePreview = RestorePreview(
                 fileName: url.lastPathComponent, backup: backup,
-                comparison: BackupComparison(backup: backup, current: checklist.source))
+                current: checklist.source)
             showingRestorePreview = true
         } catch {
             errorMessage = "Couldn't read \(url.lastPathComponent): \(error)"

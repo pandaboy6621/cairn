@@ -44,6 +44,7 @@ public struct ManifestDiff: Equatable, Sendable {
             },
             dock(old.layout.dock, new.layout.dock),
             displays(old.layout.displays, new.layout.displays),
+            wallpaper(old.layout.wallpaper, new.layout.wallpaper),
             keyed("shares", old.shares, new.shares, id: \.url) { a, b in
                 var parts: [Change] = []
                 if a.username != b.username { parts.append(Change(id: "\(a.url) user", from: a.username ?? "none", to: b.username ?? "none")) }
@@ -99,6 +100,17 @@ public struct ManifestDiff: Equatable, Sendable {
         let orderA = a.filter(common.contains), orderB = b.filter(common.contains)
         if orderA != orderB {
             section.changed.append(Change(id: "order", from: orderA.map(shortName).joined(separator: ", "), to: orderB.map(shortName).joined(separator: ", ")))
+        }
+        if let o = old, let n = new, o.include != n.include {
+            section.changed.append(Change(id: "include", from: "\(o.include)", to: "\(n.include)"))
+        }
+        return section
+    }
+
+    private static func wallpaper(_ old: WallpaperLayout?, _ new: WallpaperLayout?) -> Section {
+        var section = keyed("layout.wallpaper", old?.pictures ?? [], new?.pictures ?? [],
+                            id: { "\($0.display): \(shortName($0.path))" }, matchOn: \.display) { a, b in
+            a.path == b.path ? [] : [Change(id: a.display, from: shortName(a.path), to: shortName(b.path))]
         }
         if let o = old, let n = new, o.include != n.include {
             section.changed.append(Change(id: "include", from: "\(o.include)", to: "\(n.include)"))

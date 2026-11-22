@@ -585,9 +585,17 @@ struct RestorePreviewSheet: View {
 
             Divider()
             HStack {
-                Text("Applying a restore arrives in Milestone 5.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !preview.logoutSettings.isEmpty {
+                    Label("\(preview.logoutSettings.count) of these settings take effect only after you log out and back in.",
+                          systemImage: "rectangle.portrait.and.arrow.right")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help(preview.logoutSettings.joined(separator: "\n"))
+                } else {
+                    Text("Restore from the command line: cairn restore --from <backup> (a dry run until --apply).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Done") { model.showingRestorePreview = false }
                     .keyboardShortcut(.defaultAction)
@@ -618,6 +626,7 @@ struct RestorePreviewSheet: View {
         case "layout.dock": return "Dock"
         case "layout.displays": return "Displays"
         case "shares": return "Network shares"
+        case "layout.wallpaper": return "Wallpaper"
         case "sensitive": return "Sensitive"
         default: return section
         }

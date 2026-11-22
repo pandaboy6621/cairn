@@ -48,6 +48,17 @@ public struct RawDisplay: Equatable, Sendable {
 /// `CoreGraphicsDisplays`; tests pass a fake.
 public protocol DisplaySystem: Sendable {
     func onlineDisplays() -> [RawDisplay]
+    /// Each display's desktop picture path, keyed by `RawDisplay.displayID`.
+    func desktopPictures() -> [UInt32: String]
+    /// Sets a display's desktop picture (current Space). Writes system state.
+    func setDesktopPicture(_ path: String, display: UInt32) throws
+}
+
+extension DisplaySystem {
+    public func desktopPictures() -> [UInt32: String] { [:] }
+    public func setDesktopPicture(_ path: String, display: UInt32) throws {
+        throw CommandError.failed(command: "set desktop picture", exitCode: 1, stderr: "not supported")
+    }
 }
 
 /// Records how monitors are arranged. Read-only.
@@ -72,6 +83,12 @@ public struct DisplayScanner: SetupScanning {
             out.warnings.append("displays: couldn't read display names: \(error)")
         }
         out.displays = DisplayLayout(displays: Self.items(raw, names: names))
+        // Wallpaper comes from the same displays, so it shares their ids.
+        let ids = Self.identities(raw)
+        let pictures = system.desktopPictures().compactMap { display, path in
+            ids[display].map { DesktopPicture(display: $0, path: path) }
+        }
+        if !pictures.isEmpty { out.wallpaper = WallpaperLayout(pictures: pictures.sorted { $0.display < $1.display }) }
         return out
     }
 

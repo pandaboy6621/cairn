@@ -11,6 +11,10 @@ public struct RestorePlan: Equatable, Sendable {
         case setting(SettingItem, current: SettingValue?)
         /// Rebuild the Dock in this order.
         case dock(DockLayout, current: [String])
+        /// Set these default apps (only the ones this machine doesn't have yet).
+        case defaultApps([DefaultAppHandler])
+        /// Set the desktop pictures.
+        case wallpaper(WallpaperLayout, current: WallpaperLayout?)
         /// Something the backup wants that this version can't restore yet.
         case pending(category: String, id: String, reason: String)
 
@@ -18,6 +22,8 @@ public struct RestorePlan: Equatable, Sendable {
             switch self {
             case .setting(let s, _): return s.key
             case .dock: return "dock"
+            case .defaultApps: return "default apps"
+            case .wallpaper: return "wallpaper"
             case .pending(let c, let id, _): return "\(c):\(id)"
             }
         }
@@ -49,6 +55,13 @@ public struct RestorePlan: Equatable, Sendable {
         let now = Dictionary(current.settings.map { ($0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
         for s in backup.settings where s.include && s.platforms.contains(platform) && s.adapter.macos != nil {
             let cur = now[s.key]
+            if s.key == DefaultAppHandler.settingKey {
+                // Compared handler by handler: the raw list also holds dates that always differ.
+                let have = Set(cur.map(DefaultAppHandler.parse) ?? [])
+                let missing = DefaultAppHandler.parse(s.value).filter { !have.contains($0) }
+                if !missing.isEmpty { steps.append(.defaultApps(missing)) }
+                continue
+            }
             if let cur, cur.matches(s.value) { continue }
             if let m = manual(s) {
                 steps.append(.pending(category: m.category, id: s.key, reason: m.reason))
@@ -59,6 +72,10 @@ public struct RestorePlan: Equatable, Sendable {
 
         if let dock = backup.layout.dock, dock.include, dock.apps != (current.layout.dock?.apps ?? []) {
             steps.append(.dock(dock, current: current.layout.dock?.apps ?? []))
+        }
+
+        if let w = backup.layout.wallpaper, w.include, w.pictures != (current.layout.wallpaper?.pictures ?? []) {
+            steps.append(.wallpaper(w, current: current.layout.wallpaper))
         }
 
         if let d = backup.layout.displays, d.include, d != current.layout.displays {
@@ -89,9 +106,21 @@ public struct RestorePlan: Equatable, Sendable {
             for (s, c) in settings { out += "  ~ \(s.key): \(c?.summary ?? "(unset)") → \(s.value.summary)\n" }
         }
         for step in changes {
-            if case .dock(let d, let c) = step {
+            switch step {
+            case .dock(let d, let c):
                 out += "dock (\(c.count) tiles → \(d.apps.count) tiles)\n"
                 for (i, app) in d.apps.enumerated() { out += "  \(i + 1). \(Self.shortName(app))\n" }
+            case .defaultApps(let handlers):
+                out += "default apps (\(handlers.count) to set)\n"
+                for h in handlers.prefix(20) { out += "  ~ \(h.summary)\n" }
+                if handlers.count > 20 { out += "  … and \(handlers.count - 20) more\n" }
+            case .wallpaper(let w, let c):
+                out += "wallpaper\n"
+                for p in w.pictures {
+                    let was = c?.pictures.first { $0.display == p.display }.map { Self.shortName($0.path) } ?? "(unknown)"
+                    out += "  ~ \(p.display): \(was) → \(Self.shortName(p.path))\n"
+                }
+            default: break
             }
         }
         let pending = self.pending
@@ -123,6 +152,9 @@ extension SettingValue {
     public func matches(_ other: SettingValue) -> Bool {
         switch (self, other) {
         case (.int(let a), .double(let b)), (.double(let b), .int(let a)): return Double(a) == b
+        // YAML keeps about 15 significant digits, so a stored float can come back
+        // a hair different from what the system reports.
+        case (.double(let a), .double(let b)): return abs(a - b) <= 1e-12 * max(1, abs(a), abs(b))
         case (.array(let a), .array(let b)):
             return a.count == b.count && zip(a, b).allSatisfy { $0.matches($1) }
         case (.dict(let a), .dict(let b)):
@@ -152,6 +184,15 @@ public struct RestoreReport: Equatable, Sendable {
     public enum Written: Equatable, Sendable {
         case setting(SettingValue)
         case dock([String])
+        case defaultApps([DefaultAppHandler])
+        case wallpaper([DesktopPicture])
+    }
+
+    /// Something left for the user to do by hand after restore.
+    public struct ManualStep: Equatable, Sendable {
+        public var category: String
+        public var text: String
+        public init(category: String, text: String) { self.category = category; self.text = text }
     }
 
     public var entries: [Entry] = []
@@ -160,6 +201,10 @@ public struct RestoreReport: Equatable, Sendable {
     public var warnings: [String] = []
     /// Dock tiles left out because their app isn't installed yet; `cairn dock --resume` adds them later.
     public var waitingForDock: [PendingDock.Entry] = []
+    /// Settings written that only take effect after logging out and back in.
+    public var needsLogout: [String] = []
+    /// Things restore couldn't do, for the post-restore checklist.
+    public var manualSteps: [ManualStep] = []
 
     public init(entries: [Entry] = [], restarted: [String] = [], warnings: [String] = [],
                 waitingForDock: [PendingDock.Entry] = []) {
@@ -197,6 +242,18 @@ public enum RestoreVerification {
                 return got.matches(want)
                     ? Result(id: e.step.id, status: .verified, detail: want.summary)
                     : Result(id: e.step.id, status: .mismatch, detail: "wanted \(want.summary), found \(got.summary)")
+            case .defaultApps(let want)?:
+                let got = Set(after.settings.first { $0.key == DefaultAppHandler.settingKey }.map { DefaultAppHandler.parse($0.value) } ?? [])
+                let missing = want.filter { !got.contains($0) }
+                return missing.isEmpty
+                    ? Result(id: e.step.id, status: .verified, detail: "\(want.count) set" + note)
+                    : Result(id: e.step.id, status: .mismatch, detail: "\(missing.count) of \(want.count) not set, e.g. \(missing[0].summary)")
+            case .wallpaper(let want)?:
+                let got = after.layout.wallpaper?.pictures ?? []
+                let missing = want.filter { !got.contains($0) }
+                return missing.isEmpty
+                    ? Result(id: e.step.id, status: .verified, detail: want.map { RestorePlan.shortName($0.path) }.joined(separator: ", ") + note)
+                    : Result(id: e.step.id, status: .mismatch, detail: "\(missing[0].display) still shows something else")
             case .dock(let want)?:
                 let got = after.layout.dock?.apps ?? []
                 return got == want

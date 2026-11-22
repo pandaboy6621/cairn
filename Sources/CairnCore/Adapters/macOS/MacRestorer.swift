@@ -9,13 +9,41 @@ public struct MacRestorer: Sendable {
     public var runner: CommandRunner
     /// Whether an app bundle exists on this Mac. Injected for tests.
     public var appExists: @Sendable (String) -> Bool
+    public var displays: DisplaySystem
+    public var defaultApps: DefaultAppsSystem
 
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore),
-        appExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        appExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        displays: DisplaySystem = CoreGraphicsDisplays(),
+        defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps()
     ) {
         self.runner = runner
         self.appExists = appExists
+        self.displays = displays
+        self.defaultApps = defaultApps
+    }
+
+    /// Domains whose changes most apps only pick up after logging out and back in.
+    static let logoutDomains: Set<String> = [
+        "NSGlobalDomain", "com.apple.HIToolbox", "com.apple.symbolichotkeys",
+        "com.apple.AppleMultitouchTrackpad", "com.apple.driver.AppleBluetoothMultitouch.trackpad",
+        "com.apple.driver.AppleBluetoothMultitouch.mouse",
+    ]
+
+    /// Settings in `plan` that will need a log out after restore (for previews).
+    public static func logoutSettings(in plan: RestorePlan) -> [String] {
+        plan.changes.compactMap { step in
+            if case .setting(let s, _) = step, let d = s.adapter.macos?.domain, logoutDomains.contains(d) { return s.key }
+            return nil
+        }
+    }
+
+    /// AppleScript that switches Dark Mode on or off right away. Runs through
+    /// System Events, so macOS asks the user once (Automation); Cairn never
+    /// grants that itself.
+    public static func darkModeScript(_ dark: Bool) -> String {
+        "tell application \"System Events\" to tell appearance preferences to set dark mode to \(dark)"
     }
 
     /// Processes that cache a preference domain and must restart to pick up changes.
@@ -80,6 +108,30 @@ public struct MacRestorer: Sendable {
                     report.entries.append(.init(step: step, outcome: .failed("\(error)"), written: nil))
                 }
 
+            case .defaultApps(let handlers):
+                var applied: [DefaultAppHandler] = [], missingApps = Set<String>(), refused: [DefaultAppHandler] = []
+                for h in handlers {
+                    guard defaultApps.isInstalled(bundleID: h.bundleID) else { missingApps.insert(h.bundleID); continue }
+                    if defaultApps.set(h) { applied.append(h) } else { refused.append(h) }
+                }
+                var notes: [String] = []
+                if !missingApps.isEmpty { notes.append("\(handlers.count - applied.count - refused.count) left for \(missingApps.count) apps not installed") }
+                if !refused.isEmpty { notes.append("LaunchServices refused \(refused.count)") }
+                let outcome: RestoreReport.Outcome = applied.isEmpty ? .skipped(notes.joined(separator: "; "))
+                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                report.entries.append(.init(step: step, outcome: outcome, written: applied.isEmpty ? nil : .defaultApps(applied)))
+                if !refused.isEmpty {
+                    report.manualSteps.append(.init(category: "default apps",
+                        text: "set these in Finder > Get Info > Open with: " + refused.map(\.summary).joined(separator: ", ")))
+                }
+
+            case .wallpaper(let w, _):
+                let (applied, notes) = applyWallpaper(w)
+                let outcome: RestoreReport.Outcome = applied.isEmpty ? .skipped(notes.joined(separator: "; "))
+                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                report.entries.append(.init(step: step, outcome: outcome, written: applied.isEmpty ? nil : .wallpaper(applied)))
+                for n in notes { report.manualSteps.append(.init(category: "wallpaper", text: n)) }
+
             case .dock(let layout, _):
                 let (tiles, missing) = dockTiles(layout.apps)
                 do {
@@ -103,10 +155,81 @@ public struct MacRestorer: Sendable {
             _ = try? runner.run(Command("killall", [process]))
             report.restarted.append(process)
         }
-        if touched.contains("NSGlobalDomain") {
-            report.warnings.append("Some system-wide settings take effect only after logging out and back in.")
+
+        // Dark Mode: the preference is written, but the screen only changes after a
+        // log out unless something asks the system to switch now.
+        var appliedLive = Set<String>()
+        if let style = appliedAppearance(report), !followsAutoAppearance(plan) {
+            let dark = style == "Dark"
+            if let r = try? runner.run(Command("osascript", ["-e", Self.darkModeScript(dark)])), r.exitCode == 0 {
+                appliedLive.insert(style)
+            } else {
+                report.manualSteps.append(.init(category: "appearance",
+                    text: "turn \(dark ? "on" : "off") Dark Mode in System Settings > Appearance (Cairn wasn't allowed to control System Events), or log out"))
+            }
+        }
+        report.needsLogout = report.entries.compactMap { e in
+            guard e.outcome == .applied || Self.isPartial(e.outcome), case .setting(let s, _) = e.step,
+                  let ref = s.adapter.macos, Self.logoutDomains.contains(ref.domain) else { return nil }
+            if ref.key == "AppleInterfaceStyle", !appliedLive.isEmpty { return nil }
+            return s.key
         }
         return report
+    }
+
+    static func isPartial(_ o: RestoreReport.Outcome) -> Bool { if case .partial = o { return true } else { return false } }
+
+    /// The appearance (`Dark`, or `Light` when the key was set to something else)
+    /// if restore just wrote it.
+    func appliedAppearance(_ report: RestoreReport) -> String? {
+        for e in report.entries where e.outcome == .applied {
+            if case .setting(let s, _) = e.step, s.adapter.macos?.domain == "NSGlobalDomain",
+               s.adapter.macos?.key == "AppleInterfaceStyle", case .string(let v) = s.value {
+                return v == "Dark" ? "Dark" : "Light"
+            }
+        }
+        return nil
+    }
+
+    /// The backup uses Auto appearance; macOS picks light or dark itself.
+    func followsAutoAppearance(_ plan: RestorePlan) -> Bool {
+        plan.steps.contains { step in
+            if case .setting(let s, _) = step, s.adapter.macos?.key == "AppleInterfaceStyleSwitchesAutomatically" {
+                return s.value == .bool(true) || s.value == .int(1)
+            }
+            return false
+        }
+    }
+
+    /// Sets each saved desktop picture on the display with the same id. Pictures
+    /// whose display or image file isn't on this Mac are reported, not guessed.
+    func applyWallpaper(_ w: WallpaperLayout) -> (applied: [DesktopPicture], notes: [String]) {
+        let raw = displays.onlineDisplays()
+        let byID = Dictionary(DisplayScanner.identities(raw).map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        let main = raw.first(where: \.main) ?? raw.first
+        var applied: [DesktopPicture] = [], notes: [String] = []
+        for p in w.pictures {
+            guard FileManager.default.fileExists(atPath: p.path) else {
+                notes.append("\(RestorePlan.shortName(p.path)) isn't on this Mac (Cairn doesn't copy images); set the desktop picture by hand")
+                continue
+            }
+            // None of the saved displays is here (a new Mac): the first picture
+            // goes on the main display.
+            let noneMatch = !w.pictures.contains { byID[$0.display] != nil }
+            let target = byID[p.display] ?? (noneMatch && p == w.pictures.first ? main?.displayID : nil)
+            guard let display = target else {
+                if !noneMatch { notes.append("display \(p.display) isn't connected") }
+                continue
+            }
+            do {
+                try displays.setDesktopPicture(p.path, display: display)
+                let id = DisplayScanner.identities(raw)[display] ?? p.display
+                applied.append(DesktopPicture(display: id, path: p.path))
+            } catch {
+                notes.append("couldn't set \(RestorePlan.shortName(p.path)): \(error)")
+            }
+        }
+        return (applied, notes)
     }
 
     private func write(domain: String, key: String, xml: String) throws {

@@ -73,8 +73,27 @@ struct Restore: ParsableCommand {
         let checks = RestoreVerification.check(result, after: after)
         let text = "\nVerification\n" + RestoreVerification.render(checks)
         print(text, terminator: "")
-        if let report { try text.write(toFile: report, atomically: true, encoding: .utf8) }
+        let finish = Self.finishingSteps(result)
+        print(finish, terminator: "")
+        if let report { try (text + finish).write(toFile: report, atomically: true, encoding: .utf8) }
         if checks.contains(where: { $0.status == .mismatch || $0.status == .failed }) { throw ExitCode(1) }
+    }
+}
+
+extension Restore {
+    /// What's left after a restore, printed last so it isn't lost in the scroll.
+    static func finishingSteps(_ result: RestoreReport) -> String {
+        var out = ""
+        if !result.manualSteps.isEmpty {
+            out += "\nStill to do by hand\n"
+            for m in result.manualSteps { out += "  - \(m.category): \(m.text)\n" }
+        }
+        if !result.needsLogout.isEmpty {
+            let n = result.needsLogout.count
+            let some = result.needsLogout.prefix(4).joined(separator: ", ") + (n > 4 ? ", …" : "")
+            out += "\n>>> Log out and back in to finish. \(n) setting\(n == 1 ? "" : "s") only take\(n == 1 ? "s" : "") effect after that (\(some)).\n"
+        }
+        return out
     }
 }
 

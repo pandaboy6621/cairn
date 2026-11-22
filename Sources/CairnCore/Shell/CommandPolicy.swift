@@ -59,6 +59,10 @@ public struct CommandPolicy: Sendable {
             return args.count == 1 && ["Dock", "Finder", "SystemUIServer", "ControlCenter"].contains(args[0])
         case "launchctl":
             return agents.allows(command)
+        case "osascript":
+            // Only switching Dark Mode on or off.
+            return args.count == 2 && args[0] == "-e"
+                && [MacRestorer.darkModeScript(true), MacRestorer.darkModeScript(false)].contains(args[1])
         default:
             return false
         }
