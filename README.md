@@ -15,6 +15,10 @@ app preferences, displays, and network shares. It never touches your files.
 ![Status](https://img.shields.io/badge/status-early%20development-F9C74F)
 ![Windows & Linux](https://img.shields.io/badge/Windows%20%26%20Linux-coming%20soon-lightgrey)
 
+<br>
+
+<img src="docs/home.png" alt="Cairn's Home screen: setup stats and the Back Up, Restore, and Sync cards" width="860">
+
 </div>
 
 ---
