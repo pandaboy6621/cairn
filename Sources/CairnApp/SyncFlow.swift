@@ -1,14 +1,16 @@
 import AppKit
 import CairnCore
+import Network
 import Observation
 
-/// The app's side of sync: this Mac's choices, the last plan, other Macs, and
-/// Bonjour discovery. Publishing only writes this Mac's files in the backup
-/// folder; incoming changes go through the restore sheet (shown, then Apply).
+/// The app's side of sync: this Mac's choices, how setups travel (a shared
+/// folder or directly), pairing, the last plan, and other Macs. Publishing only
+/// writes this Mac's own sync files; incoming changes go through the restore
+/// sheet (shown, then Apply).
 @MainActor @Observable
 final class SyncFlow {
-    /// A Mac in the Machines list: in the sync group, backed up to the folder,
-    /// found on the network, or saved from an earlier sighting.
+    /// A Mac in the Machines list: paired, in the shared folder, backed up to
+    /// it, found on the network, or saved from an earlier sighting.
     struct Machine: Identifiable, Equatable {
         var name: String
         var osVersion: String?
@@ -19,60 +21,94 @@ final class SyncFlow {
         var latestBackupDate: Date?
         /// Found on the network right now.
         var online = false
-        /// Announced a different sync group (another backup folder).
-        var otherFolder = false
+        /// Listening for pairing (Cairn open with sync on).
+        var acceptsPairing = false
+        var deviceID: DeviceID?
+        var paired = false
         var lastSeen: Date?
         var id: String { name }
     }
 
+    /// Pairing that this Mac started.
+    struct Pairing: Equatable {
+        enum Stage: Equatable { case connecting, waiting(code: String), done, failed(String) }
+        var peer: String
+        var stage: Stage
+    }
+
     var config = SyncConfig()
+    var mode: SyncMode = .folder
     var plan: SyncPlan?
     var isSyncing = false
     var lastSync: Date?
     var error: String?
     var peers: [SyncPeer] = []
     var machines: [Machine] = []
+    var trust = SyncTrust()
+    /// Macs in the shared folder asking to sync.
+    var requests: [SyncDeviceInfo] = []
+    /// A Mac on the network asking to pair (answered from a sheet).
+    var pairRequest: PairRequest?
+    var pairing: Pairing?
+    var showingAddDevice = false
+    private(set) var deviceID: DeviceID?
     private(set) var groupTag: String?
 
+    /// Opens the main window (set by the app), so a pairing request is seen.
+    @ObservationIgnored var showWindow: (() -> Void)?
+
+    @ObservationIgnored private let local = SyncLocal()
+    @ObservationIgnored private var identity: SyncIdentity?
     @ObservationIgnored private var device: Device?
-    @ObservationIgnored private var folder: URL?
+    @ObservationIgnored private var backupFolder: URL?
     @ObservationIgnored private lazy var bonjour = SyncBonjour { [weak self] peers in
         Task { @MainActor in self?.found(peers) }
     }
-    @ObservationIgnored private var bonjourRunning = false
+    @ObservationIgnored private var server: DirectSyncServer?
+    @ObservationIgnored private var networkRunning = false
+    @ObservationIgnored private var pendingAnswers: [(PairRequest, CheckedContinuation<Bool, Never>)] = []
+    @ObservationIgnored private var timer: Timer?
 
     var isOn: Bool { config.enabled }
-    var store: SyncStore? { folder.map { SyncStore(root: $0) } }
+    /// Where sync's files live: the backup folder, or this Mac (direct mode).
+    var root: URL? { backupFolder.map { local.syncRoot(mode: mode, backupFolder: $0) } }
+    var store: SyncStore? { root.map { SyncStore(root: $0) } }
 
-    var pendingCount: Int { (plan?.incoming.count ?? 0) + (plan?.conflicts.count ?? 0) }
+    var pendingCount: Int {
+        (plan?.incoming.count ?? 0) + (plan?.conflicts.count ?? 0) + requests.count + (pairRequest == nil ? 0 : 1)
+    }
 
     // MARK: Loading
 
     /// After each scan, or when the backup folder changes. With a scan, also
     /// works out what's waiting (read-only: nothing is published).
     func load(device: Device, folder: URL, scan: Manifest? = nil) {
-        let changed = self.folder != folder || self.device?.name != device.name
+        let changed = backupFolder != folder || self.device?.name != device.name
         self.device = device
-        self.folder = folder
-        let store = SyncStore(root: folder)
+        backupFolder = folder
+        mode = local.mode()
+        identity = identity ?? (try? local.identity())
+        deviceID = identity?.deviceID
+        trust = local.trust()
+        guard let store else { return }
         config = store.config(device: device.name)
         lastSync = store.info(device: device.name)?.lastSync
-        groupTag = store.group()?.tag
+        groupTag = mode == .folder ? SyncStore(root: folder).group()?.tag : nil
         if changed { plan = nil }
+        refreshRequests()
         refreshMachines()
-        updateBonjour()
+        updateNetwork()
         if let scan { lastScan = scan }
         if let scan, config.enabled { preview(scan: scan) }
     }
 
     /// Plans a sync without writing anything, so incoming changes show up.
     func preview(scan: Manifest) {
-        guard isOn, !isSyncing, let folder else { return }
-        let device = scan.device
+        guard isOn, !isSyncing, let root, let backupFolder else { return }
+        let run = SyncRun(store: SyncStore(root: root), device: scan.device, identity: identity, trusted: trust.ids)
         Task {
             let plan = await Task.detached(priority: .utility) { () -> SyncPlan in
-                let run = SyncRun(store: SyncStore(root: folder), device: device)
-                return run.plan(local: scan, secrets: VaultStore.readSecrets(in: folder, device: device.name))
+                run.plan(local: scan, secrets: VaultStore.readSecrets(in: backupFolder, device: scan.device.name))
             }.value
             if !isSyncing { self.plan = plan }
         }
@@ -80,19 +116,38 @@ final class SyncFlow {
 
     // MARK: Choices
 
-    func turnOn(_ preset: SyncPreset) {
+    func turnOn(_ preset: SyncPreset, mode: SyncMode) {
+        setMode(mode)
         config.enabled = true
         config.apply(preset)
         save()
-        if let store { groupTag = (try? store.ensureGroup(now: Date()))?.tag }
-        updateBonjour()
+        if mode == .folder, let backupFolder { groupTag = (try? SyncStore(root: backupFolder).ensureGroup(now: Date()))?.tag }
+        updateNetwork()
     }
 
     func turnOff() {
         config.enabled = false
         save()
         plan = nil
-        updateBonjour()
+        updateNetwork()
+    }
+
+    /// Switches where setups travel, keeping this Mac's choices.
+    func setMode(_ new: SyncMode) {
+        guard new != mode || local.mode() != new, let device else { return }
+        let kept = config
+        do { try local.saveMode(new) } catch { self.error = error.localizedDescription; return }
+        mode = new
+        plan = nil
+        config = kept
+        if let store { try? store.saveConfig(kept, device: device.name) }
+        if new == .folder, isOn, let backupFolder { groupTag = (try? SyncStore(root: backupFolder).ensureGroup(now: Date()))?.tag }
+        if new == .direct { groupTag = nil }
+        lastSync = store?.info(device: device.name)?.lastSync
+        refreshRequests()
+        refreshMachines()
+        updateNetwork()
+        if let lastScan { preview(scan: lastScan) }
     }
 
     func apply(_ preset: SyncPreset) {
@@ -131,28 +186,47 @@ final class SyncFlow {
 
     // MARK: Syncing
 
-    /// Plans with the latest scan and publishes this Mac's changes.
+    /// Publishes this Mac's changes, trades them with paired Macs online (direct
+    /// mode), and plans what's waiting here.
     func syncNow(scan: Manifest) {
-        guard isOn, !isSyncing, let folder else { return }
+        guard isOn, !isSyncing, let root, let backupFolder else { return }
         isSyncing = true
         error = nil
-        let device = scan.device
+        lastScan = scan
+        let run = SyncRun(store: SyncStore(root: root), device: scan.device, identity: identity, trusted: trust.ids)
+        let direct = mode == .direct
+        let context = directContext()
+        let online: [(SyncPeer, NWEndpoint)] = direct ? peers.compactMap { p in
+            guard let id = p.deviceID, trust.isTrusted(id), let e = bonjour.endpoint(for: p) else { return nil }
+            return (p, e)
+        } : []
         Task {
-            let result = await Task.detached(priority: .userInitiated) { () -> Result<SyncPlan, Error> in
-                let run = SyncRun(store: SyncStore(root: folder), device: device)
-                let secrets = VaultStore.readSecrets(in: folder, device: device.name)
-                let plan = run.plan(local: scan, secrets: secrets)
-                do { try run.publish(plan); return .success(plan) } catch { return .failure(error) }
+            let result = await Task.detached(priority: .userInitiated) { () -> Result<(SyncPlan, [String]), Error> in
+                let secrets = VaultStore.readSecrets(in: backupFolder, device: scan.device.name)
+                var notes: [String] = []
+                do {
+                    try run.publish(run.plan(local: scan, secrets: secrets))
+                    if let context {
+                        for (peer, endpoint) in online {
+                            do { try await DirectSyncClient.sync(endpoint, context: context) }
+                            catch { notes.append("\(peer.device): \(error.localizedDescription)") }
+                        }
+                    }
+                    return .success((run.plan(local: scan, secrets: secrets), notes))
+                } catch { return .failure(error) }
             }.value
             isSyncing = false
             switch result {
-            case .success(let plan):
+            case .success(let (plan, notes)):
                 self.plan = plan
                 lastSync = Date()
+                if !notes.isEmpty { error = "Couldn't reach " + notes.joined(separator: "; ") }
             case .failure(let e):
                 // An offline NAS: try again next time, never block.
-                error = "Couldn't reach \(BackupFolder.displayPath(folder)): \(e.localizedDescription)"
+                error = direct ? e.localizedDescription
+                    : "Couldn't reach \(BackupFolder.displayPath(backupFolder)): \(e.localizedDescription)"
             }
+            refreshRequests()
             refreshMachines()
         }
     }
@@ -160,8 +234,8 @@ final class SyncFlow {
     /// Where incoming changes are written for the restore sheet. Inside the
     /// backup folder so the sheet finds the vault (a few folders up).
     func incomingURL() -> URL? {
-        guard let folder, let device else { return nil }
-        return folder.appendingPathComponent("sync/incoming", isDirectory: true)
+        guard let backupFolder, let device else { return nil }
+        return backupFolder.appendingPathComponent("sync/incoming", isDirectory: true)
             .appendingPathComponent(SnapshotStore.folderName(device: device.name), isDirectory: true)
             .appendingPathComponent("incoming.yaml")
     }
@@ -192,10 +266,10 @@ final class SyncFlow {
 
     /// After the restore sheet applied incoming changes: record what landed.
     func restored(after manifest: Manifest) {
-        guard let folder, let device, !applying.isEmpty else { return }
-        let run = SyncRun(store: SyncStore(root: folder), device: device)
+        guard let root, let backupFolder, let device, !applying.isEmpty else { return }
+        let run = SyncRun(store: SyncStore(root: root), device: device, identity: identity, trusted: trust.ids)
         do {
-            try run.taken(applying, after: manifest, secrets: VaultStore.readSecrets(in: folder, device: device.name))
+            try run.taken(applying, after: manifest, secrets: VaultStore.readSecrets(in: backupFolder, device: device.name))
         } catch { self.error = error.localizedDescription }
         applying = []
         // Re-plan so landed items drop off the list.
@@ -212,6 +286,96 @@ final class SyncFlow {
         guard let store, let device else { return }
         try? store.saveBase(SyncEngine.keepMine(conflict.id, base: store.base(device: device.name)), device: device.name)
         plan?.conflicts.removeAll { $0.id == conflict.id }
+    }
+
+    // MARK: Pairing
+
+    private func directContext() -> DirectSyncContext? {
+        guard let identity, let device, let root else { return nil }
+        return DirectSyncContext(identity: identity, name: device.name, local: local,
+                                 store: SyncStore(root: root), exchange: mode == .direct)
+    }
+
+    /// Asks a Mac found on the network to pair: both show a code.
+    func pair(with machine: Machine) {
+        guard let peer = peers.first(where: { $0.device == machine.name }), let endpoint = bonjour.endpoint(for: peer),
+              let context = directContext() else {
+            pairing = Pairing(peer: machine.name, stage: .failed("That Mac isn't reachable right now. Pair by ID instead."))
+            return
+        }
+        pairing = Pairing(peer: peer.device, stage: .connecting)
+        let expected = peer.deviceID
+        Task {
+            do {
+                _ = try await DirectSyncClient.pair(endpoint, expected: expected, context: context) { code in
+                    Task { @MainActor in self.pairing?.stage = .waiting(code: code) }
+                }
+                pairing?.stage = .done
+                trust = local.trust()
+                refreshMachines()
+                if let lastScan { preview(scan: lastScan) }
+            } catch {
+                pairing?.stage = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Pairs with a Mac by its typed-in device ID (the other Mac adds this one's too).
+    func add(_ text: String, name: String) -> String? {
+        guard let id = DeviceID(parsing: text) else { return "That isn't a device ID. It looks like ABCDE-FGHIJ-KLMNO-PQRST." }
+        guard id != deviceID else { return "That's this Mac's own ID." }
+        trust.trust(id, name: name.trimmingCharacters(in: .whitespaces), publicKey: nil, how: .manual, now: Date())
+        saveTrust()
+        return nil
+    }
+
+    func unpair(_ id: DeviceID) {
+        trust.remove(id)
+        saveTrust()
+    }
+
+    /// A Mac in the shared folder asking to sync.
+    func accept(_ info: SyncDeviceInfo) {
+        guard let id = info.deviceID else { return }
+        trust.trust(id, name: info.name, publicKey: info.publicKey, how: .folder, now: Date())
+        saveTrust()
+    }
+
+    func ignore(_ info: SyncDeviceInfo) {
+        guard let id = info.deviceID else { return }
+        trust.ignore(id)
+        saveTrust()
+    }
+
+    private func saveTrust() {
+        do { try local.saveTrust(trust) } catch { self.error = error.localizedDescription }
+        refreshRequests()
+        refreshMachines()
+        if let lastScan { preview(scan: lastScan) }
+    }
+
+    private func refreshRequests() {
+        guard let deviceID, isOn, mode == .folder, let store else { requests = []; return }
+        requests = store.requests(trust: trust, me: deviceID)
+    }
+
+    /// The listener asks: show the request and wait for an answer.
+    private func ask(_ request: PairRequest) async -> Bool {
+        await withCheckedContinuation { c in
+            pendingAnswers.append((request, c))
+            if pairRequest == nil { pairRequest = request }
+            showWindow?()
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+    }
+
+    func answer(_ yes: Bool) {
+        guard let request = pairRequest, let i = pendingAnswers.firstIndex(where: { $0.0 == request }) else { pairRequest = nil; return }
+        let (_, c) = pendingAnswers.remove(at: i)
+        c.resume(returning: yes)
+        pairRequest = pendingAnswers.first?.0
+        trust = local.trust()
+        refreshMachines()
     }
 
     // MARK: Machines
@@ -238,55 +402,107 @@ final class SyncFlow {
     }
 
     func refreshMachines() {
-        guard let folder, let device else { machines = []; return }
-        let store = SyncStore(root: folder)
-        let snapshots = SnapshotStore(root: folder)
+        guard let backupFolder, let device, let store else { machines = []; return }
+        let snapshots = SnapshotStore(root: backupFolder)
         var byName: [String: Machine] = [:]
         func touch(_ name: String, _ change: (inout Machine) -> Void) {
+            guard !name.isEmpty else { return }
             var m = byName[name] ?? Machine(name: name)
             change(&m)
             byName[name] = m
         }
-        touch(device.name) { $0.isThisMac = true; $0.osVersion = device.osVersion; $0.syncing = config.enabled; $0.lastSync = lastSync }
-        for d in store.devices() {
-            touch(d.info.name) { $0.osVersion = $0.osVersion ?? d.info.osVersion; $0.syncing = d.config.enabled; $0.lastSync = d.info.lastSync }
+        touch(device.name) {
+            $0.isThisMac = true; $0.osVersion = device.osVersion; $0.syncing = config.enabled
+            $0.lastSync = lastSync; $0.deviceID = deviceID
         }
+        for d in store.devices() where d.info.name != device.name {
+            touch(d.info.name) {
+                $0.osVersion = $0.osVersion ?? d.info.osVersion; $0.syncing = d.config.enabled
+                $0.lastSync = d.info.lastSync; $0.deviceID = $0.deviceID ?? d.info.deviceID
+            }
+        }
+        for t in trust.devices { touch(t.name.isEmpty ? t.id.description : t.name) { $0.deviceID = t.id; $0.paired = true } }
         for s in snapshots.list() where byName[s.info.device]?.latestBackup == nil {
             touch(s.info.device) { $0.latestBackup = s.manifestURL; $0.latestBackupDate = s.info.created }
         }
         for p in peers {
             touch(p.device) {
                 $0.online = true
+                $0.acceptsPairing = p.accepts
                 $0.osVersion = $0.osVersion ?? p.osVersion
-                $0.otherFolder = p.groupTag != nil && p.groupTag != groupTag
+                $0.deviceID = $0.deviceID ?? p.deviceID
             }
         }
         for (name, seen) in saved { touch(name) { $0.lastSeen = seen } }
+        for (name, m) in byName {
+            if let id = m.deviceID, trust.isTrusted(id) { byName[name]?.paired = true }
+        }
         machines = byName.values.sorted {
             if $0.isThisMac != $1.isThisMac { return $0.isThisMac }
+            if $0.paired != $1.paired { return $0.paired }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 
-    // MARK: Bonjour
+    // MARK: Network
 
-    /// Announce and look for other Macs only while sync is on (macOS asks once
-    /// for local network access the first time).
-    private func updateBonjour() {
-        guard let device else { return }
+    /// While sync is on: listen for pairing (and direct sync), announce this
+    /// Mac, and look for others. macOS may ask once for local network access
+    /// and to allow incoming connections. In direct mode, sync every 15 minutes.
+    private func updateNetwork() {
+        guard let device, let identity, let root else { return }
         #if DEBUG
-        // Snapshots shouldn't make macOS ask for local network access.
+        // Snapshots shouldn't make macOS ask for network access.
         if ProcessInfo.processInfo.environment["CAIRN_SNAPSHOT"] != nil { return }
         #endif
-        if config.enabled {
-            bonjour.start(device: device.name, osVersion: device.osVersion, groupTag: groupTag)
-            bonjourRunning = true
-        } else if bonjourRunning {
-            bonjour.stop()
-            bonjourRunning = false
-            peers = []
-            refreshMachines()
+        stopNetwork()
+        guard config.enabled else { peers = []; refreshMachines(); return }
+        let context = DirectSyncContext(identity: identity, name: device.name, local: local,
+                                        store: SyncStore(root: root), exchange: mode == .direct)
+        let server = DirectSyncServer(context: context, ask: { [weak self] request in
+            guard let self else { return false }
+            return await self.ask(request)
+        }, exchanged: { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, let scan = self.lastScan else { return }
+                self.preview(scan: scan)
+                self.refreshMachines()
+            }
+        })
+        let txt = SyncPeer.txt(device: device.name, osVersion: device.osVersion, groupTag: groupTag,
+                               deviceID: identity.deviceID, accepts: true)
+        let name = SyncBonjour.serviceName(device: device.name)
+        self.server = server
+        networkRunning = true
+        Task {
+            do {
+                try await server.start(service: name, txt: txt)
+                bonjour.start(device: device.name, osVersion: device.osVersion, groupTag: groupTag,
+                              deviceID: identity.deviceID, announce: false)
+            } catch {
+                // No listener: still be found (pairing by ID and the folder still work).
+                bonjour.start(device: device.name, osVersion: device.osVersion, groupTag: groupTag,
+                              deviceID: identity.deviceID, announce: true)
+            }
         }
+        if mode == .direct {
+            timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let scan = self.lastScan else { return }
+                    self.syncNow(scan: scan)
+                }
+            }
+        }
+    }
+
+    private func stopNetwork() {
+        timer?.invalidate()
+        timer = nil
+        guard networkRunning else { return }
+        server?.stop()
+        server = nil
+        bonjour.stop()
+        networkRunning = false
     }
 }
 
@@ -296,3 +512,19 @@ extension SyncPreset {
         SyncConfig(preset: self).scope(for: id, in: category)
     }
 }
+
+#if DEBUG
+extension SyncFlow {
+    /// For `CAIRN_SNAPSHOT_SYNC`: shows a pairing sheet with made-up data.
+    func debugShow(_ state: String) {
+        let fake = SyncIdentity().deviceID
+        switch state {
+        case "request": pairRequest = PairRequest(deviceID: fake, name: "example-imac", code: "482 913")
+        case "pairing": pairing = Pairing(peer: "example-imac", stage: .waiting(code: "482 913"))
+        case "paired": pairing = Pairing(peer: "example-imac", stage: .done)
+        case "add": showingAddDevice = true
+        default: break
+        }
+    }
+}
+#endif

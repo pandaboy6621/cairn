@@ -217,12 +217,18 @@ public struct SyncDeviceInfo: Codable, Equatable, Sendable {
     public var os: String
     public var osVersion: String
     public var lastSync: Date?
+    /// Its sync identity, so other Macs can ask their users to accept it.
+    public var deviceID: DeviceID?
+    public var publicKey: Data?
 
-    public init(name: String, os: String, osVersion: String, lastSync: Date? = nil) {
+    public init(name: String, os: String, osVersion: String, lastSync: Date? = nil,
+                deviceID: DeviceID? = nil, publicKey: Data? = nil) {
         self.name = name
         self.os = os
         self.osVersion = osVersion
         self.lastSync = lastSync
+        self.deviceID = deviceID
+        self.publicKey = publicKey
     }
 }
 

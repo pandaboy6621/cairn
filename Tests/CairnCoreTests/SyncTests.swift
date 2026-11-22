@@ -233,6 +233,9 @@ import Testing
     @Test func bonjourAnnouncementIsMinimal() {
         let txt = SyncPeer.txt(device: "mac-a", osVersion: "14.5", groupTag: SyncGroup(id: "x", created: Self.t0).tag)
         #expect(Set(txt.keys) == ["v", "device", "os", "group"])
+        let id = SyncIdentity().deviceID
+        let full = SyncPeer.txt(device: "mac-a", osVersion: "14.5", groupTag: nil, deviceID: id, accepts: true)
+        #expect(SyncPeer(service: "s", txt: full)?.deviceID == id && SyncPeer(service: "s", txt: full)?.accepts == true)
         let bytes = SyncPeer.encode(txt)
         #expect(bytes.first == UInt8("device=mac-a".utf8.count))
         #expect(SyncPeer(service: "Cairn on mac-a", txt: txt)?.groupTag == SyncGroup(id: "x", created: Self.t0).tag)

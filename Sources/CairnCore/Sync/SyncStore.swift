@@ -60,15 +60,65 @@ public struct SyncStore: Sendable {
 
     // MARK: The group
 
-    /// Every Mac's published file, keyed by folder name.
-    public func allPublished() -> [String: SyncPublished] {
+    /// Every Mac's published file, keyed by folder name. With `trusted`, only
+    /// Macs whose device ID is in it (a Mac without an ID yet is left out).
+    public func allPublished(trusted: Set<DeviceID>? = nil) -> [String: SyncPublished] {
         var out: [String: SyncPublished] = [:]
         for name in deviceFolders() {
-            if let p = read(SyncPublished.self, devicesURL.appendingPathComponent(name).appendingPathComponent("published.yaml")) {
-                out[name] = p
+            let dir = devicesURL.appendingPathComponent(name)
+            if let trusted {
+                guard let id = read(SyncDeviceInfo.self, dir.appendingPathComponent("device.yaml"))?.deviceID,
+                      trusted.contains(id) else { continue }
             }
+            if let p = read(SyncPublished.self, dir.appendingPathComponent("published.yaml")) { out[name] = p }
         }
         return out
+    }
+
+    /// Macs in the folder asking to sync: they have an ID, and aren't this Mac,
+    /// trusted, or turned down.
+    public func requests(trust: SyncTrust, me: DeviceID) -> [SyncDeviceInfo] {
+        devices().compactMap { d in
+            guard let id = d.info.deviceID, id != me, !trust.isTrusted(id), !trust.isIgnored(id), d.config.enabled,
+                  let key = d.info.publicKey, id.matches(publicKey: key) else { return nil }
+            return d.info
+        }
+    }
+
+    // MARK: Direct exchange
+
+    /// Every Mac's description and published items, to send to a paired Mac.
+    public func bundle() -> SyncBundle {
+        SyncBundle(devices: deviceFolders().compactMap { name in
+            let dir = devicesURL.appendingPathComponent(name)
+            guard let info = read(SyncDeviceInfo.self, dir.appendingPathComponent("device.yaml")) else { return nil }
+            let published = read(SyncPublished.self, dir.appendingPathComponent("published.yaml")) ?? SyncPublished()
+            return SyncBundle.Device(info: info, published: published)
+        })
+    }
+
+    /// Takes in what a paired Mac sent: its own items, and those it has from
+    /// other trusted Macs (so changes spread). Never this Mac's own files, and a
+    /// Mac's file only replaces an older one. Returns how many Macs changed.
+    @discardableResult
+    public func take(_ bundle: SyncBundle, me: DeviceID, trusted: Set<DeviceID>) throws -> Int {
+        var changed = 0
+        for d in bundle.devices {
+            guard let id = d.info.deviceID, id != me, trusted.contains(id),
+                  let key = d.info.publicKey, id.matches(publicKey: key) else { continue }
+            let folder = SnapshotStore.folderName(device: d.info.name)
+            let dir = devicesURL.appendingPathComponent(folder)
+            let have = read(SyncPublished.self, dir.appendingPathComponent("published.yaml"))
+            let haveInfo = read(SyncDeviceInfo.self, dir.appendingPathComponent("device.yaml"))
+            if let haveID = haveInfo?.deviceID, haveID != id { continue } // a different Mac with the same name
+            let newer = (d.published.entries.values.map(\.updated).max() ?? .distantPast)
+                > (have?.entries.values.map(\.updated).max() ?? .distantPast)
+            guard have == nil || newer || (haveInfo?.lastSync ?? .distantPast) < (d.info.lastSync ?? .distantPast) else { continue }
+            try write(d.info, dir.appendingPathComponent("device.yaml"))
+            if have == nil || newer { try write(d.published, dir.appendingPathComponent("published.yaml")) }
+            changed += 1
+        }
+        return changed
     }
 
     /// Macs in the group that have turned sync on, newest sync first.
@@ -82,9 +132,10 @@ public struct SyncStore: Sendable {
         .sorted { ($0.info.lastSync ?? .distantPast) > ($1.info.lastSync ?? .distantPast) }
     }
 
-    /// The group's newest entry per item, leaving out this Mac's own.
-    public func group(excluding device: String) -> [String: SyncEntry] {
-        SyncEngine.merge(allPublished(), excluding: SnapshotStore.folderName(device: device))
+    /// The group's newest entry per item, leaving out this Mac's own (and, with
+    /// `trusted`, any Mac that isn't paired).
+    public func group(excluding device: String, trusted: Set<DeviceID>? = nil) -> [String: SyncEntry] {
+        SyncEngine.merge(allPublished(trusted: trusted), excluding: SnapshotStore.folderName(device: device))
     }
 
     // MARK: Files
@@ -114,17 +165,23 @@ public struct SyncStore: Sendable {
 public struct SyncRun {
     public var store: SyncStore
     public var device: Device
+    /// This Mac's identity, written into its device.yaml.
+    public var identity: SyncIdentity?
+    /// Only these Macs' changes are used (nil: every Mac in the folder, for tests).
+    public var trusted: Set<DeviceID>?
 
-    public init(store: SyncStore, device: Device) {
+    public init(store: SyncStore, device: Device, identity: SyncIdentity? = nil, trusted: Set<DeviceID>? = nil) {
         self.store = store
         self.device = device
+        self.identity = identity
+        self.trusted = trusted
     }
 
     var me: String { device.name }
 
     /// Plans a sync without writing anything.
     public func plan(local manifest: Manifest, secrets: SecretsFile, now: Date = Date()) -> SyncPlan {
-        SyncEngine.plan(local: SyncItems.from(manifest, secrets: secrets), group: store.group(excluding: me),
+        SyncEngine.plan(local: SyncItems.from(manifest, secrets: secrets), group: store.group(excluding: me, trusted: trusted),
                         base: store.base(device: me), config: store.config(device: me), device: me, now: now)
     }
 
@@ -134,7 +191,8 @@ public struct SyncRun {
         _ = try store.ensureGroup(now: now)
         try store.publish(plan.outgoing, device: me)
         try store.saveBase(plan.base, device: me)
-        try store.saveInfo(SyncDeviceInfo(name: device.name, os: device.os, osVersion: device.osVersion, lastSync: now), device: me)
+        try store.saveInfo(SyncDeviceInfo(name: device.name, os: device.os, osVersion: device.osVersion, lastSync: now,
+                                          deviceID: identity?.deviceID, publicKey: identity?.publicKey), device: me)
     }
 
     /// Records which incoming changes landed after a restore applied them.
@@ -144,4 +202,13 @@ public struct SyncRun {
         try store.publish(outgoing, device: me)
         try store.saveBase(base, device: me)
     }
+}
+
+/// What paired Macs send each other directly: each Mac's description and items.
+public struct SyncBundle: Codable, Equatable, Sendable {
+    public struct Device: Codable, Equatable, Sendable {
+        public var info: SyncDeviceInfo
+        public var published: SyncPublished
+    }
+    public var devices: [Device]
 }

@@ -13,9 +13,11 @@ struct SyncView: View {
             VStack(alignment: .leading, spacing: 22) {
                 SyncHeader()
                 if sync.isOn {
+                    if !sync.requests.isEmpty { SyncRequests() }
                     if let plan = sync.plan, !(plan.incoming.isEmpty && plan.conflicts.isEmpty && plan.removedElsewhere.isEmpty) {
                         SyncChanges(plan: plan)
                     }
+                    SyncConnection()
                     SyncChoices()
                 } else {
                     SyncTurnOn()
@@ -76,11 +78,12 @@ private struct SyncHeader: View {
 
     private var subtitle: String {
         let sync = model.sync
-        guard sync.isOn else { return "Keep your Macs' setups in step through \(BackupFolder.displayPath(model.backupFolder))." }
-        let others = sync.machines.filter { !$0.isThisMac && $0.syncing }.count
+        guard sync.isOn else { return "Keep your Macs' setups in step, through your NAS or directly between them." }
+        let others = sync.trust.devices.count
         var parts: [String] = []
         if let last = sync.lastSync { parts.append("Synced \(last.formatted(.relative(presentation: .named)))") } else { parts.append("Not synced yet") }
-        parts.append(others == 0 ? "no other Macs yet" : "with \(others) other Mac\(others == 1 ? "" : "s")")
+        parts.append(others == 0 ? "no Macs paired yet" : "paired with \(others) Mac\(others == 1 ? "" : "s")")
+        parts.append(sync.mode == .folder ? "through the shared folder" : "directly between Macs")
         return parts.joined(separator: " · ")
     }
 }
@@ -90,18 +93,21 @@ private struct SyncHeader: View {
 private struct SyncTurnOn: View {
     @Environment(AppModel.self) private var model
     private let preset = State(initialValue: SyncPreset.portable)
+    private let mode = State(initialValue: SyncMode.folder)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Every Mac that backs up to the same folder, like a share on your NAS, can sync. Cairn publishes this Mac's setup there and shows you changes from your other Macs before anything is applied. Sync never removes anything.")
+            Text("Cairn keeps your Macs' setups in step and shows you every change from another Mac before anything is applied. Each Mac is paired first, by accepting a request or typing its ID. Sync never removes anything.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Start with").font(.headline)
+            Text("How your Macs connect").font(.headline)
+            ModePicker(selection: mode.projectedValue, folder: BackupFolder.displayPath(model.backupFolder))
+            Text("What syncs").font(.headline).padding(.top, 4)
             PresetPicker(selection: preset.projectedValue)
             HStack {
                 Spacer()
                 Button {
-                    model.sync.turnOn(preset.wrappedValue)
+                    model.sync.turnOn(preset.wrappedValue, mode: mode.wrappedValue)
                     model.syncNow()
                 } label: {
                     Text("Turn On Sync").frame(minWidth: 120)
@@ -111,10 +117,132 @@ private struct SyncTurnOn: View {
                 .controlSize(.large)
                 .disabled(model.checklist == nil)
             }
-            Text("You can change any category, or single items in the checklist (right-click an item), at any time.")
+            Text("You can change any of this later, including single items in the checklist (right-click an item).")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(18)
+        .background(CardBackground(tint: .purple))
+    }
+}
+
+/// Two cards: through a NAS or shared folder, or directly between Macs.
+private struct ModePicker: View {
+    @Binding var selection: SyncMode
+    let folder: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(SyncMode.allCases) { mode in
+                let on = selection == mode
+                Button {
+                    selection = mode
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: mode == .folder ? "externaldrive.connected.to.line.below" : "laptopcomputer.and.arrow.down")
+                            Text(mode == .folder ? "NAS or shared folder" : "Device to device").font(.headline)
+                            Spacer()
+                            Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(on ? Color.purple : Color.secondary)
+                        }
+                        Text(mode.summary + (mode == .folder ? " Uses \(folder)." : ""))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(on ? Color.purple.opacity(0.12) : Color.secondary.opacity(0.06)))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(on ? Color.purple.opacity(0.6) : Color.secondary.opacity(0.2), lineWidth: on ? 1.5 : 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+// MARK: - Connection and pairing
+
+/// How this Mac connects, its ID, and pairing by ID.
+private struct SyncConnection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let sync = model.sync
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connection").font(.title3.weight(.semibold))
+            HStack(alignment: .firstTextBaseline) {
+                Picker("Macs connect", selection: Binding(get: { sync.mode }, set: { sync.setMode($0) })) {
+                    Text("Through a NAS or shared folder").tag(SyncMode.folder)
+                    Text("Directly between Macs").tag(SyncMode.direct)
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                Spacer()
+            }
+            Text(sync.mode.summary + (sync.mode == .folder ? " Folder: \(BackupFolder.displayPath(model.backupFolder))." : ""))
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Image(systemName: "person.badge.key").foregroundStyle(.purple)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("This Mac's ID").font(.caption).foregroundStyle(.secondary)
+                    Text(sync.deviceID?.description ?? "…")
+                        .font(.system(.body, design: .monospaced).weight(.medium))
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(sync.deviceID?.description ?? "", forType: .string)
+                }
+                Button("Add Mac by ID…") { sync.showingAddDevice = true }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.45)))
+            Text("To pair, click Pair next to a Mac below: both Macs show a code, and the other one accepts. If no request arrives there, type each Mac's ID into the other with Add Mac by ID.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Macs in the shared folder asking to sync.
+private struct SyncRequests: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let sync = model.sync
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(.purple)
+                Text("Wants to sync").font(.title3.weight(.semibold))
+            }
+            Text("These Macs turned on sync with this folder. Check the ID matches the one shown in Cairn on that Mac before accepting.")
+                .font(.callout).foregroundStyle(.secondary)
+            ChangeList {
+                ForEach(sync.requests, id: \.deviceID) { info in
+                    HStack(spacing: 10) {
+                        Image(systemName: "desktopcomputer").foregroundStyle(.secondary).frame(width: 20)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(info.name)
+                            Text(info.deviceID?.description ?? "").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Ignore") { sync.ignore(info) }
+                        Button("Accept") { sync.accept(info) }.buttonStyle(.borderedProminent).tint(.purple)
+                    }
+                    .controlSize(.small)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        .padding(16)
         .background(CardBackground(tint: .purple))
     }
 }
@@ -407,7 +535,7 @@ private struct SyncMachines: View {
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.45)))
             }
             if !sync.isOn {
-                Text("Turn on sync to find other Macs running Cairn on your network.")
+                Text("Turn on sync to find other Macs running Cairn on your network and pair with them.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -434,12 +562,19 @@ private struct MachineRow: View {
                 HStack(spacing: 6) {
                     Text(machine.name).fontWeight(.medium)
                     if machine.isThisMac { Tag(text: "This Mac", color: .teal) }
-                    if machine.syncing { Tag(text: "Syncing", color: .purple) }
-                    if machine.otherFolder { Tag(text: "Other folder", color: .orange) }
+                    if machine.paired { Tag(text: "Paired", color: .purple) }
+                    else if machine.syncing && !machine.isThisMac { Tag(text: "Not paired", color: .orange) }
                 }
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            if model.sync.isOn, !machine.isThisMac, !machine.paired, machine.online, machine.acceptsPairing {
+                Button("Pair…") { model.sync.pair(with: machine) }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .help("Ask this Mac to sync with this one. Both show a code to compare.")
+            }
             if let url = machine.latestBackup, !machine.isThisMac {
                 Button("View Setup") { model.previewRestore(url) }
                     .controlSize(.small)
@@ -451,6 +586,9 @@ private struct MachineRow: View {
         .contextMenu {
             if let url = machine.latestBackup {
                 Button("Show Latest Backup in Finder") { model.showInFinder(url) }
+            }
+            if !machine.isThisMac, machine.paired, let id = machine.deviceID {
+                Button("Unpair") { model.sync.unpair(id) }
             }
             if !machine.isThisMac, machine.lastSeen != nil {
                 Button("Forget This Mac") { model.sync.forget(machine) }
@@ -465,7 +603,7 @@ private struct MachineRow: View {
         if let b = machine.latestBackupDate { parts.append("backed up \(b.formatted(.relative(presentation: .named)))") }
         if machine.online && !machine.isThisMac { parts.append("on your network now") }
         else if let seen = machine.lastSeen, !machine.isThisMac { parts.append("seen \(seen.formatted(.relative(presentation: .named)))") }
-        if machine.otherFolder { parts.append("syncs through a different folder") }
+        if let id = machine.deviceID, !machine.isThisMac { parts.append("ID \(id.short)…") }
         return parts.isEmpty ? "No backups in this folder yet" : parts.joined(separator: " · ")
     }
 }
@@ -480,5 +618,141 @@ private struct Tag: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .background(Capsule().fill(color.opacity(0.14)))
+    }
+}
+
+// MARK: - Pairing sheets
+
+/// Another Mac asked to pair: compare the code, then accept or decline.
+struct PairRequestSheet: View {
+    @Environment(AppModel.self) private var model
+    let request: PairRequest
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle().fill(Color.purple.opacity(0.14)).frame(width: 84, height: 84)
+                Image(systemName: "laptopcomputer.and.arrow.down").font(.system(size: 34)).foregroundStyle(.purple)
+            }
+            Text("\(request.name) wants to sync with this Mac").font(.title2.weight(.semibold)).multilineTextAlignment(.center)
+            Text("Check that \(request.name) shows the same code:").foregroundStyle(.secondary)
+            Text(request.code)
+                .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 22).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.6)))
+            Text("ID \(request.deviceID)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("Accepting lets it share its setup with this Mac. You still review every change before it's applied here.")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            HStack(spacing: 12) {
+                Button("Decline") { model.sync.answer(false) }
+                    .keyboardShortcut(.cancelAction)
+                Button("Accept") { model.sync.answer(true) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+            }
+            .controlSize(.large)
+        }
+        .padding(28)
+        .frame(width: 440)
+    }
+}
+
+/// This Mac asked another to pair: show the code while it decides.
+struct PairingSheet: View {
+    @Environment(AppModel.self) private var model
+    let pairing: SyncFlow.Pairing
+
+    var body: some View {
+        VStack(spacing: 16) {
+            switch pairing.stage {
+            case .connecting:
+                ProgressView().controlSize(.large)
+                Text("Connecting to \(pairing.peer)…").font(.title3.weight(.semibold))
+            case .waiting(let code):
+                Text("Pairing with \(pairing.peer)").font(.title2.weight(.semibold))
+                Text("Check that \(pairing.peer) shows this code, then accept there:").foregroundStyle(.secondary)
+                Text(code)
+                    .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                    .padding(.horizontal, 22).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.6)))
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Waiting for \(pairing.peer)…").foregroundStyle(.secondary)
+                }
+                Text("No request on \(pairing.peer)? Pair by ID instead.").font(.caption).foregroundStyle(.secondary)
+            case .done:
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 54)).foregroundStyle(.green)
+                    .symbolEffect(.bounce, value: true)
+                Text("Paired with \(pairing.peer)").font(.title2.weight(.semibold))
+                Text("Changes from \(pairing.peer) will show on the Sync page for you to review.")
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+            case .failed(let why):
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 44)).foregroundStyle(.orange)
+                Text("Couldn't pair with \(pairing.peer)").font(.title3.weight(.semibold))
+                Text(why).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            HStack(spacing: 12) {
+                switch pairing.stage {
+                case .failed, .waiting:
+                    Button("Pair by ID…") { model.sync.pairing = nil; model.sync.showingAddDevice = true }
+                default: EmptyView()
+                }
+                Button(pairing.stage == .done ? "Done" : "Close") { model.sync.pairing = nil }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .controlSize(.large)
+        }
+        .padding(28)
+        .frame(width: 420)
+    }
+}
+
+/// Pair by typing the other Mac's ID (and showing this one's to type there).
+struct AddDeviceSheet: View {
+    @Environment(AppModel.self) private var model
+    private let idText = State(initialValue: "")
+    private let name = State(initialValue: "")
+    private let problem = State<String?>(initialValue: nil)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add a Mac by ID").font(.title2.weight(.semibold))
+            Text("On the other Mac, open Cairn > Sync and copy its ID. Then add this Mac's ID there too: both Macs need each other's.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("This Mac's ID").foregroundStyle(.secondary)
+                Text(model.sync.deviceID?.description ?? "…").font(.body.monospaced()).textSelection(.enabled)
+                Spacer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.sync.deviceID?.description ?? "", forType: .string)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+            TextField("Other Mac's ID (ABCDE-FGHIJ-KLMNO-PQRST)", text: idText.projectedValue)
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospaced())
+            TextField("Name (optional, e.g. Studio iMac)", text: name.projectedValue)
+                .textFieldStyle(.roundedBorder)
+            if let p = problem.wrappedValue {
+                Label(p, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { model.sync.showingAddDevice = false }.keyboardShortcut(.cancelAction)
+                Button("Add Mac") {
+                    if let p = model.sync.add(idText.wrappedValue, name: name.wrappedValue) { problem.wrappedValue = p }
+                    else { model.sync.showingAddDevice = false }
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .disabled(idText.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
     }
 }

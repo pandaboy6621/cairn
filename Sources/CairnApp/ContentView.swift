@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var model = model
@@ -41,6 +42,27 @@ struct ContentView: View {
         }
         .sheet(isPresented: Bindable(model.vault).isPresented) {
             VaultSheet().environment(model)
+        }
+        .background {
+            // Pairing prompts, from any page.
+            Color.clear
+                .sheet(item: Binding(get: { model.sync.pairRequest }, set: { _ in })) { request in
+                    PairRequestSheet(request: request).environment(model)
+                }
+            Color.clear
+                .sheet(isPresented: Binding(get: { model.sync.pairing != nil }, set: { if !$0 { model.sync.pairing = nil } })) {
+                    if let pairing = model.sync.pairing { PairingSheet(pairing: pairing).environment(model) }
+                }
+            Color.clear
+                .sheet(isPresented: Binding(get: { model.sync.showingAddDevice }, set: { model.sync.showingAddDevice = $0 })) {
+                    AddDeviceSheet().environment(model)
+                }
+        }
+        .onAppear {
+            model.sync.showWindow = { [openWindow] in
+                if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) { openWindow(id: "main") }
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
         .alert("Something went wrong", isPresented: .constant(model.errorMessage != nil)) {
             Button("OK") { model.errorMessage = nil }

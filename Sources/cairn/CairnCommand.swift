@@ -3,7 +3,7 @@ import CairnCore
 import Foundation
 
 @main
-struct CairnCommand: ParsableCommand {
+struct CairnCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
@@ -11,11 +11,11 @@ struct CairnCommand: ParsableCommand {
         subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self, VaultCommand.self, SyncCommand.self]
     )
 
-    static func main() {
+    static func main() async {
         // Line-buffer stdout even into a pipe or log file, so progress shows up as
         // it happens (a long brew install otherwise looks like a hang).
         setvbuf(stdout, nil, _IOLBF, 0)
-        main(nil)
+        await main(nil)
     }
 }
 
@@ -248,10 +248,12 @@ struct Backup: ParsableCommand {
 
         // With sync on, share this Mac's changes too (writes only this Mac's
         // sync files; changes from other Macs wait for `cairn sync now --apply`).
-        let store = SyncStore(root: folder)
+        let local = SyncLocal()
+        let mode = local.mode()
+        let store = SyncStore(root: local.syncRoot(mode: mode, backupFolder: folder))
         let device = report.manifest.device
-        if store.config(device: device.name).enabled, backup.folderIsAvailable() {
-            let run = SyncRun(store: store, device: device)
+        if store.config(device: device.name).enabled, mode == .direct || backup.folderIsAvailable() {
+            let run = SyncRun(store: store, device: device, identity: try? local.identity(), trusted: local.trust().ids)
             let plan = run.plan(local: report.manifest, secrets: VaultStore.readSecrets(in: folder, device: device.name))
             do {
                 try run.publish(plan)

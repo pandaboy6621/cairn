@@ -13,6 +13,7 @@ import CairnCore
 /// `CAIRN_SNAPSHOT_VAULT=1` opens the vault password sheet after launch.
 /// `CAIRN_SNAPSHOT_RESTORE=<unlock|wrong|unlocked|skip|running|finished>` shows that
 /// restore sheet state with made-up data (use with `CAIRN_SNAPSHOT_PREVIEW`).
+/// `CAIRN_SNAPSHOT_SYNC=<request|pairing|paired|add>` shows a pairing sheet with made-up data.
 /// `CAIRN_SNAPSHOT_SCALE=2` renders at 2x even on a non-Retina display.
 enum DebugSnapshot {
     @MainActor
@@ -51,6 +52,9 @@ enum DebugSnapshot {
                 _ = rep
                 try? scaled.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
             }
+        }
+        if let state = env["CAIRN_SNAPSHOT_SYNC"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) { AppModel.current?.sync.debugShow(state) }
         }
         if let state = env["CAIRN_SNAPSHOT_RESTORE"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) { AppModel.current?.restore.debugShow(state) }
