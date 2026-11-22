@@ -7,12 +7,17 @@ final class FakeDefaultApps: DefaultAppsSystem, @unchecked Sendable {
     var installed: Set<String>
     var refuse: Set<String> = []
     var set: [DefaultAppHandler] = []
+    var defaults: [String: String] = [:]   // target → bundle id
+    var ignore: Set<String> = []           // "succeeds" but doesn't stick (unconfirmed browser change)
     init(installed: Set<String>) { self.installed = installed }
     func isInstalled(bundleID: String) -> Bool { installed.contains(bundleID) }
     func set(_ handler: DefaultAppHandler) -> Bool {
         if refuse.contains(handler.target) { return false }
-        set.append(handler); return true
+        set.append(handler)
+        if !ignore.contains(handler.target) { defaults[handler.target] = handler.bundleID }
+        return true
     }
+    func current(for handler: DefaultAppHandler) -> String? { defaults[handler.target] }
 }
 
 /// Fake displays with desktop pictures.
@@ -72,21 +77,19 @@ private func m(_ settings: [SettingItem] = [], wallpaper: WallpaperLayout? = nil
 
     @Test func setsInstalledAppsAndReportsTheRest() {
         let apps = FakeDefaultApps(installed: ["com.example.mail", "com.example.browser"])
-        apps.refuse = ["https"]
+        apps.ignore = ["https"]                              // dialog not confirmed
+        apps.defaults["public.html"] = "com.example.browser" // already the default
         let want = DefaultAppHandler.parse(handlers([("scheme", "mailto", "com.example.mail"), ("scheme", "https", "com.example.browser"),
-                                                     ("type", "public.mpeg-4", "org.videolan.vlc")]))
+                                                     ("type", "public.mpeg-4", "org.videolan.vlc"), ("type", "public.html", "com.example.browser")]))
         let report = MacRestorer(runner: FixtureRunner(policy: .restore), defaultApps: apps)
             .apply(RestorePlan(steps: [.defaultApps(want)]))
-        #expect(apps.set.map(\.target) == ["mailto"])
+        #expect(apps.set.map(\.target) == ["mailto", "https"])  // public.html needed no change
         guard case .partial(let note) = report.entries[0].outcome else { Issue.record("expected partial"); return }
-        #expect(note.contains("1 apps not installed") && note.contains("refused 1"))
-        #expect(report.entries[0].written == .defaultApps([want[0]]))
-        #expect(report.manualSteps.map(\.category) == ["default apps"])
-
-        // Verification reads them back from a rescan.
-        let after = m([lsSetting(handlers([("scheme", "mailto", "com.example.mail")]))])
-        #expect(RestoreVerification.check(report, after: after).first?.status == .verified)
-        #expect(RestoreVerification.check(report, after: m()).first?.status == .mismatch)
+        #expect(note.contains("1 apps not installed") && note.contains("1 not taken"))
+        #expect(report.entries[0].written == .defaultApps([want[0], want[3]]))
+        #expect(report.manualSteps.first?.text.contains("https") == true)
+        // Confirmed by reading back from LaunchServices, not from a rescan.
+        #expect(RestoreVerification.check(report, after: m()).first?.status == .verified)
     }
 }
 
@@ -174,6 +177,15 @@ private func m(_ settings: [SettingItem] = [], wallpaper: WallpaperLayout? = nil
     @Test func previewCountsLogoutSettings() {
         let plan = RestorePlan.make(backup: m([dark, repeatRate]), current: m())
         #expect(MacRestorer.logoutSettings(in: plan) == ["appearance.style", "macos.NSGlobalDomain.KeyRepeat"])
+    }
+
+    @Test func lightModeVerifiesWhenMacOSRemovesTheKey() {
+        let light = global("AppleInterfaceStyle", .string("Light"), abstract: "appearance.style")
+        let report = RestoreReport(entries: [.init(step: .setting(light, current: .string("Dark")), outcome: .applied,
+                                                   written: .setting(.string("Light")))])
+        #expect(RestoreVerification.check(report, after: m()).first?.status == .verified)
+        let darkReport = RestoreReport(entries: [.init(step: .setting(dark, current: nil), outcome: .applied, written: .setting(.string("Dark")))])
+        #expect(RestoreVerification.check(darkReport, after: m()).first?.status == .mismatch)
     }
 
     @Test func floatsThatOnlyLostYAMLPrecisionMatch() {

@@ -8,6 +8,9 @@ public protocol DefaultAppsSystem: Sendable {
     func isInstalled(bundleID: String) -> Bool
     /// Returns false if LaunchServices refused.
     func set(_ handler: DefaultAppHandler) -> Bool
+    /// The app LaunchServices uses now (lowercased bundle id). The `LSHandlers`
+    /// list can't answer this: it omits choices that match the system default.
+    func current(for handler: DefaultAppHandler) -> String?
 }
 
 public struct LaunchServicesDefaultApps: DefaultAppsSystem {
@@ -19,6 +22,26 @@ public struct LaunchServicesDefaultApps: DefaultAppsSystem {
         return !urls.isEmpty
     }
 
+    public func current(for handler: DefaultAppHandler) -> String? {
+        let found: CFString?
+        switch handler.kind {
+        case .urlScheme:
+            found = LSCopyDefaultHandlerForURLScheme(handler.target as CFString)?.takeRetainedValue()
+        case .contentType:
+            found = LSCopyDefaultRoleHandlerForContentType(handler.target as CFString, Self.role(handler.role))?.takeRetainedValue()
+        }
+        return (found as String?)?.lowercased()
+    }
+
+    static func role(_ name: String) -> LSRolesMask {
+        switch name {
+        case "viewer": return .viewer
+        case "editor": return .editor
+        case "shell": return .shell
+        default: return .all
+        }
+    }
+
     public func set(_ handler: DefaultAppHandler) -> Bool {
         let bundle = handler.bundleID as CFString
         switch handler.kind {
@@ -26,13 +49,7 @@ public struct LaunchServicesDefaultApps: DefaultAppsSystem {
             // For http/https macOS asks the user to confirm the new browser.
             return Self.setScheme(handler.target as CFString, bundle) == noErr
         case .contentType:
-            let role: LSRolesMask = switch handler.role {
-            case "viewer": .viewer
-            case "editor": .editor
-            case "shell": .shell
-            default: .all
-            }
-            return Self.setContentType(handler.target as CFString, role, bundle) == noErr
+            return Self.setContentType(handler.target as CFString, Self.role(handler.role), bundle) == noErr
         }
     }
 

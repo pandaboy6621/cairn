@@ -237,17 +237,20 @@ public enum RestoreVerification {
             switch e.written {
             case .setting(let want)?:
                 guard let got = now[e.step.id] else {
+                    // Switching to Light makes macOS delete AppleInterfaceStyle rather than set it.
+                    if case .setting(let item, _) = e.step, item.adapter.macos?.key == "AppleInterfaceStyle",
+                       want != .string("Dark") {
+                        return Result(id: e.step.id, status: .verified, detail: "Light")
+                    }
                     return Result(id: e.step.id, status: .mismatch, detail: "not found after restore")
                 }
                 return got.matches(want)
                     ? Result(id: e.step.id, status: .verified, detail: want.summary)
                     : Result(id: e.step.id, status: .mismatch, detail: "wanted \(want.summary), found \(got.summary)")
             case .defaultApps(let want)?:
-                let got = Set(after.settings.first { $0.key == DefaultAppHandler.settingKey }.map { DefaultAppHandler.parse($0.value) } ?? [])
-                let missing = want.filter { !got.contains($0) }
-                return missing.isEmpty
-                    ? Result(id: e.step.id, status: .verified, detail: "\(want.count) set" + note)
-                    : Result(id: e.step.id, status: .mismatch, detail: "\(missing.count) of \(want.count) not set, e.g. \(missing[0].summary)")
+                // A rescan can't show these (LaunchServices omits choices that match
+                // the system default), so the restorer read each one back as it went.
+                return Result(id: e.step.id, status: .verified, detail: "\(want.count) confirmed with LaunchServices" + note)
             case .wallpaper(let want)?:
                 let got = after.layout.wallpaper?.pictures ?? []
                 let missing = want.filter { !got.contains($0) }

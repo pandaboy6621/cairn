@@ -112,11 +112,13 @@ public struct MacRestorer: Sendable {
                 var applied: [DefaultAppHandler] = [], missingApps = Set<String>(), refused: [DefaultAppHandler] = []
                 for h in handlers {
                     guard defaultApps.isInstalled(bundleID: h.bundleID) else { missingApps.insert(h.bundleID); continue }
-                    if defaultApps.set(h) { applied.append(h) } else { refused.append(h) }
+                    if defaultApps.current(for: h) == h.bundleID { applied.append(h); continue } // already so
+                    // Read back: a browser change waits for the user to confirm macOS's dialog.
+                    if defaultApps.set(h), defaultApps.current(for: h) == h.bundleID { applied.append(h) } else { refused.append(h) }
                 }
                 var notes: [String] = []
                 if !missingApps.isEmpty { notes.append("\(handlers.count - applied.count - refused.count) left for \(missingApps.count) apps not installed") }
-                if !refused.isEmpty { notes.append("LaunchServices refused \(refused.count)") }
+                if !refused.isEmpty { notes.append("\(refused.count) not taken (refused, or waiting for you to confirm)") }
                 let outcome: RestoreReport.Outcome = applied.isEmpty ? .skipped(notes.joined(separator: "; "))
                     : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
                 report.entries.append(.init(step: step, outcome: outcome, written: applied.isEmpty ? nil : .defaultApps(applied)))
