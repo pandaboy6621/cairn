@@ -134,7 +134,7 @@ public struct SnapshotStore: Sendable {
     /// Writes `manifest` as a new snapshot unless it matches the latest one for its
     /// device (`device` and `created` don't count as changes). `force` writes anyway.
     public func save(_ manifest: Manifest, excluded: [String], trigger: SnapshotInfo.Trigger,
-                     at date: Date = Date(), force: Bool = false) throws -> SaveResult {
+                     at date: Date = Date(), force: Bool = false, secrets: SecretsFile = SecretsFile()) throws -> SaveResult {
         // Compare what will be on disk: a YAML round trip can change a value's
         // type (1.0 → 1) without changing the setup.
         let manifest = try ManifestCoder.decode(ManifestCoder.encode(manifest))
@@ -143,8 +143,11 @@ public struct SnapshotStore: Sendable {
         var summary = "first snapshot"
         if let previous {
             let diff = ManifestDiff.between(try self.manifest(of: previous), manifest)
-            if diff.isEmpty && !force { return .unchanged(previous) }
-            summary = diff.isEmpty ? "no changes" : Self.summary(diff)
+            let changedSecrets = Self.changedSecrets(self.secrets(of: previous), secrets)
+            if diff.isEmpty && changedSecrets == 0 && !force { return .unchanged(previous) }
+            var parts = diff.isEmpty ? [] : [Self.summary(diff)]
+            if changedSecrets > 0 { parts.append("~\(changedSecrets) secret\(changedSecrets == 1 ? "" : "s")") }
+            summary = parts.isEmpty ? "no changes" : parts.joined(separator: " ")
         }
 
         let fm = FileManager.default
@@ -167,6 +170,9 @@ public struct SnapshotStore: Sendable {
         do {
             try ManifestCoder.write(manifest, to: temp.appendingPathComponent(Self.manifestName))
             try Self.encode(info).write(to: temp.appendingPathComponent(Self.infoName), atomically: true, encoding: .utf8)
+            if !secrets.secrets.isEmpty {
+                try secrets.write(to: temp.appendingPathComponent(VaultStore.secretsFileName))
+            }
             let final = dir.appendingPathComponent(id, isDirectory: true)
             try fm.moveItem(at: temp, to: final)
             return .saved(Snapshot(info: info, url: final))
@@ -174,6 +180,16 @@ public struct SnapshotStore: Sendable {
             try? fm.removeItem(at: temp)
             throw error
         }
+    }
+
+    /// The encrypted secrets saved with a snapshot (empty if none).
+    public func secrets(of snapshot: Snapshot) -> SecretsFile {
+        (try? SecretsFile.read(from: snapshot.url.appendingPathComponent(VaultStore.secretsFileName))) ?? SecretsFile()
+    }
+
+    /// How many refs differ (added, removed, or re-encrypted with a new value).
+    static func changedSecrets(_ a: SecretsFile, _ b: SecretsFile) -> Int {
+        Set(a.secrets.keys).union(b.secrets.keys).filter { a.secrets[$0] != b.secrets[$0] }.count
     }
 
     /// Deletes a snapshot (used to empty the offline queue once it's copied).

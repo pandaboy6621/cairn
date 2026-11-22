@@ -15,6 +15,11 @@ final class VaultFlow {
 
     var step: Step?
     var key: VaultKey?
+    /// Refs with a secret saved in this device's secrets file.
+    var captured: Set<String> = []
+    /// Refs to capture once the user unlocks.
+    private var pendingCapture: [String]?
+    var isCapturing = false
     var password = ""
     var confirm = ""
     var useRecoveryKey = false
@@ -54,12 +59,67 @@ final class VaultFlow {
         }
     }
 
-    func lock(_ model: AppModel) {
+    func folderChanged(_ model: AppModel) {
         key = nil
-        model.checklist?.setSensitiveUnlocked(false)
+        model.checklist?.setSensitiveUnlocked(exists(in: model.backupFolder))
+        if let device = model.checklist?.source.device.name {
+            reloadCaptured(folder: model.backupFolder, device: device)
+            model.checklist?.checkCaptured(captured)
+        }
+    }
+
+    func reloadCaptured(folder: URL, device: String) {
+        captured = Set(VaultStore.readSecrets(in: folder, device: device).secrets.keys)
+    }
+
+    /// Reads the passwords for these Wi-Fi refs (macOS asks for approval for
+    /// each one) and saves them encrypted. Unlocks first if needed.
+    func captureWiFi(_ refs: [String], model: AppModel) {
+        guard !refs.isEmpty, !isCapturing else { return }
+        guard let key else {
+            pendingCapture = refs
+            begin(model)
+            return
+        }
+        guard let device = model.checklist?.source.device.name else { return }
+        let folder = model.backupFolder
+        isCapturing = true
+        model.statusMessage = "Saving \(refs.count) Wi-Fi password\(refs.count == 1 ? "" : "s"). macOS will ask you to approve each one."
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { () throws -> SecretCapture.Report in
+                    let runner = ProcessRunner(policy: .wifiPasswords)
+                    let existing = VaultStore.readSecrets(in: folder, device: device)
+                    let (file, report) = SecretCapture.capture(refs, into: existing, key: key) { ref in
+                        guard let ssid = WiFiPasswords.ssid(ref: ref) else { return nil }
+                        return try WiFiPasswords.read(ssid: ssid, using: runner)
+                    }
+                    try VaultStore.writeSecrets(file, in: folder, device: device)
+                    return report
+                }
+            }.value
+            isCapturing = false
+            switch result {
+            case .failure(let e):
+                model.errorMessage = "Couldn't save Wi-Fi passwords: \(e.localizedDescription)"
+            case .success(let report):
+                reloadCaptured(folder: folder, device: device)
+                model.checklist?.checkCaptured(captured)
+                model.statusMessage = Self.describe(report)
+            }
+        }
+    }
+
+    static func describe(_ r: SecretCapture.Report) -> String {
+        var parts = ["Saved \(r.saved.count) Wi-Fi password\(r.saved.count == 1 ? "" : "s")"]
+        if !r.unchanged.isEmpty { parts.append("\(r.unchanged.count) unchanged") }
+        if !r.missing.isEmpty { parts.append("\(r.missing.count) with no password in the Keychain") }
+        if !r.failed.isEmpty { parts.append("\(r.failed.count) failed") }
+        return parts.joined(separator: ", ") + (r.stoppedEarly ? ". Stopped when you cancelled a prompt." : ".")
     }
 
     func close() {
+        if case .recovery = step {} else { pendingCapture = nil }
         step = nil
         clearFields()
     }
@@ -81,8 +141,16 @@ final class VaultFlow {
             case .success(let (key, recovery)):
                 self.key = key
                 model.checklist?.setSensitiveUnlocked(true)
+                if let device = model.checklist?.source.device.name {
+                    reloadCaptured(folder: model.backupFolder, device: device)
+                    model.checklist?.checkCaptured(captured)
+                }
                 clearFields()
                 step = recovery.map { .recovery($0) }
+                if let refs = pendingCapture {
+                    pendingCapture = nil
+                    captureWiFi(refs, model: model)
+                }
             case .failure(let e):
                 error = e.localizedDescription
                 password = ""

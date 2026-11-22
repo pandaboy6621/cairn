@@ -60,7 +60,7 @@ final class AppModel {
             defaults.set(backupFolder.path, forKey: "backupFolder")
             refreshFoundBackups()
             // A different folder has a different vault (or none).
-            vault.lock(self)
+            vault.folderChanged(self)
             // Keep automatic backups going to the same folder.
             if autoBackup != nil { setAutoBackup(true) }
         }
@@ -162,7 +162,9 @@ final class AppModel {
                 return (report, BackupRun(folder: folder).previousExclusions(device: report.manifest.device.name))
             }.value
             var list = Checklist(manifest: report.manifest)
-            list.setSensitiveUnlocked(vault.key != nil)
+            vault.reloadCaptured(folder: folder, device: report.manifest.device.name)
+            list.setSensitiveUnlocked(vault.exists(in: folder))
+            list.checkCaptured(vault.captured)
             for id in excluded { list.setChecked(id, false) }
             previousExclusions = excluded
             checklist = list
@@ -234,7 +236,11 @@ final class AppModel {
     func backUp(into folder: URL) {
         guard let checklist else { return }
         let ids = Set(checklist.items.map(\.id))
-        let unchecked = checklist.items.filter { !$0.isChecked && !checklist.isLocked($0.category) }.map(\.id)
+        // Sensitive items without a saved secret aren't a choice the user made yet.
+        let captured = vault.captured
+        let unchecked = checklist.items.filter {
+            !$0.isChecked && ($0.category != .sensitive || captured.contains(Checklist.ref(sensitiveID: $0.id)))
+        }.map(\.id)
         let excluded = Array(Set(unchecked).union(previousExclusions.filter { !ids.contains($0) }))
         let manifest = checklist.exportManifest()
         let count = checklist.checkedCount

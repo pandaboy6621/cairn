@@ -179,6 +179,7 @@ import Testing
         #expect(Set(m.settings.map(\.key)).count == m.settings.count)
         #expect(m.settings.allSatisfy { $0.platforms == ["macos"] })
         #expect(report.warnings.count == 1)
+        #expect(m.sensitive.map(\.ref) == ["vault://wifi/Example Home", "vault://wifi/Example Office"])
         #expect(m.shares.map(\.url) == ["afp://oldmac.example/Public", "https://dav.example/remote.php/webdav",
                                         "nfs://files.example/export/home", "smb://files.example/Team%20Share",
                                         "smb://nas.example/Media"])

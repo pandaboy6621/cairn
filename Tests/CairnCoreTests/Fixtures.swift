@@ -25,6 +25,9 @@ enum Fixtures {
         let r = FixtureRunner()
         r.stub(Command("scutil", ["--get", "LocalHostName"]), stdout: "Test-Mac\n")
         r.stub(Command("sw_vers", ["-productVersion"]), stdout: "14.5\n")
+        r.stub(Command("networksetup", ["-listallhardwareports"]), stdout: "Hardware Port: Wi-Fi\nDevice: en0\n")
+        r.stub(Command("networksetup", ["-listpreferredwirelessnetworks", "en0"]),
+               stdout: "Preferred networks on en0:\n\tExample Home\n\tExample Office\n")
         r.stub(Command("brew", ["leaves", "--installed-on-request"]), stdout: text("brew-leaves.txt"))
         r.stub(Command("brew", ["list", "--cask", "-1", "--full-name"]), stdout: text("brew-casks.txt"))
         r.stub(Command("brew", ["tap"]), stdout: text("brew-taps.txt"))

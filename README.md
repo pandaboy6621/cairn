@@ -47,6 +47,7 @@ restore onto Windows and Linux.
 | 🧩 **App preferences** | Allowlisted app settings, with caches, window state, IDs, and anything that looks like a token filtered out |
 | 🖥️ **Displays** | Monitor arrangement, main display, resolution, refresh rate, and mirroring, matched per monitor |
 | 🌐 **Network shares** | SMB, AFP, NFS, and WebDAV shares plus Finder's Connect to Server favorites (usernames only, never passwords) |
+| 🔐 **Wi-Fi** | Saved networks, with the passwords you choose encrypted in your vault |
 
 ### Store
 
@@ -81,7 +82,7 @@ restore onto Windows and Linux.
 | 1 | Manifest format, `cairn scan`, `cairn diff` | ✅ Done |
 | 2 | SwiftUI checklist app, export manifests | ✅ Done |
 | 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
-| 4 | 🔐 Encrypted vault: Wi-Fi networks, VPNs, SSH keys, API tokens, share passwords | 🚧 In progress (vault and password done, Wi-Fi next) |
+| 4 | 🔐 Encrypted vault: Wi-Fi networks, VPNs, SSH keys, API tokens, share passwords | 🚧 In progress (vault and Wi-Fi backup done) |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (settings, Dock, displays work) |
 | 6 | 🔄 Sync between your Macs, auto-discovered on your network | 📅 Planned |
 | 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
@@ -169,6 +170,8 @@ cairn auto-backup status
 cairn vault init            # shows the one-time recovery key
 cairn vault check
 cairn vault change-password --recovery
+cairn vault wifi                         # saved networks and which passwords are saved
+cairn vault wifi --network "Home"       # save one password (macOS asks to approve)
 ```
 
 While developing, use `swift run cairn …` and `swift run CairnApp`.
@@ -186,6 +189,7 @@ While developing, use `swift run cairn …` and `swift run CairnApp`.
 | `defaults` | `defaults export <domain> -` for an allowlist of Apple and common third-party apps |
 | `displays` | CoreGraphics display list and modes; serial numbers are stored only as a short hash |
 | `shares`   | `mount` (network filesystems) and Finder's Connect to Server favorites |
+| `wifi`     | `networksetup -listpreferredwirelessnetworks` on the detected Wi-Fi port (names only) |
 
 Every command goes through a read-only allowlist (`CommandPolicy.readOnly`), so a scanner can't run
 `defaults write`, `brew install`, and so on.

@@ -270,6 +270,12 @@ private struct CategoryDetail: View {
             if locked {
                 LockedNotice()
                 Spacer()
+            } else if category == .sensitive && !groups.isEmpty {
+                SecretsBar(checklist: checklist)
+                Divider()
+            }
+            if locked {
+                EmptyView()
             } else if groups.isEmpty {
                 emptyState
             } else {
@@ -367,6 +373,41 @@ private struct CategoryHeader: View {
     }
 }
 
+/// Sensitive items only reach a backup once their secret is saved, encrypted.
+private struct SecretsBar: View {
+    @Environment(AppModel.self) private var model
+    let checklist: Checklist
+
+    var body: some View {
+        let items = checklist.items(in: .sensitive)
+        let captured = model.vault.captured
+        let saved = items.filter { captured.contains(Checklist.ref(sensitiveID: $0.id)) }.count
+        let toSave = items.filter { $0.isChecked && !captured.contains(Checklist.ref(sensitiveID: $0.id)) }
+            .map { Checklist.ref(sensitiveID: $0.id) }
+        HStack(spacing: 12) {
+            Image(systemName: model.vault.key == nil ? "lock.fill" : "lock.open.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(saved) of \(items.count) passwords saved").font(.callout.weight(.medium))
+                Text("Check the networks you want, then save their passwords. macOS asks you to approve each one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if model.vault.isCapturing {
+                ProgressView().controlSize(.small)
+            }
+            Button(toSave.isEmpty ? "Save Passwords…" : "Save \(toSave.count) Password\(toSave.count == 1 ? "" : "s")…") {
+                model.vault.captureWiFi(toSave, model: model)
+            }
+            .disabled(toSave.isEmpty || model.vault.isCapturing)
+            .help(toSave.isEmpty ? "Check networks without a saved password first" : "Reads each password from the Keychain and encrypts it")
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+    }
+}
+
 private struct LockedNotice: View {
     @Environment(AppModel.self) private var model
 
@@ -440,7 +481,11 @@ private struct ItemRow: View {
 
             Spacer(minLength: 12)
 
-            if !item.detail.isEmpty {
+            if category == .sensitive, model.vault.captured.contains(Checklist.ref(sensitiveID: item.id)) {
+                Label("Password saved", systemImage: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else if !item.detail.isEmpty {
                 Text(item.detail)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
@@ -482,6 +527,7 @@ private struct ItemIcon: View {
         case "Formulae": return "terminal"
         case "Casks": return "macwindow"
         case "Taps": return "spigot"
+        case "Wi-Fi networks": return "wifi"
         default: break
         }
         if item.id == "layout:dock" { return "dock.rectangle" }

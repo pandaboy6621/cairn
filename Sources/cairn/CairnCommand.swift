@@ -198,7 +198,9 @@ struct Backup: ParsableCommand {
         let backup = BackupRun(folder: folder)
         let report = SetupScanner().scan()
         let previous = backup.previousExclusions(device: report.manifest.device.name)
-        let (manifest, excluded) = BackupRun.select(report.manifest, excluding: previous)
+        let captured = Set(VaultStore.readSecrets(in: folder, device: report.manifest.device.name).secrets.keys)
+        let (manifest, excluded) = BackupRun.select(report.manifest, excluding: previous,
+                                                    hasVault: VaultStore.exists(in: folder), captured: captured)
         let result = try backup.run(manifest, excluded: excluded, trigger: auto ? .auto : .manual, force: force)
 
         let stamp = auto ? "[\(ISO8601DateFormatter().string(from: Date()))] " : ""

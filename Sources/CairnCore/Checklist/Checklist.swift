@@ -133,7 +133,16 @@ public struct Checklist: Sendable {
         category == .sensitive && !sensitiveUnlocked
     }
 
-    /// Unlock once the vault is unlocked; locking again unchecks every sensitive item.
+    /// Checks the sensitive items whose secret has been saved in the vault: saving
+    /// a secret is how the user opts it in.
+    public mutating func checkCaptured(_ refs: Set<String>) {
+        guard sensitiveUnlocked else { return }
+        for i in items.indices where items[i].category == .sensitive && refs.contains(Self.ref(sensitiveID: items[i].id)) {
+            items[i].isChecked = true
+        }
+    }
+
+    /// Unlocked once the backup folder has a vault; locking again unchecks every sensitive item.
     public mutating func setSensitiveUnlocked(_ unlocked: Bool) {
         sensitiveUnlocked = unlocked
         if !unlocked {
@@ -200,6 +209,7 @@ public struct Checklist: Sendable {
     static func id(app a: AppItem) -> String { "app:\(a.id)" }
     static func id(setting s: SettingItem) -> String { "setting:\(s.key)" }
     static func id(sensitive s: SensitiveRef) -> String { "sensitive:\(s.ref)" }
+    public static func ref(sensitiveID id: String) -> String { String(id.dropFirst("sensitive:".count)) }
     static func id(share s: ShareItem) -> String { "share:\(s.url)" }
 
     static func buildItems(_ m: Manifest) -> [ChecklistItem] {
@@ -250,8 +260,10 @@ public struct Checklist: Sendable {
                                      title: s.url, detail: user, isChecked: s.include))
         }
         for s in m.sensitive {
-            out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive, group: s.type,
-                                     title: s.ref, detail: "", isChecked: false))
+            let wifi = WiFiPasswords.ssid(ref: s.ref)
+            out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive,
+                                     group: s.type == WiFiPasswords.type ? "Wi-Fi networks" : s.type,
+                                     title: wifi ?? s.ref, detail: "", isChecked: false))
         }
         return out
     }

@@ -56,10 +56,18 @@ public struct BackupRun: Sendable {
     /// Applies exclusions to a fresh scan. Returns the manifest to save and the
     /// exclusions to record (kept even for items not present now, so they stay
     /// unchecked if they come back).
-    public static func select(_ scan: Manifest, excluding excluded: [String]) -> (manifest: Manifest, excluded: [String]) {
+    /// Sensitive items count only when the folder has a vault, and are selected
+    /// when their secret has been saved (`captured`), unless excluded.
+    public static func select(_ scan: Manifest, excluding excluded: [String], hasVault: Bool = false,
+                              captured: Set<String> = []) -> (manifest: Manifest, excluded: [String]) {
         var checklist = Checklist(manifest: scan)
+        checklist.setSensitiveUnlocked(hasVault)
+        checklist.checkCaptured(captured)
         for id in excluded { checklist.setChecked(id, false) }
-        let unchecked = checklist.items.filter { !$0.isChecked && !checklist.isLocked($0.category) }.map(\.id)
+        // Unsaved secrets aren't "unchecked by the user": leave them out of the record.
+        let unchecked = checklist.items.filter {
+            !$0.isChecked && ($0.category != .sensitive || captured.contains(Checklist.ref(sensitiveID: $0.id)))
+        }.map(\.id)
         return (checklist.exportManifest(), Array(Set(excluded).union(unchecked)).sorted())
     }
 
@@ -73,10 +81,17 @@ public struct BackupRun: Sendable {
             }
         }
         let flushed = try flushQueue()
-        switch try store.save(manifest, excluded: excluded, trigger: trigger, at: date, force: force) {
+        let secrets = Self.secrets(for: manifest, from: VaultStore.readSecrets(in: folder, device: manifest.device.name))
+        switch try store.save(manifest, excluded: excluded, trigger: trigger, at: date, force: force, secrets: secrets) {
         case .saved(let s): return Result(outcome: .saved(s), flushed: flushed)
         case .unchanged(let s): return Result(outcome: .unchanged(s), flushed: flushed)
         }
+    }
+
+    /// The device's saved secrets for the refs this manifest includes.
+    static func secrets(for manifest: Manifest, from all: SecretsFile) -> SecretsFile {
+        let refs = Set(manifest.sensitive.map(\.ref))
+        return SecretsFile(secrets: all.secrets.filter { refs.contains($0.key) })
     }
 
     /// Copies queued snapshots into the backup folder, oldest first, skipping any
@@ -86,7 +101,8 @@ public struct BackupRun: Sendable {
         for queued in queueStore.list().reversed() {
             let manifest = try queueStore.manifest(of: queued)
             if case .saved(let s) = try store.save(manifest, excluded: queued.info.excluded,
-                                                    trigger: queued.info.trigger, at: queued.info.created) {
+                                                    trigger: queued.info.trigger, at: queued.info.created,
+                                                    secrets: queueStore.secrets(of: queued)) {
                 copied.append(s)
             }
             try queueStore.remove(queued)

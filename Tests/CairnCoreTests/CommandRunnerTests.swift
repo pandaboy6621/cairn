@@ -29,7 +29,7 @@ import Testing
         Command("defaults", ["import", "com.apple.dock", "-"]),
         Command("defaults", ["export", "com.apple.dock", "/tmp/out.plist"]),
         Command("killall", ["Dock"]),
-        Command("networksetup", ["-listpreferredwirelessnetworks", "en0"]),
+        Command("networksetup", ["-setairportnetwork", "en0", "Example"]),
         Command("scutil", ["--set", "ComputerName", "x"]),
         Command("sh", ["-c", "brew list"]),
     ])

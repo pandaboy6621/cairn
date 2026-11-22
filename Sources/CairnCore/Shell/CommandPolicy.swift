@@ -36,6 +36,10 @@ public struct CommandPolicy: Sendable {
         case "mount":
             // With no arguments, `mount` only lists what's mounted.
             return args.isEmpty
+        case "networksetup":
+            // Listing ports and saved Wi-Fi network names; never passwords.
+            return args == ["-listallhardwareports"]
+                || (args.count == 2 && args[0] == "-listpreferredwirelessnetworks")
         case "plutil":
             // Converting Finder's shared file lists to stdout; never in place.
             return args.count == 5 && args[0...3] == ["-convert", "xml1", "-o", "-"]
@@ -80,6 +84,20 @@ public struct CommandPolicy: Sendable {
             if args.count == 2, args[0] == "bootout", args[1].hasPrefix("gui/"), args[1].hasSuffix("/\(label)") { return true }
         }
         return false
+    }
+
+    /// Everything `readOnly` allows, plus reading one saved Wi-Fi password from
+    /// the Keychain. Only the vault's capture step uses this, and macOS asks the
+    /// user to approve each read.
+    public static let wifiPasswords = CommandPolicy { command in
+        readOnly.allows(command) || isWiFiPasswordRead(command)
+    }
+
+    static func isWiFiPasswordRead(_ command: Command) -> Bool {
+        let a = command.arguments
+        return command.program == "security" && a.count == 6
+            && Array(a[0...4]) == ["find-generic-password", "-D", WiFiPasswords.kind, "-w", "-a"]
+            && !a[5].isEmpty
     }
 
     /// For tests only.

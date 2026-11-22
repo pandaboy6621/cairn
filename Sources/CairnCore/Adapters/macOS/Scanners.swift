@@ -10,6 +10,7 @@ public struct ScanContribution: Sendable {
     public var displays: DisplayLayout?
     public var wallpaper: WallpaperLayout?
     public var shares: [ShareItem] = []
+    public var sensitive: [SensitiveRef] = []
     public var warnings: [String] = []
 
     public init() {}

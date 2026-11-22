@@ -8,7 +8,7 @@ public struct ScanReport: Sendable {
 /// Runs the selected scanners and assembles a manifest. Read-only.
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
-        case brew, mas, dock, displays, defaults, shares
+        case brew, mas, dock, displays, defaults, shares, wifi
 
         /// Human-readable name for progress messages.
         public var title: String {
@@ -19,6 +19,7 @@ public struct SetupScanner: Sendable {
             case .displays: return "displays"
             case .defaults: return "preferences"
             case .shares: return "network shares"
+            case .wifi: return "Wi-Fi networks"
             }
         }
     }
@@ -72,6 +73,7 @@ public struct SetupScanner: Sendable {
                 manifest.apps += found.apps
                 manifest.settings += found.settings
                 manifest.shares += found.shares
+                manifest.sensitive += found.sensitive
                 if let dock = found.dock { manifest.layout.dock = dock }
                 if let displays = found.displays { manifest.layout.displays = displays }
                 if let wallpaper = found.wallpaper { manifest.layout.wallpaper = wallpaper }
@@ -95,6 +97,7 @@ public struct SetupScanner: Sendable {
         case .displays: return DisplayScanner(system: displays)
         case .defaults: return DefaultsScanner(extraDomains: extraDomains, isSandboxed: isSandboxed)
         case .shares: return NetworkSharesScanner()
+        case .wifi: return WiFiScanner()
         }
     }
 
