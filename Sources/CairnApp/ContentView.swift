@@ -33,6 +33,9 @@ struct ContentView: View {
                     .environment(model)
             }
         }
+        .sheet(isPresented: Bindable(model.vault).isPresented) {
+            VaultSheet().environment(model)
+        }
         .alert("Something went wrong", isPresented: .constant(model.errorMessage != nil)) {
             Button("OK") { model.errorMessage = nil }
         } message: {
@@ -354,7 +357,9 @@ private struct CategoryHeader: View {
     }
 
     private func subtitle(_ count: (checked: Int, total: Int)) -> String {
-        if checklist.isLocked(category) { return "Locked until you set a password" }
+        if checklist.isLocked(category) {
+            return model.vault.exists(in: model.backupFolder) ? "Locked. Unlock with your vault password" : "Locked until you set a password"
+        }
         if count.total == 0 && !category.isScanned { return "Not scanned yet" }
         return model.query.isEmpty
             ? "\(count.checked) of \(count.total) selected"
@@ -363,17 +368,21 @@ private struct CategoryHeader: View {
 }
 
 private struct LockedNotice: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
+        let hasVault = model.vault.exists(in: model.backupFolder)
         HStack(alignment: .top, spacing: 14) {
             SymbolTile(symbol: "lock.fill", tint: .orange, size: 36)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Sensitive items are encrypted").font(.headline)
-                Text("Wi-Fi networks, VPN profiles, SSH keys, and API tokens are only ever stored encrypted with your password. Setting a password arrives in Milestone 4.")
+                Text(hasVault
+                     ? "Wi-Fi networks, VPN profiles, SSH keys, and API tokens are encrypted with your vault password. Unlock to choose which ones to back up."
+                     : "Wi-Fi networks, VPN profiles, SSH keys, and API tokens are only ever stored encrypted with your password. Set one to include them in backups.")
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Set Password…") {}
-                    .disabled(true)
+                Button(hasVault ? "Unlock…" : "Set Password…") { model.vault.begin(model) }
                     .padding(.top, 4)
             }
         }

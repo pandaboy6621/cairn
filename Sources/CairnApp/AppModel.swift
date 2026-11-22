@@ -59,6 +59,8 @@ final class AppModel {
         didSet {
             defaults.set(backupFolder.path, forKey: "backupFolder")
             refreshFoundBackups()
+            // A different folder has a different vault (or none).
+            vault.lock(self)
             // Keep automatic backups going to the same folder.
             if autoBackup != nil { setAutoBackup(true) }
         }
@@ -85,6 +87,9 @@ final class AppModel {
     /// Latest restore preview; `showingRestorePreview` drives the sheet.
     var restorePreview: RestorePreview?
     var showingRestorePreview = false
+
+    /// The Sensitive tier's password and unlocked key (memory only).
+    let vault = VaultFlow()
 
     /// The app's single model, for the debug snapshot hook.
     static weak var current: AppModel?
@@ -157,6 +162,7 @@ final class AppModel {
                 return (report, BackupRun(folder: folder).previousExclusions(device: report.manifest.device.name))
             }.value
             var list = Checklist(manifest: report.manifest)
+            list.setSensitiveUnlocked(vault.key != nil)
             for id in excluded { list.setChecked(id, false) }
             previousExclusions = excluded
             checklist = list

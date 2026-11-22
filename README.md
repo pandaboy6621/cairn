@@ -81,7 +81,7 @@ restore onto Windows and Linux.
 | 1 | Manifest format, `cairn scan`, `cairn diff` | ✅ Done |
 | 2 | SwiftUI checklist app, export manifests | ✅ Done |
 | 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
-| 4 | 🔐 Encrypted vault: Wi-Fi networks, VPNs, SSH keys, API tokens, share passwords | 🔜 Next |
+| 4 | 🔐 Encrypted vault: Wi-Fi networks, VPNs, SSH keys, API tokens, share passwords | 🚧 In progress (vault and password done, Wi-Fi next) |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (settings, Dock, displays work) |
 | 6 | 🔄 Sync between your Macs, auto-discovered on your network | 📅 Planned |
 | 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
@@ -104,7 +104,7 @@ or Flatpak. Mac-only settings are kept and marked as Mac-only, never lost.
 
 ### Encryption (milestone 4)
 
-Sensitive items will be encrypted per item with AES-256-GCM, under a vault key wrapped by your password
+Sensitive items are encrypted per item with AES-256-GCM, under a vault key wrapped by your password
 (PBKDF2-SHA256, 600,000+ iterations) and a one-time recovery key. Everything else stays plain YAML so
 you can read and diff it.
 
@@ -164,6 +164,11 @@ cairn displays --from backup.yaml --apply
 # Automatic backups
 cairn auto-backup on --every 60
 cairn auto-backup status
+
+# Encryption vault for Sensitive items (prompts without echo)
+cairn vault init            # shows the one-time recovery key
+cairn vault check
+cairn vault change-password --recovery
 ```
 
 While developing, use `swift run cairn …` and `swift run CairnApp`.

@@ -8,7 +8,7 @@ struct CairnCommand: ParsableCommand {
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
         version: Cairn.version,
-        subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self]
+        subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self, VaultCommand.self]
     )
 }
 

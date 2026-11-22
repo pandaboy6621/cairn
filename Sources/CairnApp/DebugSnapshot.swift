@@ -10,6 +10,7 @@ import CairnCore
 /// `CAIRN_SNAPSHOT_PREVIEW=<manifest.yaml>` opens a restore preview of that file after the scan.
 /// `CAIRN_SNAPSHOT_SELECT=<home | category rawValue>` selects a sidebar item after launch, like a click.
 /// `CAIRN_SNAPSHOT_BACKUP_FOLDER=<dir>` uses that folder for backups instead of the saved setting.
+/// `CAIRN_SNAPSHOT_VAULT=1` opens the vault password sheet after launch.
 /// `CAIRN_SNAPSHOT_SCALE=2` renders at 2x even on a non-Retina display.
 enum DebugSnapshot {
     @MainActor
@@ -21,6 +22,11 @@ enum DebugSnapshot {
             let item: SidebarItem? = raw == "home" ? .home : ChecklistCategory(rawValue: raw).map { .category($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay / 2) {
                 AppModel.current?.selection = item
+            }
+        }
+        if env["CAIRN_SNAPSHOT_VAULT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
+                if let model = AppModel.current { model.vault.begin(model) }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {

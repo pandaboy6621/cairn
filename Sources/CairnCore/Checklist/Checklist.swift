@@ -133,6 +133,14 @@ public struct Checklist: Sendable {
         category == .sensitive && !sensitiveUnlocked
     }
 
+    /// Unlock once the vault is unlocked; locking again unchecks every sensitive item.
+    public mutating func setSensitiveUnlocked(_ unlocked: Bool) {
+        sensitiveUnlocked = unlocked
+        if !unlocked {
+            for i in items.indices where items[i].category == .sensitive { items[i].isChecked = false }
+        }
+    }
+
     // MARK: Changes
 
     public mutating func setChecked(_ id: String, _ checked: Bool) {

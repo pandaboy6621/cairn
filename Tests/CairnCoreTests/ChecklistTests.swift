@@ -113,3 +113,23 @@ import Testing
         #expect(c.items(in: .appStore).first { $0.title == "Xcode" }?.isChecked == false)
     }
 }
+
+@Suite struct SensitiveLockTests {
+    func checklist() -> Checklist {
+        var m = Manifest(device: .init(name: "t", os: "macos", osVersion: "14"), created: Date(timeIntervalSince1970: 0))
+        m.sensitive = [SensitiveRef(type: "wifi", ref: "vault://wifi/Home")]
+        return Checklist(manifest: m)
+    }
+
+    @Test func sensitiveItemsExportOnlyWhileUnlocked() {
+        var c = checklist()
+        c.setChecked("sensitive:vault://wifi/Home", true)
+        #expect(c.exportManifest().sensitive.isEmpty)
+        c.setSensitiveUnlocked(true)
+        c.setChecked("sensitive:vault://wifi/Home", true)
+        #expect(c.exportManifest().sensitive.map(\.ref) == ["vault://wifi/Home"])
+        c.setSensitiveUnlocked(false)
+        #expect(c.exportManifest().sensitive.isEmpty)
+        #expect(c.items(in: .sensitive).allSatisfy { !$0.isChecked })
+    }
+}
