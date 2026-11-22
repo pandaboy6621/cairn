@@ -12,20 +12,25 @@ public struct BackupComparison: Equatable, Sendable {
     public var matchingCount: Int
 
     public init(backup: Manifest, current: Manifest) {
-        diff = ManifestDiff.between(current, backup)
+        // A different checkbox isn't a difference: restore never changes what's
+        // selected for backup, so include-flag changes are dropped.
+        var diff = ManifestDiff.between(current, backup)
+        diff.sections = diff.sections.map { section in
+            var s = section
+            s.changed.removeAll { $0.id == "include" || $0.id.hasSuffix(" include") }
+            return s
+        }.filter { !$0.isEmpty }
+        self.diff = diff
         let included = Self.includedItemCount(backup)
         backupItemCount = included
         let wholeItems: Set<String> = ["layout.dock", "layout.displays", "layout.wallpaper"]
-        // Sensitive items aren't in `included`; they're compared by the restore plan.
+        // Sensitive items aren't in `included`; the restore plan handles them.
         let items = diff.sections.filter { !wholeItems.contains($0.name) && $0.name != "sensitive" }
         let toInstall = items.reduce(0) { $0 + $1.added.count }
-        // A different checkbox isn't a difference: restore never changes what's
-        // selected for backup, so "x include" changes don't count.
-        let toChange = items.reduce(0) { n, section in
-            n + Set(section.changed.filter { !$0.id.hasSuffix(" include") }.map { Self.itemID($0.id) }).count
-        }
-        // The Dock and the display layout each count as one item.
-        let layoutDiffers = diff.sections.filter { wholeItems.contains($0.name) }.count
+        let toChange = items.reduce(0) { $0 + Set($1.changed.map { Self.itemID($0.id) }).count }
+        // The Dock, displays and wallpaper each count as one item, and only when the
+        // backup brings something: entries only on this Mac are left alone.
+        let layoutDiffers = diff.sections.filter { wholeItems.contains($0.name) && !($0.added.isEmpty && $0.changed.isEmpty) }.count
         matchingCount = max(0, included - toInstall - toChange - layoutDiffers)
     }
 

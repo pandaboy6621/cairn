@@ -33,6 +33,17 @@ import Testing
         #expect(c.matchFraction == 1)
     }
 
+    @Test func layoutOnlyOnThisMacDoesntCount() {
+        var backup = Samples.manifest
+        backup.layout.wallpaper = nil      // backup has no wallpaper; this Mac does
+        var current = Samples.manifest
+        current.layout.wallpaper = WallpaperLayout(pictures: [.init(display: "builtin", path: "/tmp/a.heic")])
+        current.layout.dock?.apps.append("/Applications/Extra.app") // extra Dock tile here
+        let c = BackupComparison(backup: backup, current: current)
+        #expect(c.itemsToRestore == 0)
+        #expect(!c.diff.isEmpty) // still listed as "only on this Mac"
+    }
+
     @Test func itemsOnlyOnThisMacDontCount() {
         var current = Samples.manifest
         current.packages.append(PackageItem(id: "extra", kind: .formula, resolvers: ["brew": "extra"]))
