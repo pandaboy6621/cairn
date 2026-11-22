@@ -8,7 +8,7 @@ public struct ScanReport: Sendable {
 /// Runs the selected scanners and assembles a manifest. Read-only.
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
-        case brew, mas, dock, displays, defaults, shares, wifi
+        case brew, mas, dock, displays, defaults, shares, wifi, ssh
 
         /// Human-readable name for progress messages.
         public var title: String {
@@ -20,6 +20,7 @@ public struct SetupScanner: Sendable {
             case .defaults: return "preferences"
             case .shares: return "network shares"
             case .wifi: return "Wi-Fi networks"
+            case .ssh: return "SSH keys"
             }
         }
     }
@@ -30,10 +31,14 @@ public struct SetupScanner: Sendable {
     public var now: @Sendable () -> Date
     /// Which preference domains belong to sandboxed apps (skipped). Injected for tests.
     public var isSandboxed: @Sendable (String) -> Bool
+    /// Home folder for `~/.ssh`. Injected for tests.
+    public var home: String
 
     public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = CoreGraphicsDisplays(),
                 now: @escaping @Sendable () -> Date = { Date() },
-                isSandboxed: @escaping @Sendable (String) -> Bool = DefaultsScanner.hasContainer) {
+                isSandboxed: @escaping @Sendable (String) -> Bool = DefaultsScanner.hasContainer,
+                home: String = NSHomeDirectory()) {
+        self.home = home
         self.runner = runner
         self.extraDomains = extraDomains
         self.displays = displays
@@ -98,6 +103,7 @@ public struct SetupScanner: Sendable {
         case .defaults: return DefaultsScanner(extraDomains: extraDomains, isSandboxed: isSandboxed)
         case .shares: return NetworkSharesScanner()
         case .wifi: return WiFiScanner()
+        case .ssh: return SSHKeyScanner(home: home)
         }
     }
 

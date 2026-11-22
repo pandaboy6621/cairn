@@ -75,20 +75,6 @@ public enum WiFiPasswords {
     /// The password bytes, or nil if the Keychain has none (an open network,
     /// or one joined through a profile). Never logged.
     public static func read(ssid: String, using runner: CommandRunner) throws -> Data? {
-        let result = try runner.run(command(ssid: ssid))
-        switch result.exitCode {
-        case 0:
-            var bytes = Array(result.stdout.utf8)
-            if bytes.last == UInt8(ascii: "\n") { bytes.removeLast() }
-            defer { Vault.zero(&bytes) }
-            return bytes.isEmpty ? nil : Data(bytes)
-        case 44: // errSecItemNotFound
-            return nil
-        case 128, 51: // user cancelled / interaction not allowed
-            throw ReadError.cancelled
-        default:
-            // stderr from `security` never contains the password.
-            throw ReadError.failed("security exited with \(result.exitCode): \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-        }
+        try KeychainCommand.password(from: runner.run(command(ssid: ssid)))
     }
 }

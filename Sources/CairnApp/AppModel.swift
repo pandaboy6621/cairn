@@ -163,6 +163,7 @@ final class AppModel {
             }.value
             var list = Checklist(manifest: report.manifest)
             vault.reloadCaptured(folder: folder, device: report.manifest.device.name)
+            if vault.key == nil { vault.loadRemembered(folder: folder) }
             list.setSensitiveUnlocked(vault.exists(in: folder))
             list.checkCaptured(vault.captured)
             for id in excluded { list.setChecked(id, false) }

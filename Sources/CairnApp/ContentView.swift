@@ -388,8 +388,8 @@ private struct SecretsBar: View {
             Image(systemName: model.vault.key == nil ? "lock.fill" : "lock.open.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(saved) of \(items.count) passwords saved").font(.callout.weight(.medium))
-                Text("Check the networks you want, then save their passwords. macOS asks you to approve each one.")
+                Text("\(saved) of \(items.count) secrets saved").font(.callout.weight(.medium))
+                Text("Check what you want backed up, then save it. macOS asks you to approve each Keychain read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -397,11 +397,15 @@ private struct SecretsBar: View {
             if model.vault.isCapturing {
                 ProgressView().controlSize(.small)
             }
-            Button(toSave.isEmpty ? "Save Passwords…" : "Save \(toSave.count) Password\(toSave.count == 1 ? "" : "s")…") {
-                model.vault.captureWiFi(toSave, model: model)
+            if model.vault.isRemembered {
+                Button("Forget on This Mac") { model.vault.forget(model) }
+                    .help("Stop keeping the vault key in this Mac's Keychain")
+            }
+            Button(toSave.isEmpty ? "Save…" : "Save \(toSave.count) Secret\(toSave.count == 1 ? "" : "s")…") {
+                model.vault.capture(toSave, model: model)
             }
             .disabled(toSave.isEmpty || model.vault.isCapturing)
-            .help(toSave.isEmpty ? "Check networks without a saved password first" : "Reads each password from the Keychain and encrypts it")
+            .help(toSave.isEmpty ? "Check items that aren't saved yet first" : "Reads each secret and encrypts it")
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
@@ -482,7 +486,7 @@ private struct ItemRow: View {
             Spacer(minLength: 12)
 
             if category == .sensitive, model.vault.captured.contains(Checklist.ref(sensitiveID: item.id)) {
-                Label("Password saved", systemImage: "lock.fill")
+                Label("Saved", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.green)
             } else if !item.detail.isEmpty {
@@ -528,6 +532,8 @@ private struct ItemIcon: View {
         case "Casks": return "macwindow"
         case "Taps": return "spigot"
         case "Wi-Fi networks": return "wifi"
+        case "SSH keys": return "key"
+        case "Network share passwords": return "externaldrive.connected.to.line.below"
         default: break
         }
         if item.id == "layout:dock" { return "dock.rectangle" }

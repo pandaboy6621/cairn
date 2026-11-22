@@ -168,7 +168,7 @@ import Testing
 @Suite struct SetupScannerTests {
     @Test func fullScanAssemblesANormalizedManifest() throws {
         let fixed = Samples.date
-        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }).scan()
+        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan()
         let m = report.manifest
         #expect(m.device == Device(name: "test-mac", os: "macos", osVersion: "14.5"))
         #expect(m.created == fixed)
@@ -179,7 +179,9 @@ import Testing
         #expect(Set(m.settings.map(\.key)).count == m.settings.count)
         #expect(m.settings.allSatisfy { $0.platforms == ["macos"] })
         #expect(report.warnings.count == 1)
-        #expect(m.sensitive.map(\.ref) == ["vault://wifi/Example Home", "vault://wifi/Example Office"])
+        #expect(m.sensitive.map(\.ref) == ["vault://share/smb/alex@files.example", "vault://share/smb/alex@nas.example",
+                                            "vault://ssh/id_ed25519", "vault://ssh/work_key",
+                                            "vault://wifi/Example Home", "vault://wifi/Example Office"])
         #expect(m.shares.map(\.url) == ["afp://oldmac.example/Public", "https://dav.example/remote.php/webdav",
                                         "nfs://files.example/export/home", "smb://files.example/Team%20Share",
                                         "smb://nas.example/Media"])
@@ -187,8 +189,8 @@ import Testing
 
     @Test func scanIsDeterministic() throws {
         let fixed = Samples.date
-        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }).scan().manifest)
-        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }).scan().manifest)
+        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan().manifest)
+        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan().manifest)
         #expect(a == b)
     }
 

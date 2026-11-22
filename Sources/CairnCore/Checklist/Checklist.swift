@@ -260,10 +260,10 @@ public struct Checklist: Sendable {
                                      title: s.url, detail: user, isChecked: s.include))
         }
         for s in m.sensitive {
-            let wifi = WiFiPasswords.ssid(ref: s.ref)
-            out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive,
-                                     group: s.type == WiFiPasswords.type ? "Wi-Fi networks" : s.type,
-                                     title: wifi ?? s.ref, detail: "", isChecked: false))
+            let groups = [WiFiPasswords.type: "Wi-Fi networks", SSHKeyScanner.type: "SSH keys",
+                          SharePasswords.type: "Network share passwords"]
+            out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive, group: groups[s.type] ?? s.type,
+                                     title: SecretReader.title(of: s.ref), detail: "", isChecked: false))
         }
         return out
     }

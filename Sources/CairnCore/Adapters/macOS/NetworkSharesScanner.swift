@@ -56,6 +56,8 @@ public struct NetworkSharesScanner: SetupScanning {
             // Missing file: try the older format, or there are no favorites.
         }
         out.shares = order.compactMap { byURL[$0] }
+        // A secret slot per server and user; capture reads the Keychain later.
+        out.sensitive = SharePasswords.refs(for: out.shares)
         return out
     }
 

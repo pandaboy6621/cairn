@@ -21,6 +21,17 @@ enum Fixtures {
     }
 
     /// A runner that answers every command a full scan makes, from fixtures.
+    /// A fake home with a made-up `~/.ssh` (no real keys).
+    static let home: String = {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cairn-home-fixture", isDirectory: true)
+        let ssh = dir.appendingPathComponent(".ssh", isDirectory: true)
+        try? FileManager.default.createDirectory(at: ssh, withIntermediateDirectories: true)
+        for name in ["id_ed25519", "id_ed25519.pub", "work_key", "work_key.pub", "config", "known_hosts", "notes.txt"] {
+            try? Data("fake \(name)\n".utf8).write(to: ssh.appendingPathComponent(name))
+        }
+        return dir.path
+    }()
+
     static func fullRunner() -> FixtureRunner {
         let r = FixtureRunner()
         r.stub(Command("scutil", ["--get", "LocalHostName"]), stdout: "Test-Mac\n")

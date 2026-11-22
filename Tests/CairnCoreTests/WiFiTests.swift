@@ -43,16 +43,16 @@ import Testing
     @Test func passwordReadsAreOnlyAllowedByTheWiFiPolicy() {
         let read = WiFiPasswords.command(ssid: "Example Home")
         #expect(!CommandPolicy.readOnly.allows(read))
-        #expect(CommandPolicy.wifiPasswords.allows(read))
-        #expect(CommandPolicy.wifiPasswords.allows(Command("networksetup", ["-listallhardwareports"])))
+        #expect(CommandPolicy.secretReads.allows(read))
+        #expect(CommandPolicy.secretReads.allows(Command("networksetup", ["-listallhardwareports"])))
         // Other Keychain items, and anything that writes, stay blocked.
-        #expect(!CommandPolicy.wifiPasswords.allows(Command("security", ["find-generic-password", "-s", "github.com", "-w"])))
-        #expect(!CommandPolicy.wifiPasswords.allows(Command("security", ["delete-generic-password", "-a", "Example Home"])))
+        #expect(!CommandPolicy.secretReads.allows(Command("security", ["find-generic-password", "-s", "github.com", "-w"])))
+        #expect(!CommandPolicy.secretReads.allows(Command("security", ["delete-generic-password", "-a", "Example Home"])))
         #expect(!CommandPolicy.readOnly.allows(Command("networksetup", ["-setairportnetwork", "en1", "X"])))
     }
 
     @Test func passwordReadHandlesFoundMissingAndCancelled() throws {
-        let runner = FixtureRunner(policy: .wifiPasswords)
+        let runner = FixtureRunner(policy: .secretReads)
         runner.stub(WiFiPasswords.command(ssid: "A"), stdout: "fake-pass-1\n")
         runner.stub(WiFiPasswords.command(ssid: "Open"), stdout: "", stderr: "could not be found", exitCode: 44)
         runner.stub(WiFiPasswords.command(ssid: "C"), stdout: "", stderr: "User canceled", exitCode: 128)

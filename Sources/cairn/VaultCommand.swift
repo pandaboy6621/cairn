@@ -11,7 +11,7 @@ struct VaultCommand: ParsableCommand {
             The vault lives in the backup folder as vault.yaml, so every Mac backing up to
             the same folder shares one password. It holds no secret in the clear.
             """,
-        subcommands: [Init.self, Status.self, Check.self, ChangePassword.self, WiFi.self]
+        subcommands: [Init.self, Status.self, Check.self, ChangePassword.self, Secrets.self, WiFi.self, Remember.self, Forget.self]
     )
 
     struct Location: ParsableArguments {
@@ -65,6 +65,8 @@ struct VaultCommand: ParsableCommand {
             }
             let e = try VaultStore.read(in: folder)
             print("Vault in \(BackupFolder.displayPath(folder)): \(e.kdf), \(e.kdfParams.iterations) iterations, version \(e.v).")
+            let remembered = Vault.cachedKey(for: e, cache: KeychainVaultKeyCache()) != nil
+            print(remembered ? "This Mac remembers the vault key." : "This Mac asks for the vault password each time.")
         }
     }
 
@@ -111,17 +113,79 @@ struct VaultCommand: ParsableCommand {
 }
 
 extension VaultCommand {
+    /// Every secret this Mac could back up, from a read-only scan.
+    static func scanSecrets() -> [SensitiveRef] {
+        SetupScanner().scan([.wifi, .ssh, .shares]).manifest.sensitive
+    }
+
+    /// The vault key from this Mac's Keychain if remembered, else a prompt.
+    static func unlock(_ location: Location) throws -> VaultKey {
+        let envelope = try VaultStore.read(in: location.url)
+        if let key = Vault.cachedKey(for: envelope, cache: KeychainVaultKeyCache()) { return key }
+        return try Vault.unlock(envelope, password: readPassword("Vault password: ", stdin: location.passwordStdin))
+    }
+
+    static func capture(_ refs: [String], location: Location, device: String) throws {
+        let folder = location.url
+        let existing = VaultStore.readSecrets(in: folder, device: device)
+        let key = try unlock(location)
+        print("Reading \(refs.count) secret\(refs.count == 1 ? "" : "s"). Approve each macOS prompt.")
+        let reader = SecretReader()
+        let (file, report) = SecretCapture.capture(refs, into: existing, key: key, read: reader.read)
+        try VaultStore.writeSecrets(file, in: folder, device: device)
+        print("Saved \(report.saved.count), unchanged \(report.unchanged.count), nothing to save \(report.missing.count).")
+        for (ref, why) in report.failed.sorted(by: { $0.key < $1.key }) {
+            stderr("failed: \(SecretReader.title(of: ref)): \(why)")
+        }
+        if report.stoppedEarly { print("Stopped when a prompt was cancelled; run again to continue.") }
+    }
+
+    struct Secrets: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List Wi-Fi passwords, SSH keys, and share passwords, or save them encrypted.",
+            discussion: """
+                With no options, lists what this Mac has and which are saved. Saving reads each
+                secret (macOS asks you to approve Keychain reads one by one) and stores only
+                ciphertext, in secrets/<device>.yaml in the backup folder. Each later backup
+                copies it into the snapshot, so automatic backups never need the password.
+                """)
+        @OptionGroup var location: Location
+        @Option(name: .long, help: "Only this kind: wifi, ssh, or share.")
+        var type: String?
+        @Option(name: .long, help: "A secret to save, by the name the list shows (repeatable).")
+        var name: [String] = []
+        @Flag(name: .long, help: "Save every secret listed (of --type, if given). Expect one prompt each.")
+        var all = false
+
+        func run() throws {
+            let device = SetupScanner().device().name
+            let found = VaultCommand.scanSecrets().filter { type == nil || $0.type == type }
+            guard all || !name.isEmpty else {
+                let saved = VaultStore.readSecrets(in: location.url, device: device).secrets
+                if found.isEmpty { print("Nothing found."); return }
+                for s in found {
+                    let mark = saved[s.ref] != nil ? "saved" : "     "
+                    print("[\(mark)] \(s.type.padding(toLength: 5, withPad: " ", startingAt: 0)) \(SecretReader.title(of: s.ref))")
+                }
+                let count = found.filter { saved[$0.ref] != nil }.count
+                print("\n\(count) of \(found.count) saved. Save some with --name <name> or --all.")
+                return
+            }
+            var refs = found.map(\.ref)
+            if !all {
+                let byTitle = Dictionary(found.map { (SecretReader.title(of: $0.ref), $0.ref) }, uniquingKeysWith: { a, _ in a })
+                let unknown = name.filter { byTitle[$0] == nil }
+                guard unknown.isEmpty else { throw ValidationError("Not found: \(unknown.joined(separator: ", "))") }
+                refs = name.compactMap { byTitle[$0] }
+            }
+            try VaultCommand.capture(refs, location: location, device: device)
+        }
+    }
+
     struct WiFi: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "wifi",
-            abstract: "List saved Wi-Fi networks, or save their passwords encrypted in the vault.",
-            discussion: """
-                With no options, lists this Mac's saved networks and which passwords are saved.
-                Saving reads each password from the Keychain (macOS asks for an administrator
-                password for every network) and stores only ciphertext, in
-                secrets/<device>.yaml in the backup folder. Each later backup copies it into
-                the snapshot, so automatic backups never need the vault password.
-                """)
+            abstract: "Shortcut for `cairn vault secrets --type wifi`.")
         @OptionGroup var location: Location
         @Option(name: .long, help: "A network to save (repeatable).")
         var network: [String] = []
@@ -129,38 +193,36 @@ extension VaultCommand {
         var all = false
 
         func run() throws {
-            let folder = location.url
-            let device = SetupScanner().device().name
-            let found = try WiFiScanner().scan(using: ProcessRunner()).sensitive.map(\.ref)
-            let existing = VaultStore.readSecrets(in: folder, device: device)
+            var s = Secrets()
+            s.location = location
+            s.type = WiFiPasswords.type
+            s.name = network
+            s.all = all
+            try s.run()
+        }
+    }
 
-            guard all || !network.isEmpty else {
-                if found.isEmpty { print("No saved Wi-Fi networks (or no Wi-Fi hardware)."); return }
-                for ref in found {
-                    let mark = existing.secrets[ref] != nil ? "saved" : "     "
-                    print("[\(mark)] \(WiFiPasswords.ssid(ref: ref) ?? ref)")
-                }
-                print("\n\(existing.secrets.count) of \(found.count) passwords saved. Save some with --network <name> or --all.")
-                return
-            }
-            let refs = all ? found : network.map(WiFiPasswords.ref(ssid:))
-            let unknown = refs.filter { !found.contains($0) }
-            guard unknown.isEmpty else {
-                throw ValidationError("Not a saved network: \(unknown.compactMap(WiFiPasswords.ssid(ref:)).joined(separator: ", "))")
-            }
-            let key = try Vault.unlock(VaultStore.read(in: folder),
-                                       password: readPassword("Vault password: ", stdin: location.passwordStdin))
-            let runner = ProcessRunner(policy: .wifiPasswords)
-            print("Reading \(refs.count) password\(refs.count == 1 ? "" : "s"). Approve each macOS prompt.")
-            let (file, report) = SecretCapture.capture(refs, into: existing, key: key) { ref in
-                try WiFiPasswords.read(ssid: WiFiPasswords.ssid(ref: ref)!, using: runner)
-            }
-            try VaultStore.writeSecrets(file, in: folder, device: device)
-            print("Saved \(report.saved.count), unchanged \(report.unchanged.count), no password in the Keychain \(report.missing.count).")
-            for (ref, why) in report.failed.sorted(by: { $0.key < $1.key }) {
-                stderr("failed: \(WiFiPasswords.ssid(ref: ref) ?? ref): \(why)")
-            }
-            if report.stoppedEarly { print("Stopped when a prompt was cancelled; run again to continue.") }
+    struct Remember: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Remember the vault key in this Mac's Keychain, so you're not asked again here.",
+            discussion: "Stays on this Mac (never synced). Undo with `cairn vault forget`.")
+        @OptionGroup var location: Location
+
+        func run() throws {
+            let envelope = try VaultStore.read(in: location.url)
+            let key = try Vault.unlock(envelope, password: readPassword("Vault password: ", stdin: location.passwordStdin))
+            try KeychainVaultKeyCache().save(key, vaultID: envelope.id)
+            print("This Mac will remember the vault key.")
+        }
+    }
+
+    struct Forget: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Remove the remembered vault key from this Mac's Keychain.")
+        @OptionGroup var location: Location
+
+        func run() throws {
+            KeychainVaultKeyCache().remove(vaultID: try VaultStore.read(in: location.url).id)
+            print("Forgotten. You'll be asked for the vault password next time.")
         }
     }
 }

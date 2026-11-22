@@ -23,6 +23,11 @@ final class VaultFlow {
     var password = ""
     var confirm = ""
     var useRecoveryKey = false
+    /// Keep the key in this Mac's Keychain after unlocking.
+    var remember = false
+    /// Whether this Mac has the current vault's key remembered.
+    var isRemembered = false
+    let cache: VaultKeyCache = KeychainVaultKeyCache()
     var savedRecoveryKey = false
     var isWorking = false
     var error: String?
@@ -46,7 +51,7 @@ final class VaultFlow {
         run(model) {
             let made = try Vault.create(password: password)
             try VaultStore.write(made.envelope, in: folder)
-            return (made.key, made.recoveryKey)
+            return (made.key, made.recoveryKey, made.envelope.id)
         }
     }
 
@@ -55,17 +60,34 @@ final class VaultFlow {
         run(model) {
             let envelope = try VaultStore.read(in: folder)
             let key = recovery ? try Vault.unlock(envelope, recoveryKey: secret) : try Vault.unlock(envelope, password: secret)
-            return (key, nil)
+            return (key, nil, envelope.id)
         }
     }
 
     func folderChanged(_ model: AppModel) {
         key = nil
+        loadRemembered(folder: model.backupFolder)
         model.checklist?.setSensitiveUnlocked(exists(in: model.backupFolder))
         if let device = model.checklist?.source.device.name {
             reloadCaptured(folder: model.backupFolder, device: device)
             model.checklist?.checkCaptured(captured)
         }
+    }
+
+    /// Unlocks from this Mac's Keychain if the user chose to remember the key.
+    func loadRemembered(folder: URL) {
+        guard let envelope = try? VaultStore.read(in: folder) else { isRemembered = false; return }
+        let cached = Vault.cachedKey(for: envelope, cache: cache)
+        isRemembered = cached != nil
+        if let cached { key = cached }
+    }
+
+    /// Stop remembering the key on this Mac (and lock).
+    func forget(_ model: AppModel) {
+        if let envelope = try? VaultStore.read(in: model.backupFolder) { cache.remove(vaultID: envelope.id) }
+        isRemembered = false
+        key = nil
+        model.statusMessage = "This Mac no longer remembers the vault password."
     }
 
     func reloadCaptured(folder: URL, device: String) {
@@ -74,7 +96,7 @@ final class VaultFlow {
 
     /// Reads the passwords for these Wi-Fi refs (macOS asks for approval for
     /// each one) and saves them encrypted. Unlocks first if needed.
-    func captureWiFi(_ refs: [String], model: AppModel) {
+    func capture(_ refs: [String], model: AppModel) {
         guard !refs.isEmpty, !isCapturing else { return }
         guard let key else {
             pendingCapture = refs
@@ -84,16 +106,13 @@ final class VaultFlow {
         guard let device = model.checklist?.source.device.name else { return }
         let folder = model.backupFolder
         isCapturing = true
-        model.statusMessage = "Saving \(refs.count) Wi-Fi password\(refs.count == 1 ? "" : "s"). macOS will ask you to approve each one."
+        model.statusMessage = "Saving \(refs.count) secret\(refs.count == 1 ? "" : "s"). macOS will ask you to approve each Keychain read."
         Task {
             let result = await Task.detached(priority: .userInitiated) {
                 Result { () throws -> SecretCapture.Report in
-                    let runner = ProcessRunner(policy: .wifiPasswords)
+                    let reader = SecretReader()
                     let existing = VaultStore.readSecrets(in: folder, device: device)
-                    let (file, report) = SecretCapture.capture(refs, into: existing, key: key) { ref in
-                        guard let ssid = WiFiPasswords.ssid(ref: ref) else { return nil }
-                        return try WiFiPasswords.read(ssid: ssid, using: runner)
-                    }
+                    let (file, report) = SecretCapture.capture(refs, into: existing, key: key, read: reader.read)
                     try VaultStore.writeSecrets(file, in: folder, device: device)
                     return report
                 }
@@ -101,7 +120,7 @@ final class VaultFlow {
             isCapturing = false
             switch result {
             case .failure(let e):
-                model.errorMessage = "Couldn't save Wi-Fi passwords: \(e.localizedDescription)"
+                model.errorMessage = "Couldn't save secrets: \(e.localizedDescription)"
             case .success(let report):
                 reloadCaptured(folder: folder, device: device)
                 model.checklist?.checkCaptured(captured)
@@ -111,9 +130,9 @@ final class VaultFlow {
     }
 
     static func describe(_ r: SecretCapture.Report) -> String {
-        var parts = ["Saved \(r.saved.count) Wi-Fi password\(r.saved.count == 1 ? "" : "s")"]
+        var parts = ["Saved \(r.saved.count) secret\(r.saved.count == 1 ? "" : "s")"]
         if !r.unchanged.isEmpty { parts.append("\(r.unchanged.count) unchanged") }
-        if !r.missing.isEmpty { parts.append("\(r.missing.count) with no password in the Keychain") }
+        if !r.missing.isEmpty { parts.append("\(r.missing.count) with nothing to save") }
         if !r.failed.isEmpty { parts.append("\(r.failed.count) failed") }
         return parts.joined(separator: ", ") + (r.stoppedEarly ? ". Stopped when you cancelled a prompt." : ".")
     }
@@ -131,15 +150,20 @@ final class VaultFlow {
     }
 
     /// PBKDF2 at 600,000 iterations takes a moment: do it off the main thread.
-    private func run(_ model: AppModel, _ work: @escaping @Sendable () throws -> (VaultKey, String?)) {
+    private func run(_ model: AppModel, _ work: @escaping @Sendable () throws -> (VaultKey, String?, String)) {
         isWorking = true
         error = nil
         Task {
             let result = await Task.detached(priority: .userInitiated) { Result { try work() } }.value
             isWorking = false
             switch result {
-            case .success(let (key, recovery)):
+            case .success(let (key, recovery, vaultID)):
                 self.key = key
+                if remember {
+                    do { try cache.save(key, vaultID: vaultID); isRemembered = true } catch {
+                        model.errorMessage = "Couldn't remember the password on this Mac: \(error.localizedDescription)"
+                    }
+                }
                 model.checklist?.setSensitiveUnlocked(true)
                 if let device = model.checklist?.source.device.name {
                     reloadCaptured(folder: model.backupFolder, device: device)
@@ -149,7 +173,7 @@ final class VaultFlow {
                 step = recovery.map { .recovery($0) }
                 if let refs = pendingCapture {
                     pendingCapture = nil
-                    captureWiFi(refs, model: model)
+                    capture(refs, model: model)
                 }
             case .failure(let e):
                 error = e.localizedDescription
@@ -164,6 +188,7 @@ final class VaultFlow {
         confirm = ""
         useRecoveryKey = false
         savedRecoveryKey = false
+        remember = false
         error = nil
     }
 }

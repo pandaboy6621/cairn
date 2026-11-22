@@ -38,6 +38,7 @@ struct VaultSheet: View {
         SecureField("Password (at least 8 characters)", text: $flow.password)
         SecureField("Repeat password", text: $flow.confirm)
             .onSubmit { flow.create(model) }
+        rememberToggle(flow)
         footer(flow, action: "Create Vault", enabled: flow.password.count >= 8 && !flow.confirm.isEmpty) { flow.create(model) }
     }
 
@@ -57,6 +58,7 @@ struct VaultSheet: View {
         }
         Toggle("Use my recovery key instead", isOn: $flow.useRecoveryKey)
             .toggleStyle(.checkbox)
+        rememberToggle(flow)
         footer(flow, action: "Unlock", enabled: !flow.password.isEmpty) { flow.unlock(model) }
     }
 
@@ -82,6 +84,13 @@ struct VaultSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!flow.savedRecoveryKey)
         }
+    }
+
+    private func rememberToggle(_ flow: VaultFlow) -> some View {
+        @Bindable var flow = flow
+        return Toggle("Remember on this Mac", isOn: $flow.remember)
+            .toggleStyle(.checkbox)
+            .help("Keeps the vault key in this Mac's Keychain (never synced), so Cairn doesn't ask again here")
     }
 
     private func footer(_ flow: VaultFlow, action: String, enabled: Bool, perform: @escaping () -> Void) -> some View {

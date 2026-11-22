@@ -86,11 +86,11 @@ public struct CommandPolicy: Sendable {
         return false
     }
 
-    /// Everything `readOnly` allows, plus reading one saved Wi-Fi password from
-    /// the Keychain. Only the vault's capture step uses this, and macOS asks the
-    /// user to approve each read.
-    public static let wifiPasswords = CommandPolicy { command in
-        readOnly.allows(command) || isWiFiPasswordRead(command)
+    /// Everything `readOnly` allows, plus reading one saved Wi-Fi or network
+    /// share password from the Keychain. Only the vault's capture step uses
+    /// this, and macOS asks the user to approve each read.
+    public static let secretReads = CommandPolicy { command in
+        readOnly.allows(command) || isWiFiPasswordRead(command) || isSharePasswordRead(command)
     }
 
     static func isWiFiPasswordRead(_ command: Command) -> Bool {
@@ -98,6 +98,14 @@ public struct CommandPolicy: Sendable {
         return command.program == "security" && a.count == 6
             && Array(a[0...4]) == ["find-generic-password", "-D", WiFiPasswords.kind, "-w", "-a"]
             && !a[5].isEmpty
+    }
+
+    /// `security find-internet-password -r <smb |afp > -s <host> -a <user> -w`.
+    static func isSharePasswordRead(_ command: Command) -> Bool {
+        let a = command.arguments
+        return command.program == "security" && a.count == 8
+            && a[0] == "find-internet-password" && a[1] == "-r" && SharePasswords.protocols.values.contains(a[2])
+            && a[3] == "-s" && !a[4].isEmpty && a[5] == "-a" && !a[6].isEmpty && a[7] == "-w"
     }
 
     /// For tests only.
