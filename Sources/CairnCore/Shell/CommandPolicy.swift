@@ -63,6 +63,10 @@ public struct CommandPolicy: Sendable {
             return args.count == 1 && ["Dock", "Finder", "SystemUIServer", "ControlCenter"].contains(args[0])
         case "launchctl":
             return agents.allows(command)
+        case "ssh-keygen":
+            // Only printing a key's public half, with an empty passphrase so it can't prompt.
+            return args.count == 5 && Array(args[0...3]) == ["-y", "-P", "", "-f"]
+                && args[4].contains("/.ssh/") && !args[4].hasSuffix(".pub")
         case "osascript":
             // Only switching Dark Mode on or off.
             return args.count == 2 && args[0] == "-e"

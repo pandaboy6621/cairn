@@ -19,7 +19,7 @@ struct Restore: ParsableCommand {
             Scans this Mac, then prints what would change to match the backup.
             With --apply it writes settings and the Dock, restarts the affected apps,
             scans again, and checks every item it wrote.
-            Saved Wi-Fi passwords are decrypted only with --apply, after asking for the
+            Saved secrets (Wi-Fi and share passwords, SSH keys) are decrypted only with --apply, after asking for the
             vault password (or reading it with --password-stdin). Packages and App Store
             apps are listed but not restored yet.
             """
@@ -68,7 +68,9 @@ struct Restore: ParsableCommand {
         let vaultFolder = Self.vaultFolder(near: source)
         let result = restorer.apply(plan, backup: source.standardized.path, secrets: secrets) {
             let envelope = try VaultStore.read(in: vaultFolder)
-            return try Vault.unlock(envelope, password: readPassword("Vault password (to restore Wi-Fi passwords): ", stdin: passwordStdin))
+            // A key this Mac remembers (opt-in, `cairn vault remember`) skips the prompt.
+            if let key = Vault.cachedKey(for: envelope, cache: KeychainVaultKeyCache()) { return key }
+            return try Vault.unlock(envelope, password: readPassword("Vault password (to restore secrets): ", stdin: passwordStdin))
         }
         if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
         for w in result.warnings { stderr("note: \(w)") }

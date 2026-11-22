@@ -77,7 +77,7 @@ stage)
     scripts/build-app.sh
     # The VM's shared-folder mount caches files by path, so a rebuilt app at the
     # same path can still run the old binary. Give every build a new folder.
-    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
+    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/secrets-*.txt "$SHARE"/secrets-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
     BUILD_DIR="build-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$SHARE/$BUILD_DIR"
     cp -R dist/Cairn.app "$SHARE/$BUILD_DIR/"
@@ -175,6 +175,36 @@ EOF2
     # is in a test vault, and one without. The runner watches every process's
     # arguments while it restores, to prove the password never reaches a command line.
     CAIRN_VM_WIFI_FIXTURE="$SHARE/wifi-test" swift test --filter VMWiFiFixture >/dev/null
+    # SSH key and share password restore test (VM only): two throwaway keys made
+    # just now (one passphrase-protected), sealed into a test vault with a
+    # made-up share password. The runner watches process arguments as above.
+    KEYS="$(mktemp -d)"
+    ssh-keygen -q -t ed25519 -N "" -C cairn-test -f "$KEYS/cairn_test_ed25519"
+    ssh-keygen -q -t ed25519 -N "made-up-passphrase" -C cairn-test-locked -f "$KEYS/cairn_test_locked"
+    CAIRN_VM_SECRETS_FIXTURE="$SHARE/secrets-test" CAIRN_VM_SSH_KEYS="$KEYS" swift test --filter VMSecretsFixture >/dev/null
+    # A line of the unprotected key's body, to look for in process arguments.
+    KEYLINE="$(sed -n 2p "$KEYS/cairn_test_ed25519" | cut -c1-40)"
+    rm -rf "$KEYS"
+    cat > "$SHARE/Secrets restore test.command" <<EOF2
+#!/bin/sh
+# Runs inside cairn-test only: writes ~/.ssh and the login keychain. Throwaway keys, made-up password.
+D="/Volumes/My Shared Files/cairn"
+cd "\$D" || exit 1
+seen="\$D/secrets-argv.txt"; : > "\$seen"
+( while :; do ps -axww -o args= | grep -c -e "made-up-share-pass-77" -e "$KEYLINE" | grep -v '^1\$' >> "\$seen"; sleep 0.05; done ) &
+watcher=\$!
+{
+  echo vm-test-vault-pass | "$CAIRN_VM" restore --from secrets-test/manifest.yaml --apply --password-stdin
+  echo "exit: \$?"
+  echo "== ~/.ssh"; ls -le ~/.ssh | grep -v '^total'; stat -f '%Sp %N' ~/.ssh
+  echo "== public key"; cat ~/.ssh/cairn_test_ed25519.pub 2>&1
+  echo "== share password item"
+  security find-internet-password -s nas.example -a cairntest 2>&1 | grep -E 'keychain:|"acct"|"srvr"|"ptcl"|"labl"|could not'
+} 2>&1 | tee "\$D/secrets-restore.txt"
+kill \$watcher
+echo "== ps lines showing a secret (other than the watcher's own grep): \$(wc -l < "\$seen" | tr -d ' ')" | tee -a "\$D/secrets-restore.txt"
+EOF2
+    chmod +x "$SHARE"/*.command; xattr -c "$SHARE"/*.command 2>/dev/null || true
     cat > "$SHARE/Wi-Fi restore test.command" <<EOF2
 #!/bin/sh
 # Runs inside cairn-test only: writes the Keychain. Made-up networks and passwords.

@@ -12,15 +12,21 @@ public struct MacRestorer: Sendable {
     public var displays: DisplaySystem
     public var defaultApps: DefaultAppsSystem
     public var wifi: WiFiSystem
+    public var sshKeys: SSHKeySystem
+    public var sharePasswords: SharePasswordSystem
 
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore),
         appExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
         displays: DisplaySystem = CoreGraphicsDisplays(),
         defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps(),
-        wifi: WiFiSystem = CoreWLANWiFi()
+        wifi: WiFiSystem = CoreWLANWiFi(),
+        sshKeys: SSHKeySystem = FileSSHKeys(),
+        sharePasswords: SharePasswordSystem = KeychainSharePasswords()
     ) {
         self.wifi = wifi
+        self.sshKeys = sshKeys
+        self.sharePasswords = sharePasswords
         self.runner = runner
         self.appExists = appExists
         self.displays = displays
@@ -180,6 +186,35 @@ public struct MacRestorer: Sendable {
                     : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
                 report.entries.append(.init(step: step, outcome: outcome, written: saved.isEmpty ? nil : .wifi(saved)))
 
+            case .secrets(let items):
+                var done: [String] = [], notes: [String] = []
+                for item in items {
+                    guard item.hasSecret, let sealed = secrets.secrets[item.ref] else {
+                        report.manualSteps.append(.init(category: item.type == "ssh" ? "ssh" : "shares",
+                            text: "\(item.title) wasn't saved in the backup; copy it over by hand"))
+                        continue
+                    }
+                    guard let key = vaultKey() else { notes.append("\(item.title): vault not unlocked"); continue }
+                    do {
+                        var secret = try key.open(sealed, ref: item.ref)
+                        defer { Vault.zero(&secret) }
+                        let outcome = item.type == "ssh" ? restoreSSHKey(secret, item: item, report: &report)
+                                                         : restoreSharePassword(secret, item: item, report: &report)
+                        switch outcome {
+                        case .some(true): done.append(item.title)
+                        case .some(false): notes.append("\(item.title): couldn't save it")
+                        case nil: break // already there, or left for the checklist
+                        }
+                    } catch {
+                        notes.append("\(item.title): couldn't decrypt (\(error.localizedDescription))")
+                    }
+                }
+                if let unlockError { notes.append("vault: \(unlockError)") }
+                let outcome: RestoreReport.Outcome = done.isEmpty
+                    ? (notes.isEmpty ? .skipped("nothing new to restore") : .failed(notes.joined(separator: "; ")))
+                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .secrets(done)))
+
             case .wallpaper(let w, _):
                 let (applied, notes) = applyWallpaper(w)
                 let outcome: RestoreReport.Outcome = applied.isEmpty ? .skipped(notes.joined(separator: "; "))
@@ -230,6 +265,42 @@ public struct MacRestorer: Sendable {
             return s.key
         }
         return report
+    }
+
+    /// true = written and read back, false = failed, nil = nothing to do or left for the checklist.
+    func restoreSSHKey(_ key: Data, item: SecretRestore, report: inout RestoreReport) -> Bool? {
+        guard let name = SSHKeyScanner.file(ref: item.ref) else { return false }
+        if var existing = sshKeys.existing(name) {
+            defer { Vault.zero(&existing) }
+            if existing != key {
+                report.manualSteps.append(.init(category: "ssh",
+                    text: "~/.ssh/\(name) already exists and differs from the backup; Cairn left it alone"))
+            }
+            return nil
+        }
+        do { try sshKeys.write(key, name: name) } catch { return false }
+        guard var back = sshKeys.existing(name) else { return false }
+        defer { Vault.zero(&back) }
+        guard back == key else { return false }
+        if !sshKeys.writePublicKey(for: name) {
+            report.manualSteps.append(.init(category: "ssh",
+                text: "\(name).pub wasn't recreated (the key has a passphrase, or a .pub is already there); run ssh-keygen -y -f ~/.ssh/\(name) > ~/.ssh/\(name).pub if you need it"))
+        }
+        return true
+    }
+
+    func restoreSharePassword(_ password: Data, item: SecretRestore, report: inout RestoreReport) -> Bool? {
+        // `smb/alex@nas.example`
+        let title = item.title
+        guard let slash = title.firstIndex(of: "/"), let at = title.lastIndex(of: "@"), slash < at else { return false }
+        let scheme = String(title[..<slash]), user = String(title[title.index(after: slash)..<at]),
+            host = String(title[title.index(after: at)...])
+        if sharePasswords.exists(scheme: scheme, user: user, host: host) { return nil } // never replace one
+        guard sharePasswords.add(password, scheme: scheme, user: user, host: host),
+              sharePasswords.matches(password, scheme: scheme, user: user, host: host) else { return false }
+        report.manualSteps.append(.init(category: "shares",
+            text: "the first time you connect to \(host), macOS may ask to let Finder use the saved password: choose Always Allow"))
+        return true
     }
 
     static func isPartial(_ o: RestoreReport.Outcome) -> Bool { if case .partial = o { return true } else { return false } }

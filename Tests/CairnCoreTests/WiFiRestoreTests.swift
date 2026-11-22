@@ -82,10 +82,10 @@ final class FakeWiFi: WiFiSystem, @unchecked Sendable {
         #expect(why2.contains("Keychain didn't take"))
     }
 
-    @Test func otherSecretTypesStayPending() {
-        var b = backup(); b.sensitive = [SensitiveRef(type: "ssh", ref: "vault://ssh/id_ed25519")]
+    @Test func unknownSecretTypesStayPending() {
+        var b = backup(); b.sensitive = [SensitiveRef(type: "vpn", ref: "vault://vpn/Example")]
         let plan = RestorePlan.make(backup: b, current: Manifest(device: b.device, created: Samples.date))
-        #expect(plan.pending.map(\.id) == ["sensitive:vault://ssh/id_ed25519"])
+        #expect(plan.pending.map(\.id) == ["sensitive:vault://vpn/Example"])
     }
 }
 

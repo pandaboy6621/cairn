@@ -17,6 +17,8 @@ public struct RestorePlan: Equatable, Sendable {
         case wallpaper(WallpaperLayout, current: WallpaperLayout?)
         /// Save Wi-Fi networks this machine doesn't know yet.
         case wifi([WiFiNetwork])
+        /// Write SSH keys and save share passwords from the vault.
+        case secrets([SecretRestore])
         /// Something the backup wants that this version can't restore yet.
         case pending(category: String, id: String, reason: String)
 
@@ -27,6 +29,7 @@ public struct RestorePlan: Equatable, Sendable {
             case .defaultApps: return "default apps"
             case .wallpaper: return "wallpaper"
             case .wifi: return "wi-fi"
+            case .secrets: return "secrets"
             case .pending(let c, let id, _): return "\(c):\(id)"
             }
         }
@@ -93,7 +96,16 @@ public struct RestorePlan: Equatable, Sendable {
         }
         let known = Set(current.sensitive.map(\.ref))
         var networks: [WiFiNetwork] = []
-        for s in backup.sensitive where s.include && !known.contains(s.ref) {
+        var others: [SecretRestore] = []
+        for s in backup.sensitive where s.include {
+            if SecretRestore.types.contains(s.type), SecretRestore.title(ref: s.ref) != nil {
+                // Listed even if this Mac has one by that name: only apply can compare
+                // contents (an SSH key file, a Keychain item) without showing them.
+                others.append(SecretRestore(type: s.type, ref: s.ref, hasSecret: savedSecrets.contains(s.ref),
+                                            onThisMac: known.contains(s.ref)))
+                continue
+            }
+            guard !known.contains(s.ref) else { continue }
             if s.type == "wifi", let ssid = WiFiNetwork.ssid(ref: s.ref) {
                 networks.append(WiFiNetwork(ssid: ssid, ref: s.ref, hasPassword: savedSecrets.contains(s.ref)))
             } else {
@@ -101,10 +113,9 @@ public struct RestorePlan: Equatable, Sendable {
             }
         }
         // Before the layout: in dependency order, networks come with settings.
-        if !networks.isEmpty {
-            let at = steps.firstIndex { if case .dock = $0 { return true }; if case .wallpaper = $0 { return true }; return false } ?? steps.count
-            steps.insert(.wifi(networks), at: at)
-        }
+        let at = steps.firstIndex { if case .dock = $0 { return true }; if case .wallpaper = $0 { return true }; return false } ?? steps.count
+        if !others.isEmpty { steps.insert(.secrets(others), at: at) }
+        if !networks.isEmpty { steps.insert(.wifi(networks), at: at) }
         return RestorePlan(steps: steps)
     }
 
@@ -131,6 +142,9 @@ public struct RestorePlan: Equatable, Sendable {
             case .wifi(let networks):
                 out += "wi-fi (\(networks.count) network\(networks.count == 1 ? "" : "s") to save)\n"
                 for n in networks { out += "  + \(n.ssid) (\(n.hasPassword ? "password saved" : "no password saved"))\n" }
+            case .secrets(let items):
+                out += "secrets (\(items.count) to restore)\n"
+                for i in items { out += "  + \(i.summary)\n" }
             case .wallpaper(let w, let c):
                 out += "wallpaper\n"
                 for p in w.pictures {
@@ -205,6 +219,8 @@ public struct RestoreReport: Equatable, Sendable {
         case wallpaper([DesktopPicture])
         /// Networks whose password was saved and read back.
         case wifi([String])
+        /// SSH keys written and share passwords saved, by title, each read back.
+        case secrets([String])
     }
 
     /// Something left for the user to do by hand after restore.
@@ -270,6 +286,9 @@ public enum RestoreVerification {
                 // A rescan can't show these (LaunchServices omits choices that match
                 // the system default), so the restorer read each one back as it went.
                 return Result(id: e.step.id, status: .verified, detail: "\(want.count) confirmed with LaunchServices" + note)
+            case .secrets(let done)?:
+                // Each was read back as it was written; a rescan can't see secrets.
+                return Result(id: e.step.id, status: .verified, detail: "\(done.count) restored and read back" + note)
             case .wifi(let saved)?:
                 // Read back from the Keychain as they were saved; a rescan can't see passwords.
                 return Result(id: e.step.id, status: .verified, detail: "\(saved.count) password\(saved.count == 1 ? "" : "s") saved and read back" + note)
@@ -327,5 +346,40 @@ public struct WiFiNetwork: Equatable, Sendable {
     static let prefix = "vault://wifi/"
     public static func ssid(ref: String) -> String? {
         ref.hasPrefix(prefix) && ref.count > prefix.count ? String(ref.dropFirst(prefix.count)) : nil
+    }
+}
+
+/// An SSH key or share password to restore from the vault. Holds no secret.
+public struct SecretRestore: Equatable, Sendable {
+    public static let types: Set<String> = ["ssh", "share"]
+    public var type: String
+    public var ref: String
+    /// The backup has it, encrypted in the vault.
+    public var hasSecret: Bool
+    /// This Mac already has one by this name (an SSH key file, or a share it uses).
+    public var onThisMac: Bool
+
+    public init(type: String, ref: String, hasSecret: Bool, onThisMac: Bool = false) {
+        self.type = type
+        self.ref = ref
+        self.hasSecret = hasSecret
+        self.onThisMac = onThisMac
+    }
+
+    /// `id_ed25519`, or `smb/alex@nas.example`.
+    public var title: String { Self.title(ref: ref) ?? ref }
+
+    static func title(ref: String) -> String? {
+        for prefix in ["vault://ssh/", "vault://share/"] where ref.hasPrefix(prefix) && ref.count > prefix.count {
+            return String(ref.dropFirst(prefix.count))
+        }
+        return nil
+    }
+
+    /// For the dry run: what would happen, never the secret.
+    public var summary: String {
+        let what = type == "ssh" ? "write SSH key \(title)" : "save share password for \(title)"
+        if !hasSecret { return "\(what) (not saved in the backup)" }
+        return what + (onThisMac ? " (one is already here; kept if different)" : "")
     }
 }
