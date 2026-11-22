@@ -1,102 +1,212 @@
+<div align="center">
+
+<img src="docs/icon.png" alt="Cairn icon" width="128" height="128">
+
 # Cairn
 
-Back up, restore, and sync a Mac's *setup* (not its files). See [CLAUDE.md](CLAUDE.md) for the design.
+**Set up a new Mac in minutes.**
 
-**Status:** Milestones 1–2. Scanning, diffing, and the checklist UI are read-only and never change system state.
+Cairn backs up, restores, and syncs your Mac's *setup*: apps, Homebrew packages, Dock, system settings,
+app preferences, displays, and network shares. It never touches your files.
 
-## Requirements
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-4B44B8?logo=apple&logoColor=white)
+![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-first-2BB5A5)
+![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)
+![Status](https://img.shields.io/badge/status-early%20development-F9C74F)
+![Windows & Linux](https://img.shields.io/badge/Windows%20%26%20Linux-coming%20soon-lightgrey)
 
-- macOS 14+, Apple Silicon
-- Swift 5.9+ (the Command Line Tools are enough; Xcode is not required)
-- Optional, for the scanners: Homebrew, `mas` (`brew install mas`)
+</div>
 
-## Build and test
+---
+
+## Why Cairn?
+
+Think **Homebrew Bundle + macprefs + a dotfiles playbook**, wrapped in a native SwiftUI app with a
+checklist, snapshots, and NAS storage. Cairn records your setup as a readable YAML manifest of
+*intent* ("VLC is installed", "the Dock auto-hides"), not raw OS files. The same manifest will later
+restore onto Windows and Linux.
+
+> [!NOTE]
+> Cairn is not Time Machine. It never backs up Documents, Photos, or other personal files. It
+> stores the setup that makes a machine feel like *yours*.
+
+## ✨ Features
+
+### Back up
+
+| | |
+|---|---|
+| 📦 **Homebrew** | Formulae, casks, and taps you installed on purpose |
+| 🛍️ **Mac App Store** | Your purchased apps, saved to install after you sign in |
+| 🧭 **Dock and layout** | Dock order, spacers, and Dock, Finder, menu bar, and Mission Control settings |
+| ⚙️ **System settings** | Keyboard, trackpad, sound, energy, and more |
+| 🧩 **App preferences** | Allowlisted app settings, with caches, window state, IDs, and anything that looks like a token filtered out |
+| 🖥️ **Displays** | Monitor arrangement, main display, resolution, refresh rate, and mirroring, matched per monitor |
+| 🌐 **Network shares** | SMB, AFP, NFS, and WebDAV shares plus Finder's Connect to Server favorites (usernames only, never passwords) |
+
+### Store
+
+- **Snapshots with history.** Each backup links to the one before it, so you can diff any two and roll back.
+  Cairn writes a new snapshot only when something changed.
+- **Local folder or NAS.** Point Cairn at a mounted SMB share. If the NAS is offline, snapshots wait on
+  your Mac and copy over when it's back.
+- **Automatic backups.** A background agent backs up on a schedule and soon after your settings change.
+- **Clean diffs.** Manifests are deterministic YAML with sorted keys and stable ordering.
+
+### Restore
+
+- **Dry run first, always.** Restore shows exactly what would change. Nothing is written until you
+  press Apply (or pass `--apply`).
+- **Settings and Dock.** Settings are written back and the affected apps restarted.
+  Dock icons for apps that aren't installed yet are added back automatically once the app appears.
+- **Displays.** Puts your monitors back in the same arrangement, even on a different desk.
+- **Post-restore checklist.** Anything macOS insists you approve by hand (privacy permissions, iCloud,
+  display rotation, share passwords) is listed for you instead of being forced.
+
+### Use it your way
+
+- **Native Mac app.** Home dashboard, a checklist for every category with search and item counts,
+  presets (Minimal, Developer, Everything), drag and drop, and a Settings window.
+- **Full CLI.** Everything the app does, `cairn` does too, so it's scriptable.
+- **Safe by design.** Scanning is read-only and runs through a command allowlist. Secrets are never logged.
+
+## 🗺️ Roadmap
+
+| | Milestone | Status |
+|---|---|---|
+| 1 | Manifest format, `cairn scan`, `cairn diff` | ✅ Done |
+| 2 | SwiftUI checklist app, export manifests | ✅ Done |
+| 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
+| 4 | 🔐 Encrypted vault: Wi-Fi networks, VPNs, SSH keys, API tokens, share passwords | 🔜 Next |
+| 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (settings, Dock, displays work) |
+| 6 | 🔄 Sync between your Macs, auto-discovered on your network | 📅 Planned |
+| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
+
+### Coming soon: Windows and Linux
+
+Cairn's manifest describes what you want, not how one OS stores it. Each package carries resolvers
+for every platform, and each setting has a per-platform adapter:
+
+```yaml
+packages:
+  - id: vlc
+    kind: cask
+    resolvers: { brew: vlc, winget: VideoLAN.VLC, apt: vlc }
+    include: true
+```
+
+So a backup made on your Mac will set up a Windows PC with `winget` or a Linux box with `apt`, `dnf`,
+or Flatpak. Mac-only settings are kept and marked as Mac-only, never lost.
+
+### Encryption (milestone 4)
+
+Sensitive items will be encrypted per item with AES-256-GCM, under a vault key wrapped by your password
+(PBKDF2-SHA256, 600,000+ iterations) and a one-time recovery key. Everything else stays plain YAML so
+you can read and diff it.
+
+---
+
+## 🚀 Getting started
+
+**You'll need:** macOS 14 or later on Apple Silicon, and Swift 5.9 or later (the Command Line Tools are
+enough; you don't need Xcode). Optional, for scanning: Homebrew and `mas` (`brew install mas`).
+
+Build `Cairn.app` and put it in `~/Applications`:
+
+```bash
+scripts/build-app.sh --install
+```
+
+Without `--install` it only builds `dist/Cairn.app`. The CLI is bundled inside at
+`Cairn.app/Contents/MacOS/cairn`.
+
+Build and run the tests:
 
 ```bash
 swift build
 swift test
 ```
 
-## CLI
+<details>
+<summary><b>CLI reference</b></summary>
 
 ```bash
-# Scan everything to stdout, or to a file
-swift run cairn scan
-swift run cairn scan -o ~/Desktop/mac.yaml
-
-# Only some scanners, plus an extra preferences domain
-swift run cairn scan --only brew,mas
-swift run cairn scan --only defaults --domain com.example.SomeApp
+# Scan to stdout or a file; limit scanners; add a preferences domain
+cairn scan
+cairn scan -o ~/Desktop/mac.yaml
+cairn scan --only brew,mas
+cairn scan --only defaults --domain com.example.SomeApp
 
 # Compare two manifests (exit 0 = same, 1 = different)
-swift run cairn diff old.yaml new.yaml
+cairn diff old.yaml new.yaml
 
-# Save a snapshot in the backup folder (the app's, or --to), only if something changed
-swift run cairn backup
-swift run cairn backup --to /Volumes/NAS/Cairn
+# Save a snapshot (only if something changed), to the app's folder or a NAS
+cairn backup
+cairn backup --to /Volumes/NAS/Cairn
 
-# Snapshot history, and what changed (newest vs its parent, or any two)
-swift run cairn snapshots
-swift run cairn snapshots --diff
-swift run cairn snapshots --diff 2026-11-20 2026-11-21-101500
+# Snapshot history and what changed
+cairn snapshots
+cairn snapshots --diff
+cairn snapshots --diff 2026-11-20 2026-11-21-101500
 
-# Roll back: restore a snapshot (dry run until --apply; test in a VM)
-swift run cairn restore --from 2026-11-20-090000
+# Restore or roll back (dry run until --apply)
+cairn restore --from 2026-11-20-090000
+cairn restore --from backup.yaml --apply
 
-# Automatic backups (a user LaunchAgent): on, off, or status
-swift run cairn auto-backup on --every 60
-swift run cairn auto-backup status
+# Dock icons waiting for their apps; display arrangement
+cairn dock --resume
+cairn displays --from backup.yaml --apply
+
+# Automatic backups
+cairn auto-backup on --every 60
+cairn auto-backup status
 ```
 
-### Snapshots
+While developing, use `swift run cairn …` and `swift run CairnApp`.
 
-Snapshots live in the backup folder as `snapshots/<device>/<yyyy-MM-dd-HHmmss>/`, each with
-`manifest.yaml` and `snapshot.yaml` (parent, trigger, a `+added -removed ~changed` summary, and the
-items you left unchecked, so later backups keep your selection). A new snapshot is written only when
-the setup changed. If the backup folder is a NAS share that isn't mounted, snapshots wait in
-`~/Library/Application Support/Cairn/Queue` and are copied over on the next run that can reach it.
-Cairn never creates a missing backup folder other than its own default, so an unmounted share can't
-become a stray folder under `/Volumes`.
+</details>
 
-## App
+<details>
+<summary><b>What gets scanned</b></summary>
 
-Build a real `Cairn.app` (release build, icon, ad-hoc signed for this Mac) and put it in `~/Applications`,
-so it shows up in Launchpad and Spotlight:
+| Scanner    | Reads |
+|------------|-------|
+| `brew`     | `brew leaves --installed-on-request`, `brew list --cask`, `brew tap` |
+| `mas`      | `mas list` |
+| `dock`     | `defaults export com.apple.dock -` (tile order and Dock settings) |
+| `defaults` | `defaults export <domain> -` for an allowlist of Apple and common third-party apps |
+| `displays` | CoreGraphics display list and modes; serial numbers are stored only as a short hash |
+| `shares`   | `mount` (network filesystems) and Finder's Connect to Server favorites |
 
-```bash
-scripts/build-app.sh --install
-```
+Every command goes through a read-only allowlist (`CommandPolicy.readOnly`), so a scanner can't run
+`defaults write`, `brew install`, and so on.
 
-Without `--install` it only builds `dist/Cairn.app`. Run the script again after pulling changes. The
-bundle also contains the CLI at `Cairn.app/Contents/MacOS/cairn`.
+</details>
 
-While developing, you can skip the bundle:
+<details>
+<summary><b>How snapshots are stored</b></summary>
 
-```bash
-swift run CairnApp
-```
+Snapshots live in the backup folder as `snapshots/<device>/<yyyy-MM-dd-HHmmss>/`, each holding a
+`manifest.yaml` and a `snapshot.yaml`. The `snapshot.yaml` records the parent snapshot, what triggered
+the backup, a `+added -removed ~changed` summary, and the items you unchecked, so later backups keep
+your selection. If the backup folder is an unmounted NAS share, snapshots wait in
+`~/Library/Application Support/Cairn/Queue` and are copied on the next run that can reach it. Cairn
+never creates a missing folder under `/Volumes`.
 
-The app opens on **Home**: setup stats plus Back Up, Restore (preview a backup against this Mac), and
-Sync cards. It scans on launch, starting from what you unchecked last time. Pick a category, check or uncheck items, use a preset (Minimal, Developer,
-Everything), and click **Back Up** to save the checked items as a snapshot. Settings (⌘,) turns on
-automatic backups. ⌘R scans again, ⌘E backs up.
+</details>
 
-Debug builds can save a picture of the window without Screen Recording permission:
+<details>
+<summary><b>Developer notes</b></summary>
 
-```bash
-CAIRN_SNAPSHOT=/tmp/cairn.png CAIRN_SNAPSHOT_SELECT=lookAndLayout swift run CairnApp
-```
+- One Swift package: `CairnCore` (model, scanners, restorers, storage), the `cairn` CLI, and `CairnApp` (SwiftUI).
+- Only two dependencies: [Yams](https://github.com/jpsim/Yams) and [swift-argument-parser](https://github.com/apple/swift-argument-parser).
+- Unit tests use recorded command output, never live `brew` or `defaults`.
+- Restore is tested only in throwaway macOS VMs (`scripts/vm.sh`, using [Tart](https://tart.run)), never on a real account.
+- Debug builds can screenshot their own window: `CAIRN_SNAPSHOT=/tmp/cairn.png swift run CairnApp`.
+- Design notes live in [CLAUDE.md](CLAUDE.md).
 
-## What gets scanned
+</details>
 
-| Scanner    | Reads                                                                 |
-|------------|-----------------------------------------------------------------------|
-| `brew`     | `brew leaves --installed-on-request`, `brew list --cask`, `brew tap`  |
-| `mas`      | `mas list`                                                            |
-| `dock`     | `defaults export com.apple.dock -` (tile order and Dock settings)     |
-| `defaults` | `defaults export <domain> -` for an allowlist of Apple and common third-party domains |
-| `shares`   | `mount` (SMB, AFP, NFS, WebDAV mounts) and Finder's Connect to Server favorites; usernames, never passwords |
-
-Preferences are filtered: window state, caches, identifiers, timestamps, large blobs, and anything that
-looks like a credential are dropped. Every command goes through a read-only allowlist
-(`CommandPolicy.readOnly`), so a scanner cannot run `defaults write`, `brew install`, and so on.
+<div align="center">
+<sub>A cairn is a stack of stones that marks the trail, so whoever comes next finds the way.</sub>
+</div>
