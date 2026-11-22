@@ -52,8 +52,8 @@ struct CairnMainApp: App {
             MenuBarMenu()
                 .environment(model)
         } label: {
-            Image(nsImage: MenuBarIcon.image)
-                .accessibilityLabel("Cairn")
+            Image(nsImage: model.restore.isRunning ? MenuBarIcon.progress(model.restore.fraction) : MenuBarIcon.image)
+                .accessibilityLabel(model.restore.isRunning ? "Cairn, restoring \(Int(model.restore.fraction * 100)) percent" : "Cairn")
         }
     }
 }

@@ -281,7 +281,7 @@ final class RestoreRun {
         progress(.planned(groups))
         let report = MacRestorer().apply(plan, backup: url.standardized.path, secrets: secrets, unlock: {
             if let knownKey { return knownKey }
-            if skipSecrets { throw RestoreRunError.noPassword }
+            if skipSecrets { throw VaultError.skippedByUser }
             let envelope = try VaultStore.read(in: VaultStore.folder(near: url, fallback: fallback))
             if let cached = Vault.cachedKey(for: envelope, cache: KeychainVaultKeyCache()) { return cached }
             throw RestoreRunError.noPassword

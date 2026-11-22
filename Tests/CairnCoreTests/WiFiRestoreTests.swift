@@ -59,6 +59,20 @@ final class FakeWiFi: WiFiSystem, @unchecked Sendable {
         #expect(!"\(report)".contains("made-up-pass"))
     }
 
+    @Test func choosingToSkipSecretsIsSkippedNotAFailure() throws {
+        let plan = RestorePlan(steps: [.wifi([WiFiNetwork(ssid: "Example Cafe", ref: Self.cafe, hasPassword: true)])])
+        let wifi = FakeWiFi()
+        let skipped = MacRestorer(runner: FixtureRunner(policy: .restore), wifi: wifi)
+            .apply(plan, secrets: try secrets()) { throw VaultError.skippedByUser }
+        #expect(wifi.saved.isEmpty)
+        #expect(skipped.entries[0].outcome == .skipped("skipped by you (no vault password): Example Cafe"))
+        #expect(RestoreVerification.check(skipped, after: backup()).first?.status == .skipped)
+        // A vault that wouldn't open is still a failure, said once.
+        let locked = MacRestorer(runner: FixtureRunner(policy: .restore), wifi: wifi)
+            .apply(plan, secrets: try secrets()) { throw VaultError.wrongPassword }
+        #expect(locked.entries[0].outcome == .failed("vault not unlocked (That password doesn't unlock this vault): Example Cafe"))
+    }
+
     @Test func noPasswordsMeansNoUnlockPrompt() {
         var unlocks = 0
         let plan = RestorePlan(steps: [.wifi([WiFiNetwork(ssid: "Example Guest", ref: Self.guest, hasPassword: false)])])

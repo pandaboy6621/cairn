@@ -461,29 +461,6 @@ private struct DashboardCard<Actions: View, MenuItems: View, Footer: View>: View
 }
 
 /// A circular status ring: a determinate arc, an idle track, or a dashed "not yet" ring.
-/// The ring while a restore runs: fills with overall progress and shows the percentage.
-struct RestoreRunningRing: View {
-    let fraction: Double
-    var lineWidth: CGFloat = 9
-
-    var body: some View {
-        ZStack {
-            Circle().stroke(Color.blue.opacity(0.18), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: max(0.02, min(1, fraction)))
-                .stroke(Color.blue.gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.4), value: fraction)
-            Text("\(Int((fraction * 100).rounded()))%")
-                .font(.title3.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.blue)
-                .contentTransition(.numericText())
-                .animation(.default, value: fraction)
-        }
-        .padding(5)
-    }
-}
-
 struct StatusRing: View {
     let state: RingState
     let tint: Color
@@ -557,7 +534,11 @@ struct RestorePreviewSheet: View {
                 // Before: how much already matches. After: how many steps checked out
                 // (the comparison is from before the restore, so it would be stale).
                 if case .running = model.restore.phase {
-                    RestoreRunningRing(fraction: model.restore.fraction).frame(width: 64, height: 64)
+                    // Progress shows once, as the bar under the big icon (and in the menu bar).
+                    Image(nsImage: CairnIcon.image(size: 128) ?? NSImage())
+                        .resizable()
+                        .frame(width: 60, height: 60)
+                        .frame(width: 64, height: 64)
                 } else if case .finished(let o) = model.restore.phase {
                     StatusRing(state: .progress(1, symbol: o.problems == 0 ? "checkmark" : "exclamationmark", label: nil),
                                tint: o.problems == 0 ? .green : .orange)

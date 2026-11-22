@@ -65,4 +65,46 @@ enum MenuBarIcon {
         image.isTemplate = true
         return image
     }()
+
+    /// While a restore runs: a ring that fills with its progress (in 5% steps,
+    /// so the menu bar isn't redrawn on every tick).
+    @MainActor static func progress(_ fraction: Double) -> NSImage {
+        let step = (min(1, max(0, fraction)) * 20).rounded() / 20
+        if let cached = progressCache[step] { return cached }
+        let size = NSSize(width: 18, height: 16)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let center = NSPoint(x: 9, y: 8), radius: CGFloat = 6.3
+            let track = NSBezierPath()
+            track.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
+            track.lineWidth = 2.2
+            NSColor.black.withAlphaComponent(0.3).setStroke()
+            track.stroke()
+            if step > 0 {
+                let arc = NSBezierPath()
+                arc.appendArc(withCenter: center, radius: radius, startAngle: 90, endAngle: 90 - 360 * step, clockwise: true)
+                arc.lineWidth = 2.2
+                arc.lineCapStyle = .round
+                NSColor.black.setStroke()
+                arc.stroke()
+            }
+            // A small arrow in the middle: restoring.
+            NSColor.black.setFill()
+            let arrow = NSBezierPath()
+            arrow.move(to: NSPoint(x: 9, y: 4.6))
+            arrow.line(to: NSPoint(x: 11.4, y: 7.6))
+            arrow.line(to: NSPoint(x: 9.8, y: 7.6))
+            arrow.line(to: NSPoint(x: 9.8, y: 11.2))
+            arrow.line(to: NSPoint(x: 8.2, y: 11.2))
+            arrow.line(to: NSPoint(x: 8.2, y: 7.6))
+            arrow.line(to: NSPoint(x: 6.6, y: 7.6))
+            arrow.close()
+            arrow.fill()
+            return true
+        }
+        image.isTemplate = true
+        progressCache[step] = image
+        return image
+    }
+
+    @MainActor private static var progressCache: [Double: NSImage] = [:]
 }

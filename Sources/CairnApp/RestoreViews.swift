@@ -110,8 +110,8 @@ struct Shake: GeometryEffect {
 
 // MARK: - Running
 
-/// While a restore runs: a big progress ring, the current step, and a task list
-/// whose Details arrow opens the full log.
+/// While a restore runs: a big status icon, the current step, one flat progress
+/// bar, and a task list whose Details arrow opens the full log.
 struct RestoreProgressPanel: View {
     @Environment(AppModel.self) private var model
     private let showDetails = State(initialValue: false)
@@ -122,14 +122,26 @@ struct RestoreProgressPanel: View {
         ScrollView {
             VStack(spacing: 18) {
                 VStack(spacing: 10) {
-                    RestoreRunningRing(fraction: run.fraction, lineWidth: 11)
-                        .frame(width: 110, height: 110)
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 64))
+                        .foregroundStyle(.blue)
+                        .symbolEffect(.pulse, options: .repeating)
                     Text(line)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: 460)
+                    HStack(spacing: 10) {
+                        ProgressView(value: min(1, max(0, run.fraction)))
+                            .progressViewStyle(.linear)
+                            .animation(.easeInOut(duration: 0.4), value: run.fraction)
+                        Text("\(Int((run.fraction * 100).rounded()))%")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                    .frame(maxWidth: 460)
                 }
                 .padding(.top, 8)
 
@@ -232,6 +244,10 @@ struct RestoreFinishedNotice: View {
 
     private func summary(manual: Int) -> String {
         var parts = ["\(outcome.verified) item\(outcome.verified == 1 ? "" : "s") restored and checked"]
+        let skippedSecrets = outcome.report.entries.contains {
+            if case .skipped(let why) = $0.outcome { return why.hasPrefix("skipped by you") } else { return false }
+        }
+        if skippedSecrets { parts.append("secrets skipped") }
         if manual > 0 { parts.append("\(manual) to finish by hand below") }
         return parts.joined(separator: " · ")
     }

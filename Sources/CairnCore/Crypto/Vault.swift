@@ -259,9 +259,12 @@ public enum VaultError: Error, Equatable, LocalizedError {
     case crypto(String)
     case noVault
     case alreadyExists
+    /// The user chose to restore without the vault password.
+    case skippedByUser
 
     public var errorDescription: String? {
         switch self {
+        case .skippedByUser: return "Secrets were skipped (no vault password)."
         case .passwordTooShort: return "Use a password of at least 8 characters."
         case .wrongPassword: return "That password doesn't unlock this vault."
         case .wrongRecoveryKey: return "That recovery key doesn't unlock this vault."

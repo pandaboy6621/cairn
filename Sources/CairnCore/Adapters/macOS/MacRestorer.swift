@@ -105,14 +105,34 @@ public struct MacRestorer: Sendable {
                       stepStarted: (@Sendable (_ index: Int, _ total: Int) -> Void)? = nil) -> RestoreReport {
         var key: VaultKey?
         var unlockError: String?
+        var skippedByUser = false
         func vaultKey() -> VaultKey? {
             if key == nil && unlockError == nil {
                 do {
                     guard let unlock else { throw VaultError.noVault }
                     key = try unlock()
+                } catch VaultError.skippedByUser {
+                    skippedByUser = true
+                    unlockError = VaultError.skippedByUser.localizedDescription
                 } catch { unlockError = error.localizedDescription }
             }
             return key
+        }
+        /// One outcome for a secrets step: what was saved, what failed, and what
+        /// waited on a vault that stayed locked (skipped, when the user chose that).
+        func secretOutcome(done: [String], notes: [String], locked: [String], nothing: String) -> RestoreReport.Outcome {
+            var notes = notes
+            if !locked.isEmpty {
+                if skippedByUser {
+                    if done.isEmpty && notes.isEmpty { return .skipped("skipped by you (no vault password): " + locked.joined(separator: ", ")) }
+                    notes.append("skipped by you: " + locked.joined(separator: ", "))
+                } else {
+                    notes.append("vault not unlocked (\((unlockError ?? "no key").trimmingCharacters(in: CharacterSet(charactersIn: ".")))): "
+                                 + locked.joined(separator: ", "))
+                }
+            }
+            if done.isEmpty { return notes.isEmpty ? .skipped(nothing) : .failed(notes.joined(separator: "; ")) }
+            return notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
         }
         var report = RestoreReport()
         var touched: [String] = []
@@ -197,13 +217,13 @@ public struct MacRestorer: Sendable {
                 }
 
             case .wifi(let networks):
-                var saved: [String] = [], notes: [String] = [], places: [String: [String]] = [:]
+                var saved: [String] = [], notes: [String] = [], locked: [String] = [], places: [String: [String]] = [:]
                 for n in networks {
                     guard n.hasPassword, let sealed = secrets.secrets[n.ref] else {
                         report.manualSteps.append(.init(category: "wi-fi", text: "join \(n.ssid) from the Wi-Fi menu and type its password (none was saved)"))
                         continue
                     }
-                    guard let key = vaultKey() else { notes.append("\(n.ssid): vault not unlocked"); continue }
+                    guard let key = vaultKey() else { locked.append(n.ssid); continue }
                     do {
                         var password = try key.open(sealed, ref: n.ref)
                         defer { Vault.zero(&password) }
@@ -217,7 +237,6 @@ public struct MacRestorer: Sendable {
                         notes.append("\(n.ssid): couldn't decrypt (\(error.localizedDescription))")
                     }
                 }
-                if let unlockError { notes.append("vault: \(unlockError)") }
                 // macOS adds a network to its list the first time it's joined (backups don't
                 // record the security type needed to add it blind). Without root, CoreWLAN
                 // saves to the login keychain (seen in VM testing); whether joining picks it
@@ -227,20 +246,18 @@ public struct MacRestorer: Sendable {
                         text: "pick \(ssids.joined(separator: ", ")) once in the Wi-Fi menu. The password is saved in your \(place); "
                             + "if macOS still asks for it, Keychain Access shows it (search for the network name)"))
                 }
-                let outcome: RestoreReport.Outcome = saved.isEmpty
-                    ? (notes.isEmpty ? .skipped("no passwords saved in the backup") : .failed(notes.joined(separator: "; ")))
-                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                let outcome = secretOutcome(done: saved, notes: notes, locked: locked, nothing: "no passwords saved in the backup")
                 report.entries.append(.init(step: step, outcome: outcome, written: saved.isEmpty ? nil : .wifi(saved)))
 
             case .secrets(let items):
-                var done: [String] = [], notes: [String] = []
+                var done: [String] = [], notes: [String] = [], locked: [String] = []
                 for item in items {
                     guard item.hasSecret, let sealed = secrets.secrets[item.ref] else {
                         report.manualSteps.append(.init(category: Self.checklistCategory(item.type),
                             text: "\(item.title) wasn't saved in the backup; copy it over by hand"))
                         continue
                     }
-                    guard let key = vaultKey() else { notes.append("\(item.title): vault not unlocked"); continue }
+                    guard let key = vaultKey() else { locked.append(item.title); continue }
                     do {
                         var secret = try key.open(sealed, ref: item.ref)
                         defer { Vault.zero(&secret) }
@@ -259,10 +276,7 @@ public struct MacRestorer: Sendable {
                         notes.append("\(item.title): couldn't decrypt (\(error.localizedDescription))")
                     }
                 }
-                if let unlockError { notes.append("vault: \(unlockError)") }
-                let outcome: RestoreReport.Outcome = done.isEmpty
-                    ? (notes.isEmpty ? .skipped("nothing new to restore") : .failed(notes.joined(separator: "; ")))
-                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                let outcome = secretOutcome(done: done, notes: notes, locked: locked, nothing: "nothing new to restore")
                 report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .secrets(done)))
 
             case .wallpaper(let w, _):

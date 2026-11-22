@@ -31,6 +31,27 @@ enum DebugSnapshot {
                 if let model = AppModel.current { model.vault.begin(model) }
             }
         }
+        if let out = env["CAIRN_SNAPSHOT_MENU_ICON"] {
+            // A strip of the menu bar icon: idle, then restoring at 0, 30, 65, 100%.
+            let icons = [MenuBarIcon.image] + [0, 0.3, 0.65, 1].map { MenuBarIcon.progress($0) }
+            let strip = NSImage(size: NSSize(width: 18 * icons.count + 6 * (icons.count - 1), height: 16), flipped: false) { _ in
+                for (i, icon) in icons.enumerated() { icon.draw(in: NSRect(x: i * 24, y: 0, width: 18, height: 16)) }
+                return true
+            }
+            if let tiff = strip.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                let scaled = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(strip.size.width * 4), pixelsHigh: 64,
+                                              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+                scaled.size = strip.size
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: scaled)
+                NSColor.white.setFill(); NSRect(origin: .zero, size: strip.size).fill()
+                strip.draw(in: NSRect(origin: .zero, size: strip.size))
+                NSGraphicsContext.restoreGraphicsState()
+                _ = rep
+                try? scaled.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+            }
+        }
         if let state = env["CAIRN_SNAPSHOT_RESTORE"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) { AppModel.current?.restore.debugShow(state) }
         }
