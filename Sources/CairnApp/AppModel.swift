@@ -94,6 +94,8 @@ final class AppModel {
     let vault = VaultFlow()
     /// Applying a restore from the preview sheet.
     let restore = RestoreRun()
+    /// Open at Login.
+    let loginItem = LoginItem()
 
     /// The app's single model, for the debug snapshot hook.
     static weak var current: AppModel?

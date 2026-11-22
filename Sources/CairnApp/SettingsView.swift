@@ -73,10 +73,24 @@ private struct BackupSettings: View {
 
             Section {
                 Toggle("Show Cairn in the menu bar", isOn: $model.showInMenuBar)
+                Toggle("Open at login", isOn: Binding(get: { model.loginItem.isOn || model.loginItem.needsApproval },
+                                                      set: { model.loginItem.set($0) }))
+                if model.loginItem.needsApproval {
+                    HStack {
+                        Text("macOS needs you to allow Cairn in Login Items.").foregroundStyle(.orange)
+                        Spacer()
+                        Button("Open Login Items…") { model.loginItem.openSystemSettings() }
+                    }
+                    .font(.callout)
+                }
+                if let error = model.loginItem.error {
+                    Text(error).font(.callout).foregroundStyle(.red)
+                }
             } footer: {
-                Text("Back up from the menu bar without opening the window. While it's showing, closing the window keeps Cairn running there.")
+                Text("Back up from the menu bar without opening the window. While it's showing, closing the window keeps Cairn running there. Opened at login, Cairn starts quietly in the menu bar.")
                     .foregroundStyle(.secondary)
             }
+            .onAppear { model.loginItem.refresh() }
 
             Section {
                 Toggle("Ask where to save each backup", isOn: $model.askWhereToSave)

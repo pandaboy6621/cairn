@@ -60,10 +60,24 @@ struct CairnMainApp: App {
 
 /// Run from `swift run`, the app has no bundle; make it a regular foreground app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Read before launch finishes: the launch event is gone afterwards.
+    private var openedAtLogin = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        openedAtLogin = LoginItem.launchedAtLogin()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.applicationIconImage = CairnIcon.image(size: 512)
-        NSApp.activate(ignoringOtherApps: true)
+        if openedAtLogin && AppModel.showsMenuBarIcon {
+            // Opened at login: stay in the menu bar instead of popping a window.
+            DispatchQueue.main.async {
+                for window in NSApp.windows where window.canBecomeMain { window.close() }
+            }
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         #if DEBUG
         DebugSnapshot.scheduleIfRequested()
         #endif

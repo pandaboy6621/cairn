@@ -24,6 +24,9 @@ struct MenuBarMenu: View {
         Toggle("Back Up Automatically", isOn: Binding(
             get: { model.autoBackup != nil },
             set: { model.setAutoBackup($0) }))
+        Toggle("Open at Login", isOn: Binding(
+            get: { model.loginItem.isOn || model.loginItem.needsApproval },
+            set: { model.loginItem.set($0) }))
 
         Divider()
         Button("Open Backup Folder") { model.showBackupFolder() }
