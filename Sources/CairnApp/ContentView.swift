@@ -195,7 +195,8 @@ private struct DeviceHeader: View {
         .animation(.easeInOut(duration: 0.25), value: model.activity?.label)
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .padding(.bottom, 4)
+        // Room between this Mac and the Home row, so the header doesn't read as a list item.
+        .padding(.bottom, 14)
     }
 }
 
