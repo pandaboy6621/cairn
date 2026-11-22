@@ -47,6 +47,7 @@ Rules:
 - Every item has a stable `id` and an `include` flag (this is what the checklist UI toggles).
 - Settings carry an abstract `key` plus a per-platform adapter. Unknown or macOS-only settings are kept but flagged `platforms: [macos]`.
 - Manifest files are deterministic: sorted keys, stable ordering, so snapshot diffs are clean.
+- Adding an optional section or field (like `layout.displays` or `shares`) that older backups simply lack does not bump `schema`. Bump it only for breaking changes (renamed, removed, or restructured fields), with a migration for old manifests.
 
 ## Categories (checklist tree)
 Each category expands into individual items with their own checkboxes, a search box, and item counts. Presets: Minimal, Developer, Everything.
