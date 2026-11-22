@@ -89,6 +89,8 @@ final class AppModel {
     /// Latest restore preview; `showingRestorePreview` drives the sheet.
     var restorePreview: RestorePreview?
     var showingRestorePreview = false
+    /// The backup this app last finished restoring (the Restore card shows it as done).
+    var lastRestoredURL: URL?
 
     /// The Sensitive tier's password and unlocked key (memory only).
     let vault = VaultFlow()

@@ -201,6 +201,9 @@ private struct BackupCard: View {
 private struct RestoreCard: View {
     @Environment(AppModel.self) private var model
 
+    /// This app finished restoring this backup.
+    private func restored(_ p: RestorePreview) -> Bool { model.lastRestoredURL == p.url.standardizedFileURL }
+
     var body: some View {
         let preview = model.restorePreview
         let latest = model.foundBackups.first
@@ -208,13 +211,19 @@ private struct RestoreCard: View {
         DashboardCard(
             title: "Restore",
             tint: .blue,
-            ring: preview.map { .progress($0.comparison.matchFraction, symbol: nil,
-                                          label: "\(Int(($0.comparison.matchFraction * 100).rounded()))%") }
-                ?? .idle(symbol: "arrow.counterclockwise"),
+            // Matching, or just restored: a full ring with a checkmark, so it never
+            // reads as a restore stuck part way.
+            ring: preview.map { p in
+                let left = p.comparison.itemsToRestore
+                return left == 0 || restored(p) ? .progress(1, symbol: "checkmark", label: nil)
+                    : .progress(p.comparison.matchFraction, symbol: nil,
+                                label: "\(Int((p.comparison.matchFraction * 100).rounded()))%")
+            } ?? .idle(symbol: "arrow.counterclockwise"),
             status: preview.map { p in
-                p.comparison.itemsToRestore == 0
-                    ? "This Mac already matches"
-                    : "\(p.comparison.itemsToRestore) item\(p.comparison.itemsToRestore == 1 ? "" : "s") would change"
+                let left = p.comparison.itemsToRestore
+                if left == 0 { return restored(p) ? "Restored · matches this Mac" : "This Mac already matches" }
+                if restored(p) { return "Restored · \(left) item\(left == 1 ? "" : "s") left as \(left == 1 ? "it is" : "they are")" }
+                return "\(left) item\(left == 1 ? "" : "s") would change"
             } ?? (latest == nil ? "Preview a backup" : "\(model.foundBackups.count) backup\(model.foundBackups.count == 1 ? "" : "s") found"),
             detail: preview.map { "Compared with \($0.fileName)" }
                 ?? latest.map { "Latest: \($0.deviceName), \($0.created.formatted(.relative(presentation: .named))). Or drop a backup file here." }

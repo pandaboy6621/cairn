@@ -190,6 +190,7 @@ final class RestoreRun {
             fraction = 1
             addLog("Finished: \(outcome.verified) checked, \(outcome.problems) problem\(outcome.problems == 1 ? "" : "s"), \(outcome.report.manualSteps.count) to do by hand", isStep: true)
             phase = .finished(outcome)
+            model.lastRestoredURL = url.standardizedFileURL
             model.scan() // the Mac changed; refresh the checklist and preview
         }
     }
