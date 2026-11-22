@@ -8,7 +8,7 @@ public struct ScanReport: Sendable {
 /// Runs the selected scanners and assembles a manifest. Read-only.
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
-        case brew, mas, dock, displays, defaults
+        case brew, mas, dock, displays, defaults, shares
 
         /// Human-readable name for progress messages.
         public var title: String {
@@ -18,6 +18,7 @@ public struct SetupScanner: Sendable {
             case .dock: return "the Dock"
             case .displays: return "displays"
             case .defaults: return "preferences"
+            case .shares: return "network shares"
             }
         }
     }
@@ -26,12 +27,17 @@ public struct SetupScanner: Sendable {
     public var extraDomains: [String]
     public var displays: DisplaySystem
     public var now: @Sendable () -> Date
+    /// Which preference domains belong to sandboxed apps (skipped). Injected for tests.
+    public var isSandboxed: @Sendable (String) -> Bool
 
-    public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = CoreGraphicsDisplays(), now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = CoreGraphicsDisplays(),
+                now: @escaping @Sendable () -> Date = { Date() },
+                isSandboxed: @escaping @Sendable (String) -> Bool = DefaultsScanner.hasContainer) {
         self.runner = runner
         self.extraDomains = extraDomains
         self.displays = displays
         self.now = now
+        self.isSandboxed = isSandboxed
     }
 
     /// Progress through a scan: `completed` of `total` scanners are done and
@@ -65,6 +71,7 @@ public struct SetupScanner: Sendable {
                 manifest.packages += found.packages
                 manifest.apps += found.apps
                 manifest.settings += found.settings
+                manifest.shares += found.shares
                 if let dock = found.dock { manifest.layout.dock = dock }
                 if let displays = found.displays { manifest.layout.displays = displays }
                 warnings += found.warnings
@@ -85,11 +92,12 @@ public struct SetupScanner: Sendable {
         case .mas: return MASScanner()
         case .dock: return DockScanner()
         case .displays: return DisplayScanner(system: displays)
-        case .defaults: return DefaultsScanner(extraDomains: extraDomains)
+        case .defaults: return DefaultsScanner(extraDomains: extraDomains, isSandboxed: isSandboxed)
+        case .shares: return NetworkSharesScanner()
         }
     }
 
-    func device() -> Device {
+    public func device() -> Device {
         let name = (try? runner.output(Command("scutil", ["--get", "LocalHostName"])))?
             .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let version = (try? runner.output(Command("sw_vers", ["-productVersion"])))?

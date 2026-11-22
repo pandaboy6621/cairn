@@ -1,8 +1,8 @@
 import Foundation
 
-/// The eight top-level groups in the checklist tree (see CLAUDE.md).
+/// The nine top-level groups in the checklist tree (see CLAUDE.md).
 public enum ChecklistCategory: String, CaseIterable, Identifiable, Sendable {
-    case packages, appStore, lookAndLayout, systemSettings, appPreferences, developer, fonts, sensitive
+    case packages, appStore, lookAndLayout, systemSettings, appPreferences, developer, fonts, networkShares, sensitive
 
     public var id: String { rawValue }
 
@@ -15,6 +15,7 @@ public enum ChecklistCategory: String, CaseIterable, Identifiable, Sendable {
         case .appPreferences: return "App preferences"
         case .developer: return "Developer"
         case .fonts: return "Fonts"
+        case .networkShares: return "Network shares"
         case .sensitive: return "Sensitive"
         }
     }
@@ -29,6 +30,7 @@ public enum ChecklistCategory: String, CaseIterable, Identifiable, Sendable {
         case .appPreferences: return "slider.horizontal.3"
         case .developer: return "terminal"
         case .fonts: return "textformat"
+        case .networkShares: return "externaldrive.connected.to.line.below"
         case .sensitive: return "lock"
         }
     }
@@ -171,6 +173,7 @@ public struct Checklist: Sendable {
         } else {
             m.layout.displays = nil
         }
+        m.shares = source.shares.filter { checked.contains(Self.id(share: $0)) }.map { var s = $0; s.include = true; return s }
         m.sensitive = sensitiveUnlocked ? source.sensitive.filter { checked.contains(Self.id(sensitive: $0)) } : []
         return m
     }
@@ -183,6 +186,7 @@ public struct Checklist: Sendable {
     static func id(app a: AppItem) -> String { "app:\(a.id)" }
     static func id(setting s: SettingItem) -> String { "setting:\(s.key)" }
     static func id(sensitive s: SensitiveRef) -> String { "sensitive:\(s.ref)" }
+    static func id(share s: ShareItem) -> String { "share:\(s.url)" }
 
     static func buildItems(_ m: Manifest) -> [ChecklistItem] {
         var out: [ChecklistItem] = []
@@ -219,6 +223,12 @@ public struct Checklist: Sendable {
         }
         // Group by sub-heading so related settings sit together.
         out += settingItems.sorted { ($0.category.rawValue, $0.group, $0.title) < ($1.category.rawValue, $1.group, $1.title) }
+        for s in m.shares {
+            let group = s.favorite ? "Connect to Server favorites" : "Connected now"
+            let user = s.username.map { "as \($0)" } ?? ""
+            out.append(ChecklistItem(id: id(share: s), category: .networkShares, group: group,
+                                     title: s.url, detail: user, isChecked: s.include))
+        }
         for s in m.sensitive {
             out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive, group: s.type,
                                      title: s.ref, detail: "", isChecked: false))
@@ -242,7 +252,7 @@ public struct Checklist: Sendable {
             return [.lookAndLayout, .systemSettings].contains(item.category)
         case .developer:
             switch item.category {
-            case .packages, .lookAndLayout, .systemSettings, .developer: return true
+            case .packages, .lookAndLayout, .systemSettings, .developer, .networkShares: return true
             case .appPreferences:
                 return SettingCategory.developerDomains.contains { item.group == SettingCategory.displayName(domain: $0) }
             default: return false

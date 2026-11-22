@@ -62,22 +62,30 @@ import Testing
 
 @Suite struct DefaultsScannerTests {
     func scan() throws -> ScanContribution {
-        try DefaultsScanner().scan(using: Fixtures.fullRunner())
+        try DefaultsScanner(isSandboxed: { _ in false }).scan(using: Fixtures.fullRunner())
     }
 
-    @Test func scansOnlyAllowlistedDomainsThatArePresent() throws {
+    @Test func probesTheAllowlistWithoutListingDomains() throws {
         let runner = Fixtures.fullRunner()
-        _ = try DefaultsScanner().scan(using: runner)
+        _ = try DefaultsScanner(isSandboxed: { _ in false }).scan(using: runner)
         let exported = runner.invoked.filter { $0.arguments.first == "export" }.map { $0.arguments[1] }
-        #expect(exported == ["NSGlobalDomain", "com.apple.finder", "com.apple.screencapture", "com.googlecode.iterm2"])
+        #expect(exported == DefaultsScanner.appleDomains + DefaultsScanner.thirdPartyDomains)
         #expect(!exported.contains("com.example.unlisted"))
         #expect(!exported.contains("com.apple.dock")) // owned by DockScanner
+        #expect(!runner.invoked.contains(Command("defaults", ["domains"])))
+    }
+
+    @Test func skipsSandboxedAppsWithoutReadingThem() throws {
+        let runner = Fixtures.fullRunner()
+        let found = try DefaultsScanner(isSandboxed: { $0 == "com.apple.TextEdit" }).scan(using: runner)
+        #expect(!runner.invoked.contains(Command("defaults", ["export", "com.apple.TextEdit", "-"])))
+        #expect(found.warnings.contains { $0.contains("sandboxed") && $0.contains("com.apple.TextEdit") })
     }
 
     @Test func extraDomainsAreAdded() throws {
         let runner = Fixtures.fullRunner()
         runner.stub(Command("defaults", ["export", "com.example.unlisted", "-"]), stdout: "")
-        _ = try DefaultsScanner(extraDomains: ["com.example.unlisted"]).scan(using: runner)
+        _ = try DefaultsScanner(extraDomains: ["com.example.unlisted"], isSandboxed: { _ in false }).scan(using: runner)
         #expect(runner.invoked.contains(Command("defaults", ["export", "com.example.unlisted", "-"])))
     }
 
@@ -121,10 +129,6 @@ import Testing
         #expect(found.warnings.count == 1)
         #expect(found.warnings.first?.contains("com.apple.screencapture") == true)
     }
-
-    @Test func parsesDomainList() {
-        #expect(DefaultsScanner.parseDomains("a.b, c.d,\ne.f\n") == ["a.b", "c.d", "e.f"])
-    }
 }
 
 @Suite struct PreferenceFilterTests {
@@ -164,7 +168,7 @@ import Testing
 @Suite struct SetupScannerTests {
     @Test func fullScanAssemblesANormalizedManifest() throws {
         let fixed = Samples.date
-        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan()
+        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }).scan()
         let m = report.manifest
         #expect(m.device == Device(name: "test-mac", os: "macos", osVersion: "14.5"))
         #expect(m.created == fixed)
@@ -175,12 +179,15 @@ import Testing
         #expect(Set(m.settings.map(\.key)).count == m.settings.count)
         #expect(m.settings.allSatisfy { $0.platforms == ["macos"] })
         #expect(report.warnings.count == 1)
+        #expect(m.shares.map(\.url) == ["afp://oldmac.example/Public", "https://dav.example/remote.php/webdav",
+                                        "nfs://files.example/export/home", "smb://files.example/Team%20Share",
+                                        "smb://nas.example/Media"])
     }
 
     @Test func scanIsDeterministic() throws {
         let fixed = Samples.date
-        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan().manifest)
-        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }).scan().manifest)
+        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }).scan().manifest)
+        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }).scan().manifest)
         #expect(a == b)
     }
 

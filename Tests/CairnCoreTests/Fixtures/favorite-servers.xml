@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>$archiver</key><string>NSKeyedArchiver</string>
+	<key>$objects</key>
+	<array>
+		<string>$null</string>
+		<dict><key>items</key><array><dict><key>CF$UID</key><integer>2</integer></dict></array></dict>
+		<string>Made-up favorites for tests</string>
+		<string>smb://alex@nas.example/Media/</string>
+		<dict><key>NS.relative</key><string>afp://oldmac.example/Public</string></dict>
+		<data>Ym9vawAAAQBuZnM6Ly9maWxlcy5leGFtcGxlL2V4cG9ydC9ob21lAAAEbWFyaw==</data>
+		<string>vnc://screen.example</string>
+	</array>
+	<key>$top</key><dict><key>root</key><dict><key>CF$UID</key><integer>1</integer></dict></dict>
+	<key>$version</key><integer>100000</integer>
+</dict>
+</plist>

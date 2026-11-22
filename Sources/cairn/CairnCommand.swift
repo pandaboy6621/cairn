@@ -8,7 +8,7 @@ struct CairnCommand: ParsableCommand {
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
         version: Cairn.version,
-        subcommands: [Scan.self, Diff.self, Restore.self, Dock.self, Displays.self]
+        subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self]
     )
 }
 
@@ -23,7 +23,7 @@ struct Restore: ParsableCommand {
             """
     )
 
-    @Option(name: .long, help: "The backup manifest to restore.")
+    @Option(name: .long, help: "The backup manifest to restore, or a snapshot id from `cairn snapshots`.")
     var from: String
 
     @Flag(name: .long, help: "Actually change this Mac (after showing the plan).")
@@ -33,7 +33,8 @@ struct Restore: ParsableCommand {
     var report: String?
 
     func run() throws {
-        let backup = try ManifestCoder.read(from: URL(fileURLWithPath: from))
+        let source = try Snapshots.resolve(from)
+        let backup = try ManifestCoder.read(from: source)
         let scanner = SetupScanner()
         let before = scanner.scan()
         let plan = RestorePlan.make(backup: backup, current: before.manifest, manual: MacRestorer.manualStep)
@@ -54,7 +55,7 @@ struct Restore: ParsableCommand {
         guard !plan.changes.isEmpty else { return }
 
         print("\nApplying…")
-        let result = restorer.apply(plan, backup: URL(fileURLWithPath: from).standardized.path)
+        let result = restorer.apply(plan, backup: source.standardized.path)
         if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
         for w in result.warnings { stderr("note: \(w)") }
         if !result.waitingForDock.isEmpty {
@@ -145,6 +146,166 @@ struct Dock: ParsableCommand {
         if pending.isEmpty { agent.remove(); return }
         guard let cairn = Bundle.main.executableURL?.resolvingSymlinksInPath().path else { return }
         try agent.install(cairn: cairn)
+    }
+}
+
+/// The backup folder the app uses, so the CLI and the app agree.
+func appBackupFolder() -> URL {
+    UserDefaults(suiteName: "dev.cairn.Cairn")?.string(forKey: "backupFolder")
+        .map { URL(fileURLWithPath: $0, isDirectory: true) } ?? BackupFolder.defaultURL
+}
+
+struct Backup: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Scan this Mac and save a snapshot, if anything changed since the last one.",
+        discussion: """
+            Read-only on this Mac: it only writes the snapshot. Items you unchecked in the
+            last snapshot stay unchecked. If the backup folder is offline (an unmounted NAS
+            share), the snapshot is queued locally and copied over on a later run.
+            """
+    )
+
+    @Option(name: .long, help: "The backup folder. Default: the one set in the app.")
+    var to: String?
+
+    @Flag(name: .long, help: "Save a snapshot even if nothing changed.")
+    var force = false
+
+    @Flag(name: .long, help: "Used by the auto-backup agent: log only when something happens.")
+    var auto = false
+
+    func run() throws {
+        let folder = to.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) } ?? appBackupFolder()
+        let backup = BackupRun(folder: folder)
+        let report = SetupScanner().scan()
+        let previous = backup.previousExclusions(device: report.manifest.device.name)
+        let (manifest, excluded) = BackupRun.select(report.manifest, excluding: previous)
+        let result = try backup.run(manifest, excluded: excluded, trigger: auto ? .auto : .manual, force: force)
+
+        let stamp = auto ? "[\(ISO8601DateFormatter().string(from: Date()))] " : ""
+        for s in result.flushed { print("\(stamp)Copied queued snapshot \(s.id) to \(BackupFolder.displayPath(folder))") }
+        switch result.outcome {
+        case .saved(let s):
+            print("\(stamp)Saved snapshot \(s.id) (\(s.info.summary)) in \(BackupFolder.displayPath(s.url))")
+        case .queued(let s):
+            print("\(stamp)\(BackupFolder.displayPath(folder)) is offline; queued snapshot \(s.id) until it's back.")
+        case .unchanged(let s):
+            if !auto { print("No changes since snapshot \(s.id).") }
+        }
+        if !auto { for w in report.warnings { stderr("warning: \(w)") } }
+    }
+}
+
+struct Snapshots: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "List snapshots, or show what changed between two.",
+        discussion: """
+            With no arguments, lists this Mac's snapshots, newest first.
+            With --diff, compares a snapshot with the one before it (default: the newest),
+            or two snapshots with each other. To roll back, run
+            `cairn restore --from <snapshot id>` (a dry run until you add --apply).
+            """
+    )
+
+    @Option(name: .customLong("in"), help: "The backup folder. Default: the one set in the app.")
+    var folder: String?
+
+    @Flag(name: .long, help: "List every device's snapshots, not just this Mac's.")
+    var all = false
+
+    @Flag(name: .long, help: "Show changes instead of listing.")
+    var diff = false
+
+    @Argument(help: "With --diff: one snapshot id (compared with its parent) or two.")
+    var ids: [String] = []
+
+    func validate() throws {
+        if !diff && !ids.isEmpty { throw ValidationError("Snapshot ids only make sense with --diff.") }
+        if ids.count > 2 { throw ValidationError("--diff takes at most two snapshot ids.") }
+    }
+
+    func run() throws {
+        let store = SnapshotStore(root: folder.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? appBackupFolder())
+        let device = all ? nil : SetupScanner().device().name
+        guard diff else {
+            let list = store.list(device: device)
+            if list.isEmpty { print("No snapshots in \(BackupFolder.displayPath(store.root))."); return }
+            for s in list {
+                let who = all ? "  \(s.info.device)" : ""
+                print("\(s.id)  \(s.info.trigger.rawValue.padding(toLength: 6, withPad: " ", startingAt: 0))  \(s.info.summary)\(who)")
+            }
+            let queued = BackupRun(folder: store.root).queueStore.list(device: device)
+            if !queued.isEmpty { print("\(queued.count) more queued locally until the backup folder is back.") }
+            return
+        }
+        func find(_ id: String) throws -> Snapshot {
+            guard let s = store.find(id, device: device) else { throw ValidationError("No snapshot \(id) (or it matches more than one).") }
+            return s
+        }
+        let new = try ids.count == 2 ? find(ids[1]) : (ids.first.map(find) ?? store.list(device: device).first
+            ?? { throw ValidationError("No snapshots yet.") }())
+        let old = try ids.count == 2 ? find(ids[0]) : (store.parent(of: new)
+            ?? { throw ValidationError("\(new.id) is the first snapshot; nothing to compare with.") }())
+        print("\(old.id) → \(new.id)")
+        print(ManifestDiff.between(try store.manifest(of: old), try store.manifest(of: new)).render(), terminator: "")
+    }
+
+    /// A manifest path, or a snapshot id in the app's backup folder.
+    static func resolve(_ from: String) throws -> URL {
+        let path = (from as NSString).expandingTildeInPath
+        if FileManager.default.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
+        if let s = SnapshotStore(root: appBackupFolder()).find(from) { return s.manifestURL }
+        throw ValidationError("\(from) is neither a file nor a snapshot id (see `cairn snapshots --all`).")
+    }
+}
+
+struct AutoBackup: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "auto-backup",
+        abstract: "Turn automatic backups on or off, or show their status.",
+        discussion: """
+            `on` installs a user LaunchAgent that runs `cairn backup --auto` at login,
+            every --every minutes, and shortly after Dock, Finder, keyboard or trackpad
+            preferences change (at most once per 10 minutes). Log:
+            ~/Library/Logs/Cairn/auto-backup.log
+            """
+    )
+
+    enum Action: String, ExpressibleByArgument, CaseIterable { case on, off, status }
+
+    @Argument(help: "on, off, or status.")
+    var action: Action = .status
+
+    @Option(name: .long, help: "With on: minutes between scheduled backups.")
+    var every = AutoBackupAgent.defaultMinutes
+
+    @Option(name: .long, help: "With on: the backup folder. Default: the one set in the app.")
+    var to: String?
+
+    func validate() throws {
+        // launchd won't start the agent more than once per throttle interval anyway.
+        let floor = AutoBackupAgent.throttleSeconds / 60
+        if every < floor { throw ValidationError("--every must be at least \(floor) minutes.") }
+    }
+
+    func run() throws {
+        let agent = AutoBackupAgent()
+        switch action {
+        case .status:
+            guard let s = agent.status else { print("Auto-backup is off."); return }
+            print("Auto-backup is on: every \(s.everyMinutes) minutes into \(BackupFolder.displayPath(URL(fileURLWithPath: s.folder))).")
+            print("Log: \(BackupFolder.displayPath(agent.logURL))")
+        case .off:
+            agent.remove()
+            print("Auto-backup is off.")
+        case .on:
+            guard let cairn = Bundle.main.executableURL?.resolvingSymlinksInPath().path else {
+                throw ValidationError("Can't find this cairn binary.")
+            }
+            let folder = to.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) } ?? appBackupFolder()
+            try agent.install(cairn: cairn, folder: folder, everyMinutes: every)
+            print("Auto-backup is on: every \(every) minutes into \(BackupFolder.displayPath(folder)).")
+        }
     }
 }
 

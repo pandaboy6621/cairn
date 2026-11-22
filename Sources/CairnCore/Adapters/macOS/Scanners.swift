@@ -8,6 +8,7 @@ public struct ScanContribution: Sendable {
     public var settings: [SettingItem] = []
     public var dock: DockLayout?
     public var displays: DisplayLayout?
+    public var shares: [ShareItem] = []
     public var warnings: [String] = []
 
     public init() {}
@@ -162,7 +163,7 @@ public struct DefaultsScanner: SetupScanning {
         "com.apple.ActivityMonitor",
     ]
 
-    /// Common third-party apps, scanned only if installed (present in `defaults domains`).
+    /// Common third-party apps. A domain that isn't there exports as an empty dict.
     public static let thirdPartyDomains = [
         "com.googlecode.iterm2",
         "com.microsoft.VSCode",
@@ -190,15 +191,35 @@ public struct DefaultsScanner: SetupScanning {
     /// Domains the user added with `--domain`. Still filtered.
     public var extraDomains: [String]
 
-    public init(extraDomains: [String] = []) {
+    /// Whether an app keeps its preferences in a sandbox container. Reading those
+    /// counts as reading another app's data, which macOS blocks or asks about
+    /// (Files & Folders), so they're skipped. Injected for tests.
+    public var isSandboxed: @Sendable (String) -> Bool
+
+    public init(extraDomains: [String] = [],
+                isSandboxed: @escaping @Sendable (String) -> Bool = DefaultsScanner.hasContainer) {
         self.extraDomains = extraDomains
+        self.isSandboxed = isSandboxed
+    }
+
+    /// `~/Library/Containers/<domain>` exists. Only the folder's existence is
+    /// checked; nothing inside it is read.
+    public static let hasContainer: @Sendable (String) -> Bool = { domain in
+        FileManager.default.fileExists(atPath: NSHomeDirectory() + "/Library/Containers/" + domain)
     }
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
         var out = ScanContribution()
-        let present = Self.parseDomains(try runner.output(Command("defaults", ["domains"])))
+        // Never `defaults domains`: listing every domain walks other apps' sandbox
+        // containers, which macOS reports as Cairn reading their data (seen in a VM
+        // as a blocked access to Photos). Probe the allowlist instead.
+        let candidates = domainsToScan()
+        let sandboxed = candidates.filter(isSandboxed)
+        if !sandboxed.isEmpty {
+            out.warnings.append("defaults: skipped sandboxed apps (macOS protects their data): " + sandboxed.joined(separator: ", "))
+        }
 
-        for domain in domainsToScan(present: present) {
+        for domain in candidates where !sandboxed.contains(domain) {
             do {
                 let plist = try PlistConverter.parseDomain(
                     runner.output(Command("defaults", ["export", domain, "-"])))
@@ -214,17 +235,10 @@ public struct DefaultsScanner: SetupScanning {
         return out
     }
 
-    func domainsToScan(present: Set<String>) -> [String] {
-        var result: [String] = []
-        for d in Self.appleDomains where d == "NSGlobalDomain" || present.contains(d) { result.append(d) }
-        for d in Self.thirdPartyDomains where present.contains(d) { result.append(d) }
+    func domainsToScan() -> [String] {
+        var result = Self.appleDomains + Self.thirdPartyDomains
         for d in extraDomains where !result.contains(d) && d != DockScanner.domain { result.append(d) }
         return result
-    }
-
-    /// `defaults domains` prints one comma-separated line.
-    static func parseDomains(_ output: String) -> Set<String> {
-        Set(output.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
     }
 }
 

@@ -61,20 +61,16 @@ public struct MacDock: Sendable {
 public struct DockAgent: Sendable {
     public static let label = "dev.cairn.dock-resume"
 
-    public var runner: CommandRunner
-    public var home: URL
-    public var uid: UInt32
+    var agent: CairnLaunchAgent
 
     public init(runner: CommandRunner = ProcessRunner(policy: .restore),
                 home: URL = URL(fileURLWithPath: NSHomeDirectory()), uid: UInt32 = getuid()) {
-        self.runner = runner
-        self.home = home
-        self.uid = uid
+        agent = CairnLaunchAgent(label: Self.label, runner: runner, home: home, uid: uid)
     }
 
-    public var plistURL: URL { home.appendingPathComponent("Library/LaunchAgents/\(Self.label).plist") }
-    public var logURL: URL { home.appendingPathComponent("Library/Logs/Cairn/dock-resume.log") }
-    public var isInstalled: Bool { FileManager.default.fileExists(atPath: plistURL.path) }
+    public var plistURL: URL { agent.plistURL }
+    public var logURL: URL { agent.logURL("dock-resume") }
+    public var isInstalled: Bool { agent.isInstalled }
 
     func plist(cairn: String) -> [String: Any] {
         [
@@ -85,7 +81,7 @@ public struct DockAgent: Sendable {
             // a single-file watch did; the watch stays in case other versions honor it.
             "StartInterval": 300,
             "RunAtLoad": true,
-            "WatchPaths": ["/Applications", home.appendingPathComponent("Applications").path],
+            "WatchPaths": ["/Applications", agent.home.appendingPathComponent("Applications").path],
             "StandardOutPath": logURL.path,
             "StandardErrorPath": logURL.path,
         ]
@@ -93,21 +89,9 @@ public struct DockAgent: Sendable {
 
     /// Writes the agent for this `cairn` binary and loads it (replacing an older one).
     /// Never call this from the agent itself: unloading the old job stops the caller.
-    public func install(cairn: String) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try fm.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if isInstalled { _ = try? runner.run(Command("launchctl", ["bootout", "gui/\(uid)/\(Self.label)"])) }
-        let data = try PropertyListSerialization.data(fromPropertyList: plist(cairn: cairn), format: .xml, options: 0)
-        try data.write(to: plistURL, options: .atomic)
-        _ = try runner.output(Command("launchctl", ["bootstrap", "gui/\(uid)", plistURL.path]))
-    }
+    public func install(cairn: String) throws { try agent.install(plist(cairn: cairn)) }
 
     /// Unloads and deletes the agent. When the agent itself calls this, launchd
     /// stops it, so it must be the last thing done.
-    public func remove() {
-        guard isInstalled else { return }
-        try? FileManager.default.removeItem(at: plistURL)
-        _ = try? runner.run(Command("launchctl", ["bootout", "gui/\(uid)/\(Self.label)"]))
-    }
+    public func remove() { agent.remove() }
 }

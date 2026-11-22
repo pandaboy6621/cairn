@@ -23,8 +23,8 @@ public struct CommandPolicy: Sendable {
         case "mas":
             return args == ["list"]
         case "defaults":
-            // `defaults export <domain> -` writes to stdout only.
-            if args == ["domains"] { return true }
+            // `defaults export <domain> -` writes to stdout only. (`defaults domains`
+            // is left out on purpose: it reads other apps' sandbox containers.)
             if args.count == 3, args[0] == "export", args[2] == "-" { return true }
             return args.first == "read" || args.first == "read-type"
         case "scutil":
@@ -33,6 +33,14 @@ public struct CommandPolicy: Sendable {
             return true
         case "system_profiler":
             return args == ["SPDisplaysDataType", "-json"]
+        case "mount":
+            // With no arguments, `mount` only lists what's mounted.
+            return args.isEmpty
+        case "plutil":
+            // Converting Finder's shared file lists to stdout; never in place.
+            return args.count == 5 && args[0...3] == ["-convert", "xml1", "-o", "-"]
+                && args[4].contains("/Library/Application Support/com.apple.sharedfilelist/")
+                && (args[4].hasSuffix(".sfl3") || args[4].hasSuffix(".sfl2"))
         default:
             return false
         }
@@ -40,7 +48,7 @@ public struct CommandPolicy: Sendable {
 
     /// Restore: everything `readOnly` allows, plus writing one preference key at a
     /// time, restarting the few processes that cache preferences, and loading or
-    /// unloading Cairn's own Dock-resume LaunchAgent.
+    /// unloading Cairn's own LaunchAgents.
     public static let restore = CommandPolicy { command in
         if readOnly.allows(command) { return true }
         let args = command.arguments
@@ -50,14 +58,24 @@ public struct CommandPolicy: Sendable {
         case "killall":
             return args.count == 1 && ["Dock", "Finder", "SystemUIServer", "ControlCenter"].contains(args[0])
         case "launchctl":
-            // Only Cairn's own Dock-resume agent, in the user's GUI session.
-            let label = DockAgent.label
-            if args.count == 3, args[0] == "bootstrap", args[1].hasPrefix("gui/"),
-               args[2].hasSuffix("/Library/LaunchAgents/\(label).plist") { return true }
-            return args.count == 2 && args[0] == "bootout" && args[1].hasPrefix("gui/") && args[1].hasSuffix("/\(label)")
+            return agents.allows(command)
         default:
             return false
         }
+    }
+
+    /// Everything `readOnly` allows, plus loading and unloading Cairn's own user
+    /// LaunchAgents (and no others) in the user's GUI session.
+    public static let agents = CommandPolicy { command in
+        if readOnly.allows(command) { return true }
+        let args = command.arguments
+        guard command.program == "launchctl" else { return false }
+        for label in CairnLaunchAgent.labels {
+            if args.count == 3, args[0] == "bootstrap", args[1].hasPrefix("gui/"),
+               args[2].hasSuffix("/Library/LaunchAgents/\(label).plist") { return true }
+            if args.count == 2, args[0] == "bootout", args[1].hasPrefix("gui/"), args[1].hasSuffix("/\(label)") { return true }
+        }
+        return false
     }
 
     /// For tests only.

@@ -61,7 +61,7 @@ enum Samples {
     @Test func keysAreSortedAndSchemaIsWritten() throws {
         let yaml = try ManifestCoder.encode(Samples.manifest)
         let topKeys = yaml.split(separator: "\n").filter { !$0.hasPrefix(" ") && !$0.hasPrefix("-") }.map { $0.split(separator: ":")[0] }
-        #expect(topKeys == ["apps", "created", "device", "layout", "packages", "schema", "sensitive", "settings"])
+        #expect(topKeys == ["apps", "created", "device", "layout", "packages", "schema", "sensitive", "settings", "shares"])
         #expect(yaml.contains("schema: 1"))
         #expect(yaml.contains("os_version: '14.5'") || yaml.contains("os_version: \"14.5\""))
         #expect(yaml.contains("created: 2026-11-21T10:00:00Z"))

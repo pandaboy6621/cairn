@@ -15,6 +15,9 @@ public struct Manifest: Codable, Equatable, Sendable {
     public var apps: [AppItem]
     public var settings: [SettingItem]
     public var layout: Layout
+    /// Network shares (SMB, AFP, NFS, WebDAV). Optional in the file: manifests
+    /// from before shares were scanned simply have none.
+    public var shares: [ShareItem]
     public var sensitive: [SensitiveRef]
 
     public init(
@@ -25,6 +28,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         apps: [AppItem] = [],
         settings: [SettingItem] = [],
         layout: Layout = Layout(),
+        shares: [ShareItem] = [],
         sensitive: [SensitiveRef] = []
     ) {
         self.schema = schema
@@ -34,6 +38,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         self.apps = apps
         self.settings = settings
         self.layout = layout
+        self.shares = shares
         self.sensitive = sensitive
     }
 
@@ -49,6 +54,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         apps = try c.decodeIfPresent([AppItem].self, forKey: .apps) ?? []
         settings = try c.decodeIfPresent([SettingItem].self, forKey: .settings) ?? []
         layout = try c.decodeIfPresent(Layout.self, forKey: .layout) ?? Layout()
+        shares = try c.decodeIfPresent([ShareItem].self, forKey: .shares) ?? []
         sensitive = try c.decodeIfPresent([SensitiveRef].self, forKey: .sensitive) ?? []
     }
 
@@ -59,6 +65,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         m.packages.sort { ($0.kind.rawValue, $0.id) < ($1.kind.rawValue, $1.id) }
         m.apps.sort { $0.id < $1.id }
         m.settings.sort { $0.key < $1.key }
+        m.shares.sort { $0.url < $1.url }
         m.sensitive.sort { ($0.type, $0.ref) < ($1.type, $1.ref) }
         m.layout.displays?.displays.sort { $0.id < $1.id }
         // Whole seconds only: sub-second noise would make every snapshot differ.
@@ -300,6 +307,28 @@ public struct DockLayout: Codable, Equatable, Sendable {
         self.apps = apps
         self.include = include
     }
+}
+
+/// A network share to reconnect: `smb://server/share` and the like. Holds the
+/// username but never a password (that belongs in the Sensitive tier).
+public struct ShareItem: Codable, Equatable, Sendable {
+    /// `scheme://host/path` with no username or password. Doubles as the id.
+    public var url: String
+    public var username: String?
+    /// In Finder's Connect to Server favorites.
+    public var favorite: Bool
+    public var include: Bool
+
+    public init(url: String, username: String? = nil, favorite: Bool = false, include: Bool = true) {
+        self.url = url
+        self.username = username
+        self.favorite = favorite
+        self.include = include
+    }
+
+    public var id: String { url }
+    /// `smb`, `afp`, `nfs`, `webdav`...
+    public var scheme: String { url.components(separatedBy: "://").first ?? "" }
 }
 
 /// A pointer to a secret in the encrypted vault. Never holds the secret itself.

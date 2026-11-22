@@ -53,6 +53,7 @@ extension ChecklistCategory {
         case .appPreferences: return .teal
         case .developer: return .indigo
         case .fonts: return .pink
+        case .networkShares: return .cyan
         case .sensitive: return .red
         }
     }

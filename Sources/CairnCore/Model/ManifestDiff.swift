@@ -44,6 +44,13 @@ public struct ManifestDiff: Equatable, Sendable {
             },
             dock(old.layout.dock, new.layout.dock),
             displays(old.layout.displays, new.layout.displays),
+            keyed("shares", old.shares, new.shares, id: \.url) { a, b in
+                var parts: [Change] = []
+                if a.username != b.username { parts.append(Change(id: "\(a.url) user", from: a.username ?? "none", to: b.username ?? "none")) }
+                if a.favorite != b.favorite { parts.append(Change(id: "\(a.url) favorite", from: "\(a.favorite)", to: "\(b.favorite)")) }
+                if a.include != b.include { parts.append(Change(id: "\(a.url) include", from: "\(a.include)", to: "\(b.include)")) }
+                return parts
+            },
             keyed("sensitive", old.sensitive, new.sensitive, id: \.ref) { a, b in
                 a.include != b.include ? [Change(id: "\(a.ref) include", from: "\(a.include)", to: "\(b.include)")] : []
             },

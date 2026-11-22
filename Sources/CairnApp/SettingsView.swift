@@ -54,7 +54,20 @@ private struct BackupSettings: View {
                     }
                 }
             } footer: {
-                Text("Back Up Now saves here, and Restore looks here for backups. A mounted NAS share works too. The default is Cairn's own folder in Application Support.")
+                Text("Back Up Now saves snapshots here, and Restore looks here for backups. A mounted NAS share works too. The default is Cairn's own folder in Application Support.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Back up automatically", isOn: Binding(
+                    get: { model.autoBackup != nil },
+                    set: { model.setAutoBackup($0) }))
+                Picker("Check every", selection: $model.autoBackupMinutes) {
+                    ForEach(Self.intervals, id: \.minutes) { Text($0.title).tag($0.minutes) }
+                }
+                .disabled(model.autoBackup == nil)
+            } footer: {
+                Text("Cairn checks at login, on this schedule, and soon after Dock, Finder, keyboard or trackpad settings change. It saves a snapshot only when something changed. If the folder is a NAS share that isn't connected, snapshots wait on this Mac until it is.")
                     .foregroundStyle(.secondary)
             }
 
@@ -68,6 +81,10 @@ private struct BackupSettings: View {
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
     }
+
+    static let intervals: [(minutes: Int, title: String)] = [
+        (15, "15 minutes"), (30, "30 minutes"), (60, "Hour"), (180, "3 hours"), (360, "6 hours"), (1440, "Day"),
+    ]
 
     private var foundSummary: String {
         guard model.findBackupsAutomatically else { return "Restore only uses files you choose or drop on it." }

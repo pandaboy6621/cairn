@@ -7,9 +7,12 @@ public struct BackupFile: Equatable, Sendable, Identifiable {
     public var created: Date
     /// Included items (packages, apps, settings, plus the Dock and display layouts).
     public var itemCount: Int
+    /// Set when this is a snapshot (`snapshots/<device>/<id>/manifest.yaml`).
+    public var snapshotID: String? = nil
 
     public var id: URL { url }
-    public var fileName: String { url.lastPathComponent }
+    /// The file's name, or `Snapshot <id>` for a snapshot (whose file is always manifest.yaml).
+    public var fileName: String { snapshotID.map { "Snapshot \($0)" } ?? url.lastPathComponent }
 }
 
 /// Where backups are saved by default, and finding the ones already there. Read-only
@@ -40,12 +43,18 @@ public enum BackupFolder {
         ["yaml", "yml"].contains(url.pathExtension.lowercased())
     }
 
-    /// Valid Cairn manifests directly inside `folder`, newest first. Files that
-    /// aren't manifests (or are from a newer schema) are skipped.
+    /// Valid Cairn manifests directly inside `folder`, plus its snapshots, newest
+    /// first. Files that aren't manifests (or are from a newer schema) are skipped.
     public static func list(in folder: URL) -> [BackupFile] {
         let urls = (try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        return urls.filter(isBackupFile).compactMap(read).sorted {
+        let snapshots = SnapshotStore(root: folder).list().compactMap { s -> BackupFile? in
+            guard var file = read(s.manifestURL) else { return nil }
+            file.snapshotID = s.id
+            file.created = s.info.created
+            return file
+        }
+        return (urls.filter(isBackupFile).compactMap(read) + snapshots).sorted {
             ($0.created, $0.fileName) > ($1.created, $1.fileName)
         }
     }
@@ -57,7 +66,7 @@ public enum BackupFolder {
 
     static func includedCount(_ m: Manifest) -> Int {
         m.packages.filter(\.include).count + m.apps.filter(\.include).count + m.settings.filter(\.include).count
-            + (m.layout.dock?.include == true ? 1 : 0) + (m.layout.displays?.include == true ? 1 : 0)
+            + m.shares.filter(\.include).count + (m.layout.dock?.include == true ? 1 : 0) + (m.layout.displays?.include == true ? 1 : 0)
     }
 
     /// `/Users/x/Library/...` → `~/Library/...` for display.

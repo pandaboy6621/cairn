@@ -619,6 +619,7 @@ struct RestorePreviewSheet: View {
         case "settings": return "Settings"
         case "layout.dock": return "Dock"
         case "layout.displays": return "Displays"
+        case "shares": return "Network shares"
         case "sensitive": return "Sensitive"
         default: return section
         }

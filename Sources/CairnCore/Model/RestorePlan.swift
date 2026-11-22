@@ -65,6 +65,11 @@ public struct RestorePlan: Equatable, Sendable {
             steps.append(.pending(category: "displays", id: "arrangement",
                                   reason: "restore with `cairn displays --from <backup> --apply` on the target's monitors"))
         }
+        let mapped = Set(current.shares.map(\.url))
+        for s in backup.shares where s.include && !mapped.contains(s.url) {
+            steps.append(.pending(category: "shares", id: s.url,
+                                  reason: "reconnect in Finder (Go > Connect to Server); the password comes from the Keychain or you"))
+        }
         let secrets = Set(current.sensitive.map(\.ref))
         for s in backup.sensitive where s.include && !secrets.contains(s.ref) {
             steps.append(.pending(category: "sensitive", id: s.ref, reason: "encrypted vault comes in a later version"))

@@ -65,7 +65,7 @@ extension CommandRunner {
 public struct ProcessRunner: CommandRunner {
     public var policy: CommandPolicy
     /// Extra PATH entries: GUI apps launch with a minimal PATH that lacks Homebrew.
-    public var extraPath = ["/opt/homebrew/bin", "/usr/local/bin"]
+    public var extraPath = ["/opt/homebrew/bin", "/usr/local/bin", "/sbin", "/usr/sbin"]
 
     public init(policy: CommandPolicy = .readOnly) {
         self.policy = policy

@@ -46,7 +46,12 @@ final class AppModel {
 
     /// Where "Back Up Now" saves and where restore looks for backups.
     var backupFolder: URL {
-        didSet { defaults.set(backupFolder.path, forKey: "backupFolder"); refreshFoundBackups() }
+        didSet {
+            defaults.set(backupFolder.path, forKey: "backupFolder")
+            refreshFoundBackups()
+            // Keep automatic backups going to the same folder.
+            if autoBackup != nil { setAutoBackup(true) }
+        }
     }
     var isDefaultBackupFolder: Bool { backupFolder.standardizedFileURL == BackupFolder.defaultURL.standardizedFileURL }
     /// Show a save panel for every backup instead of saving straight into `backupFolder`.
@@ -60,6 +65,13 @@ final class AppModel {
     /// Backups in `backupFolder`, newest first (empty when auto-find is off).
     var foundBackups: [BackupFile] = []
 
+    /// The auto-backup agent's settings, or nil when it's off.
+    var autoBackup: AutoBackupAgent.Status? = AutoBackupAgent().status
+    /// Minutes between scheduled automatic backups.
+    var autoBackupMinutes: Int {
+        didSet { defaults.set(autoBackupMinutes, forKey: "autoBackupMinutes"); if autoBackup != nil { setAutoBackup(true) } }
+    }
+
     /// Latest restore preview; `showingRestorePreview` drives the sheet.
     var restorePreview: RestorePreview?
     var showingRestorePreview = false
@@ -71,6 +83,7 @@ final class AppModel {
 
     init() {
         let stored = UserDefaults.standard
+        autoBackupMinutes = stored.object(forKey: "autoBackupMinutes") as? Int ?? AutoBackupAgent.defaultMinutes
         backupFolder = stored.string(forKey: "backupFolder").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? BackupFolder.defaultURL
         askWhereToSave = stored.bool(forKey: "askWhereToSave")
@@ -125,12 +138,18 @@ final class AppModel {
         statusMessage = nil
         scanProgress = SetupScanner.Progress(completed: 0, total: SetupScanner.Source.allCases.count, current: nil)
         Task {
-            let report = await Task.detached(priority: .userInitiated) {
-                SetupScanner().scan { progress in
+            let folder = backupFolder
+            let (report, excluded) = await Task.detached(priority: .userInitiated) {
+                let report = SetupScanner().scan { progress in
                     Task { @MainActor in AppModel.current?.scanProgress = progress }
                 }
+                // Start from what was unchecked in the last backup.
+                return (report, BackupRun(folder: folder).previousExclusions(device: report.manifest.device.name))
             }.value
-            checklist = Checklist(manifest: report.manifest)
+            var list = Checklist(manifest: report.manifest)
+            for id in excluded { list.setChecked(id, false) }
+            previousExclusions = excluded
+            checklist = list
             warnings = report.warnings
             lastScan = Date()
             isScanning = false
@@ -191,28 +210,76 @@ final class AppModel {
         write(to: url)
     }
 
-    /// Saves a new backup file inside `folder` (used by Back Up Now and by dropping a folder).
+    /// Exclusions from the last backup, kept for items this scan didn't find.
+    private var previousExclusions: [String] = []
+
+    /// Saves a snapshot in `folder` if anything changed (used by Back Up Now and by
+    /// dropping a folder). An offline NAS share queues it on this Mac instead.
     func backUp(into folder: URL) {
         guard let checklist else { return }
-        do {
-            try BackupFolder.ensureExists(folder)
-        } catch {
-            errorMessage = "Couldn't create \(BackupFolder.displayPath(folder)): \(error.localizedDescription)"
+        let ids = Set(checklist.items.map(\.id))
+        let unchecked = checklist.items.filter { !$0.isChecked && !checklist.isLocked($0.category) }.map(\.id)
+        let excluded = Array(Set(unchecked).union(previousExclusions.filter { !ids.contains($0) }))
+        let manifest = checklist.exportManifest()
+        let count = checklist.checkedCount
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try BackupRun(folder: folder).run(manifest, excluded: excluded, trigger: .manual) }
+            }.value
+            switch result {
+            case .failure(let error):
+                errorMessage = "Backup failed: \(error.localizedDescription)"
+            case .success(let run):
+                previousExclusions = excluded
+                switch run.outcome {
+                case .saved(let s):
+                    recordBackup(s.manifestURL, name: "Snapshot \(s.id)")
+                    statusMessage = "Backed up \(count) items as snapshot \(s.id) (\(s.info.summary))."
+                case .unchanged(let s):
+                    statusMessage = "Nothing changed since the last backup (snapshot \(s.id))."
+                case .queued(let s):
+                    statusMessage = "\(BackupFolder.displayPath(folder)) isn't available, so snapshot \(s.id) is saved on this Mac until it is."
+                }
+                if !run.flushed.isEmpty { statusMessage! += " Copied \(run.flushed.count) queued snapshot\(run.flushed.count == 1 ? "" : "s") too." }
+                refreshFoundBackups()
+            }
+        }
+    }
+
+    private func recordBackup(_ url: URL, name: String) {
+        lastBackupDate = Date()
+        lastBackupName = name
+        lastBackupURL = url
+        defaults.set(lastBackupDate, forKey: "lastBackupDate")
+        defaults.set(lastBackupName, forKey: "lastBackupName")
+        defaults.set(url.path, forKey: "lastBackupPath")
+    }
+
+    // MARK: Automatic backups
+
+    /// Installs or removes the auto-backup LaunchAgent, which runs the `cairn` CLI
+    /// inside this app bundle.
+    func setAutoBackup(_ on: Bool) {
+        let agent = AutoBackupAgent()
+        guard on else { agent.remove(); autoBackup = nil; return }
+        let cairn = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/cairn").path
+        guard FileManager.default.isExecutableFile(atPath: cairn) else {
+            errorMessage = "Automatic backups need the cairn tool inside Cairn.app; build the app with scripts/build-app.sh."
             return
         }
-        write(to: folder.appendingPathComponent(BackupFolder.fileName(device: checklist.source.device.name, date: Date())))
+        do {
+            try agent.install(cairn: cairn, folder: backupFolder, everyMinutes: autoBackupMinutes)
+            autoBackup = agent.status
+        } catch {
+            errorMessage = "Couldn't turn on automatic backups: \(error.localizedDescription)"
+        }
     }
 
     private func write(to url: URL) {
         guard let checklist else { return }
         do {
             try ManifestCoder.write(checklist.exportManifest(), to: url)
-            lastBackupDate = Date()
-            lastBackupName = url.lastPathComponent
-            lastBackupURL = url
-            defaults.set(lastBackupDate, forKey: "lastBackupDate")
-            defaults.set(lastBackupName, forKey: "lastBackupName")
-            defaults.set(url.path, forKey: "lastBackupPath")
+            recordBackup(url, name: url.lastPathComponent)
             statusMessage = "Backed up \(checklist.checkedCount) items to \(BackupFolder.displayPath(url))."
             refreshFoundBackups()
         } catch {

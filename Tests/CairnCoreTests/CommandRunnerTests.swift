@@ -9,7 +9,6 @@ import Testing
         Command("brew", ["leaves", "--installed-on-request"]),
         Command("brew", ["tap"]),
         Command("mas", ["list"]),
-        Command("defaults", ["domains"]),
         Command("defaults", ["export", "com.apple.dock", "-"]),
         Command("defaults", ["read", "com.apple.dock", "autohide"]),
         Command("scutil", ["--get", "ComputerName"]),
@@ -26,6 +25,7 @@ import Testing
         Command("mas", ["install", "497799835"]),
         Command("defaults", ["write", "com.apple.dock", "autohide", "-bool", "true"]),
         Command("defaults", ["delete", "com.apple.dock"]),
+        Command("defaults", ["domains"]), // walks other apps' sandbox containers
         Command("defaults", ["import", "com.apple.dock", "-"]),
         Command("defaults", ["export", "com.apple.dock", "/tmp/out.plist"]),
         Command("killall", ["Dock"]),
