@@ -115,7 +115,7 @@ struct VaultCommand: ParsableCommand {
 extension VaultCommand {
     /// Every secret this Mac could back up, from a read-only scan.
     static func scanSecrets() -> [SensitiveRef] {
-        SetupScanner().scan([.wifi, .ssh, .shares]).manifest.sensitive
+        SetupScanner().scan([.wifi, .ssh, .shares, .tokens, .vpn]).manifest.sensitive
     }
 
     /// The vault key from this Mac's Keychain if remembered, else a prompt.
@@ -150,7 +150,7 @@ extension VaultCommand {
                 copies it into the snapshot, so automatic backups never need the password.
                 """)
         @OptionGroup var location: Location
-        @Option(name: .long, help: "Only this kind: wifi, ssh, or share.")
+        @Option(name: .long, help: "Only this kind: wifi, ssh, share, or token.")
         var type: String?
         @Option(name: .long, help: "A secret to save, by the name the list shows (repeatable).")
         var name: [String] = []
@@ -171,7 +171,8 @@ extension VaultCommand {
                 print("\n\(count) of \(found.count) saved. Save some with --name <name> or --all.")
                 return
             }
-            var refs = found.map(\.ref)
+            // VPN configurations are listed by name only; there's nothing to save.
+            var refs = found.filter { $0.type != VPNScanner.type }.map(\.ref)
             if !all {
                 let byTitle = Dictionary(found.map { (SecretReader.title(of: $0.ref), $0.ref) }, uniquingKeysWith: { a, _ in a })
                 let unknown = name.filter { byTitle[$0] == nil }

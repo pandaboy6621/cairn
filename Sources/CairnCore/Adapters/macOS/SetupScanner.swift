@@ -8,7 +8,7 @@ public struct ScanReport: Sendable {
 /// Runs the selected scanners and assembles a manifest. Read-only.
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
-        case brew, mas, dock, displays, defaults, shares, wifi, ssh
+        case brew, mas, dock, displays, defaults, shares, wifi, ssh, tokens, vpn
 
         /// Human-readable name for progress messages.
         public var title: String {
@@ -21,6 +21,8 @@ public struct SetupScanner: Sendable {
             case .shares: return "network shares"
             case .wifi: return "Wi-Fi networks"
             case .ssh: return "SSH keys"
+            case .tokens: return "credential files"
+            case .vpn: return "VPN configurations"
             }
         }
     }
@@ -104,6 +106,8 @@ public struct SetupScanner: Sendable {
         case .shares: return NetworkSharesScanner()
         case .wifi: return WiFiScanner()
         case .ssh: return SSHKeyScanner(home: home)
+        case .tokens: return CredentialFilesScanner(home: home)
+        case .vpn: return VPNScanner()
         }
     }
 

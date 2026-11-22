@@ -14,6 +14,7 @@ public struct MacRestorer: Sendable {
     public var wifi: WiFiSystem
     public var sshKeys: SSHKeySystem
     public var sharePasswords: SharePasswordSystem
+    public var credentialFiles: CredentialFileSystem
 
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore),
@@ -22,8 +23,10 @@ public struct MacRestorer: Sendable {
         defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps(),
         wifi: WiFiSystem = CoreWLANWiFi(),
         sshKeys: SSHKeySystem = FileSSHKeys(),
-        sharePasswords: SharePasswordSystem = KeychainSharePasswords()
+        sharePasswords: SharePasswordSystem = KeychainSharePasswords(),
+        credentialFiles: CredentialFileSystem = HomeCredentialFiles()
     ) {
+        self.credentialFiles = credentialFiles
         self.wifi = wifi
         self.sshKeys = sshKeys
         self.sharePasswords = sharePasswords
@@ -190,7 +193,7 @@ public struct MacRestorer: Sendable {
                 var done: [String] = [], notes: [String] = []
                 for item in items {
                     guard item.hasSecret, let sealed = secrets.secrets[item.ref] else {
-                        report.manualSteps.append(.init(category: item.type == "ssh" ? "ssh" : "shares",
+                        report.manualSteps.append(.init(category: Self.checklistCategory(item.type),
                             text: "\(item.title) wasn't saved in the backup; copy it over by hand"))
                         continue
                     }
@@ -198,8 +201,12 @@ public struct MacRestorer: Sendable {
                     do {
                         var secret = try key.open(sealed, ref: item.ref)
                         defer { Vault.zero(&secret) }
-                        let outcome = item.type == "ssh" ? restoreSSHKey(secret, item: item, report: &report)
-                                                         : restoreSharePassword(secret, item: item, report: &report)
+                        let outcome: Bool?
+                        switch item.type {
+                        case "ssh": outcome = restoreSSHKey(secret, item: item, report: &report)
+                        case "token": outcome = restoreCredentialFile(secret, item: item, report: &report)
+                        default: outcome = restoreSharePassword(secret, item: item, report: &report)
+                        }
                         switch outcome {
                         case .some(true): done.append(item.title)
                         case .some(false): notes.append("\(item.title): couldn't save it")
@@ -287,6 +294,31 @@ public struct MacRestorer: Sendable {
                 text: "\(name).pub wasn't recreated (the key has a passphrase, or a .pub is already there); run ssh-keygen -y -f ~/.ssh/\(name) > ~/.ssh/\(name).pub if you need it"))
         }
         return true
+    }
+
+    static func checklistCategory(_ type: String) -> String {
+        switch type {
+        case "ssh": return "ssh"
+        case "token": return "tokens"
+        default: return "shares"
+        }
+    }
+
+    /// Same rules as SSH keys: created 0600, never replacing a file that's there.
+    func restoreCredentialFile(_ data: Data, item: SecretRestore, report: inout RestoreReport) -> Bool? {
+        guard let path = CredentialFiles.path(ref: item.ref) else { return false }
+        if var existing = credentialFiles.existing(path) {
+            defer { Vault.zero(&existing) }
+            if existing != data {
+                report.manualSteps.append(.init(category: "tokens",
+                    text: "~/\(path) already exists and differs from the backup; Cairn left it alone"))
+            }
+            return nil
+        }
+        do { try credentialFiles.write(data, path: path) } catch { return false }
+        guard var back = credentialFiles.existing(path) else { return false }
+        defer { Vault.zero(&back) }
+        return back == data
     }
 
     func restoreSharePassword(_ password: Data, item: SecretRestore, report: inout RestoreReport) -> Bool? {

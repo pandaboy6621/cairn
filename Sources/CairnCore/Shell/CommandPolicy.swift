@@ -28,7 +28,7 @@ public struct CommandPolicy: Sendable {
             if args.count == 3, args[0] == "export", args[2] == "-" { return true }
             return args.first == "read" || args.first == "read-type"
         case "scutil":
-            return args.count == 2 && args[0] == "--get"
+            return (args.count == 2 && args[0] == "--get") || args == ["--nc", "list"]
         case "sw_vers":
             return true
         case "system_profiler":

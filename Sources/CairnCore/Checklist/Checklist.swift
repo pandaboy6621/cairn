@@ -261,9 +261,12 @@ public struct Checklist: Sendable {
         }
         for s in m.sensitive {
             let groups = [WiFiPasswords.type: "Wi-Fi networks", SSHKeyScanner.type: "SSH keys",
-                          SharePasswords.type: "Network share passwords"]
+                          SharePasswords.type: "Network share passwords", CredentialFiles.type: "Credential files",
+                          VPNScanner.type: "VPN configurations"]
             out.append(ChecklistItem(id: id(sensitive: s), category: .sensitive, group: groups[s.type] ?? s.type,
-                                     title: SecretReader.title(of: s.ref), detail: "", isChecked: false))
+                                     title: SecretReader.title(of: s.ref),
+                                     detail: VPNScanner.parts(ref: s.ref).map { "set up again by hand · \($0.provider)" } ?? "",
+                                     isChecked: false))
         }
         return out
     }

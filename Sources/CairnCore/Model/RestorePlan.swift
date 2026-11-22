@@ -106,7 +106,12 @@ public struct RestorePlan: Equatable, Sendable {
                 continue
             }
             guard !known.contains(s.ref) else { continue }
-            if s.type == "wifi", let ssid = WiFiNetwork.ssid(ref: s.ref) {
+            if let vpn = VPNScanner.parts(ref: s.ref) {
+                // App VPNs come back with their app; built-in ones are recreated by hand.
+                let source = vpn.provider.contains(".") ? "app \(vpn.provider)" : "built-in \(vpn.provider)"
+                steps.append(.pending(category: "vpn", id: "\(vpn.name) (\(source))",
+                                      reason: "set up again: install the VPN's app and sign in, or recreate built-in ones in System Settings > VPN"))
+            } else if s.type == "wifi", let ssid = WiFiNetwork.ssid(ref: s.ref) {
                 networks.append(WiFiNetwork(ssid: ssid, ref: s.ref, hasPassword: savedSecrets.contains(s.ref)))
             } else {
                 steps.append(.pending(category: "sensitive", id: s.ref, reason: "restoring \(s.type) secrets comes in a later version"))
@@ -351,7 +356,7 @@ public struct WiFiNetwork: Equatable, Sendable {
 
 /// An SSH key or share password to restore from the vault. Holds no secret.
 public struct SecretRestore: Equatable, Sendable {
-    public static let types: Set<String> = ["ssh", "share"]
+    public static let types: Set<String> = ["ssh", "share", "token"]
     public var type: String
     public var ref: String
     /// The backup has it, encrypted in the vault.
@@ -370,6 +375,7 @@ public struct SecretRestore: Equatable, Sendable {
     public var title: String { Self.title(ref: ref) ?? ref }
 
     static func title(ref: String) -> String? {
+        if let path = CredentialFiles.path(ref: ref) { return "~/" + path }
         for prefix in ["vault://ssh/", "vault://share/"] where ref.hasPrefix(prefix) && ref.count > prefix.count {
             return String(ref.dropFirst(prefix.count))
         }
@@ -378,7 +384,8 @@ public struct SecretRestore: Equatable, Sendable {
 
     /// For the dry run: what would happen, never the secret.
     public var summary: String {
-        let what = type == "ssh" ? "write SSH key \(title)" : "save share password for \(title)"
+        let what = type == "ssh" ? "write SSH key \(title)"
+            : type == "token" ? "write credential file \(title)" : "save share password for \(title)"
         if !hasSecret { return "\(what) (not saved in the backup)" }
         return what + (onThisMac ? " (one is already here; kept if different)" : "")
     }

@@ -103,3 +103,37 @@ public struct KeychainSharePasswords: SharePasswordSystem {
         return found == password
     }
 }
+
+/// Writes credential files (`~/.npmrc`, `~/.aws/credentials`...) for restore.
+/// Injected so tests never touch the real home folder.
+public protocol CredentialFileSystem: Sendable {
+    func existing(_ path: String) -> Data?
+    /// Creates `~/<path>` with mode 0600; fails if it already exists.
+    func write(_ data: Data, path: String) throws
+}
+
+public struct HomeCredentialFiles: CredentialFileSystem {
+    public var home: String
+    public init(home: String = NSHomeDirectory()) { self.home = home }
+
+    public func existing(_ path: String) -> Data? { FileManager.default.contents(atPath: "\(home)/\(path)") }
+
+    public func write(_ data: Data, path: String) throws {
+        guard CredentialFiles.known.contains(path) else { throw CommandError.blockedByPolicy("write ~/\(path)") }
+        let full = "\(home)/\(path)"
+        let parent = (full as NSString).deletingLastPathComponent
+        if !FileManager.default.fileExists(atPath: parent) {
+            // Folders Cairn creates for credentials are private too.
+            try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+        }
+        let fd = open(full, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw CommandError.failed(command: "write ~/\(path)", exitCode: errno, stderr: String(cString: strerror(errno))) }
+        defer { close(fd) }
+        let written = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+        guard written == data.count else {
+            unlink(full)
+            throw CommandError.failed(command: "write ~/\(path)", exitCode: errno, stderr: "short write")
+        }
+    }
+}

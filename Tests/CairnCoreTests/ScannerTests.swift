@@ -181,6 +181,7 @@ import Testing
         #expect(report.warnings.count == 1)
         #expect(m.sensitive.map(\.ref) == ["vault://share/smb/alex@files.example", "vault://share/smb/alex@nas.example",
                                             "vault://ssh/id_ed25519", "vault://ssh/work_key",
+                                            "vault://vpn/IPSec/Example Office",
                                             "vault://wifi/Example Home", "vault://wifi/Example Office"])
         #expect(m.shares.map(\.url) == ["afp://oldmac.example/Public", "https://dav.example/remote.php/webdav",
                                         "nfs://files.example/export/home", "smb://files.example/Team%20Share",

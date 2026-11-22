@@ -382,7 +382,9 @@ private struct SecretsBar: View {
         let items = checklist.items(in: .sensitive)
         let captured = model.vault.captured
         let saved = items.filter { captured.contains(Checklist.ref(sensitiveID: $0.id)) }.count
-        let toSave = items.filter { $0.isChecked && !captured.contains(Checklist.ref(sensitiveID: $0.id)) }
+        // VPN configurations are names only: nothing to save.
+        let toSave = items.filter { $0.isChecked && $0.group != "VPN configurations"
+            && !captured.contains(Checklist.ref(sensitiveID: $0.id)) }
             .map { Checklist.ref(sensitiveID: $0.id) }
         HStack(spacing: 12) {
             Image(systemName: model.vault.key == nil ? "lock.fill" : "lock.open.fill")
@@ -533,6 +535,8 @@ private struct ItemIcon: View {
         case "Taps": return "spigot"
         case "Wi-Fi networks": return "wifi"
         case "SSH keys": return "key"
+        case "Credential files": return "key.horizontal"
+        case "VPN configurations": return "network.badge.shield.half.filled"
         case "Network share passwords": return "externaldrive.connected.to.line.below"
         default: break
         }

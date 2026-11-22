@@ -47,7 +47,7 @@ restore onto Windows and Linux.
 | 🧩 **App preferences** | Allowlisted app settings, with caches, window state, IDs, and anything that looks like a token filtered out |
 | 🖥️ **Displays** | Monitor arrangement, main display, resolution, refresh rate, and mirroring, matched per monitor |
 | 🌐 **Network shares** | SMB, AFP, NFS, and WebDAV shares plus Finder's Connect to Server favorites (usernames only, never passwords) |
-| 🔐 **Secrets** | Wi-Fi passwords, SSH keys, and network share passwords you choose, encrypted in your vault |
+| 🔐 **Secrets** | Wi-Fi passwords, SSH keys, credential files (GitHub CLI, npm, AWS, Docker, and more), and share passwords you choose, encrypted in your vault. VPN configurations are listed for the post-restore checklist |
 
 ### Store
 
@@ -82,7 +82,7 @@ restore onto Windows and Linux.
 | 1 | Manifest format, `cairn scan`, `cairn diff` | ✅ Done |
 | 2 | SwiftUI checklist app, export manifests | ✅ Done |
 | 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
-| 4 | 🔐 Encrypted vault: Wi-Fi networks, VPNs, SSH keys, API tokens, share passwords | 🚧 In progress (vault, Wi-Fi, SSH keys, share passwords done) |
+| 4 | 🔐 Encrypted vault: Wi-Fi networks, SSH keys, API tokens, share passwords, VPN list | ✅ Done |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (settings, Dock, displays work) |
 | 6 | 🔄 Sync between your Macs, auto-discovered on your network | 📅 Planned |
 | 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
@@ -172,7 +172,7 @@ cairn auto-backup status
 cairn vault init            # shows the one-time recovery key
 cairn vault check
 cairn vault change-password --recovery
-cairn vault secrets                      # Wi-Fi, SSH keys, share passwords, and which are saved
+cairn vault secrets                      # Wi-Fi, SSH keys, credential files, share passwords, VPNs
 cairn vault secrets --name "Home"       # save one (macOS asks to approve Keychain reads)
 cairn vault remember                     # keep the vault key in this Mac's Keychain (forget undoes)
 ```
