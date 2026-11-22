@@ -88,11 +88,12 @@ struct Restore: ParsableCommand {
         }
         if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
         for w in result.warnings { stderr("note: \(w)") }
-        if !result.waitingForDock.isEmpty {
-            var pending = try PendingDock.read()
-            pending.merge(result.waitingForDock)
+        var pending = try PendingDock.read()
+        if pending.update(after: result) {
             try pending.write()
             try Dock.syncAgent(pending)
+        }
+        if !result.waitingForDock.isEmpty {
             print("Waiting to add to Dock: " + result.waitingForDock.map { RestorePlan.shortName($0.app) }.joined(separator: ", "))
             print("They're added within 5 minutes of being installed (or run `cairn dock --resume --apply`).")
         }

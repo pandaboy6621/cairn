@@ -126,3 +126,17 @@ import Testing
         #expect(!CommandPolicy.readOnly.allows(Command("launchctl", ["bootout", "gui/501/dev.cairn.dock-resume"])))
     }
 }
+
+@Suite struct PendingDockAfterRestoreTests {
+    @Test func restorePlacingAWaitingTileDropsIt() {
+        var p = PendingDock(entries: [PendingDock.Entry(app: "/Applications/Rectangle.app", after: [], added: PendingDockTests.now, backup: "a"),
+                                      PendingDock.Entry(app: "/Applications/Other.app", after: [], added: PendingDockTests.now, backup: "a")])
+        let layout = DockLayout(apps: ["/Applications/Rectangle.app"])
+        let report = RestoreReport(entries: [.init(step: .dock(layout, current: []), outcome: .applied, written: .dock(["/Applications/Rectangle.app"]))])
+        let first = p.update(after: report)
+        #expect(first)
+        #expect(p.entries.map(\.app) == ["/Applications/Other.app"])
+        let second = p.update(after: report)
+        #expect(!second) // nothing more to change
+    }
+}

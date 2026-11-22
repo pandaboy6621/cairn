@@ -77,7 +77,7 @@ stage)
     scripts/build-app.sh
     # The VM's shared-folder mount caches files by path, so a rebuilt app at the
     # same path can still run the old binary. Give every build a new folder.
-    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/secrets-*.txt "$SHARE"/secrets-test "$SHARE"/install-*.txt "$SHARE"/install-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
+    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/secrets-*.txt "$SHARE"/secrets-test "$SHARE"/install-*.txt "$SHARE"/install-test "$SHARE"/app-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
     BUILD_DIR="build-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$SHARE/$BUILD_DIR"
     cp -R dist/Cairn.app "$SHARE/$BUILD_DIR/"
@@ -182,9 +182,19 @@ EOF2
     ssh-keygen -q -t ed25519 -N "" -C cairn-test -f "$KEYS/cairn_test_ed25519"
     ssh-keygen -q -t ed25519 -N "made-up-passphrase" -C cairn-test-locked -f "$KEYS/cairn_test_locked"
     # Milestone 5 install test (VM only): a tap, small formulae, a cask that needs
-    # no sudo and one that does, an App Store app, a Dock tile for the cask, and a
+    # no sudo, an App Store app, a Dock tile for the cask, and a
     # made-up ~/.npmrc. Run it before and after installing Homebrew in the VM.
     CAIRN_VM_INSTALL_FIXTURE="$SHARE/install-test" swift test --filter VMInstallFixture >/dev/null
+    # App Restore button test (VM only): open Cairn from the build, then restore
+    # app-test/manifest.yaml from the Restore card. Vault password: vm-test-vault-pass.
+    CAIRN_VM_APP_FIXTURE="$SHARE/app-test" swift test --filter VMAppRestoreFixture >/dev/null
+    cat > "$SHARE/Open Cairn (VM).command" <<EOF2
+#!/bin/sh
+# Runs inside cairn-test: opens this build of Cairn.app. Quits a running Cairn
+# first, or macOS would just bring the old build to the front.
+pkill -x CairnApp && sleep 1
+open "/Volumes/My Shared Files/cairn/$BUILD_DIR/Cairn.app"
+EOF2
     cat > "$SHARE/Install restore test.command" <<EOF2
 #!/bin/sh
 # Runs inside cairn-test only: installs packages and writes ~/.npmrc. Made-up token.

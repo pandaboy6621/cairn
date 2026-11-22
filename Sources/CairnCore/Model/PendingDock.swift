@@ -120,3 +120,18 @@ public struct PendingDock: Codable, Equatable, Sendable {
         try encoder.encode(self).write(to: url, atomically: true, encoding: .utf8)
     }
 }
+
+extension PendingDock {
+    /// After a restore: adds the tiles it left out, and drops waiting tiles it just
+    /// placed (an app installed by this restore, for example). Returns true if
+    /// anything changed.
+    public mutating func update(after report: RestoreReport) -> Bool {
+        let placed = Set(report.entries.compactMap { e -> [String]? in
+            if case .dock(let tiles)? = e.written { return tiles } else { return nil }
+        }.joined())
+        let before = entries
+        merge(report.waitingForDock)
+        entries.removeAll { placed.contains($0.app) }
+        return entries != before
+    }
+}

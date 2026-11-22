@@ -37,7 +37,10 @@ final class RestoreRun {
     func needsVault(_ preview: RestorePreview, model: AppModel) -> Bool {
         let saved = VaultStore.secrets(beside: preview.url).secrets.keys
         let wanted = Set(preview.backup.sensitive.filter(\.include).map(\.ref))
-        return model.vault.key == nil && saved.contains(where: wanted.contains)
+        guard saved.contains(where: wanted.contains) else { return false }
+        // The app's own unlocked key only helps for its own backup folder's vault.
+        let folder = VaultStore.folder(near: preview.url, fallback: model.backupFolder)
+        return model.vault.key == nil || folder.standardizedFileURL != model.backupFolder.standardizedFileURL
     }
 
     func start(_ preview: RestorePreview, model: AppModel) {
@@ -74,18 +77,26 @@ final class RestoreRun {
                                     savedSecrets: Set(secrets.secrets.keys),
                                     environment: MacRestorer.detectEnvironment())
         let report = MacRestorer().apply(plan, backup: url.standardized.path, secrets: secrets, unlock: {
-            if let knownKey { return knownKey }
-            let envelope = try VaultStore.read(in: VaultStore.folder(near: url, fallback: fallback))
+            let folder = VaultStore.folder(near: url, fallback: fallback)
+            // The app's unlocked key is for its own backup folder's vault; a backup
+            // from elsewhere may have a different one.
+            if let knownKey, folder.standardizedFileURL == fallback.standardizedFileURL { return knownKey }
+            let envelope = try VaultStore.read(in: folder)
             if let cached = Vault.cachedKey(for: envelope, cache: KeychainVaultKeyCache()) { return cached }
-            guard !password.isEmpty else { throw VaultError.wrongPassword }
+            guard !password.isEmpty else { throw RestoreRunError.noPassword }
             return try Vault.unlock(envelope, password: password)
         }, progress: progress)
         // Dock tiles for apps that aren't installed yet: added once they are.
-        if !report.waitingForDock.isEmpty, var pending = try? PendingDock.read() {
-            pending.merge(report.waitingForDock)
+        if var pending = try? PendingDock.read(), pending.update(after: report) {
             try? pending.write()
-            if FileManager.default.isExecutableFile(atPath: cairn) { try? DockAgent().install(cairn: cairn) }
+            if pending.isEmpty { DockAgent().remove() }
+            else if FileManager.default.isExecutableFile(atPath: cairn) { try? DockAgent().install(cairn: cairn) }
         }
         return report
     }
+}
+
+enum RestoreRunError: LocalizedError {
+    case noPassword
+    var errorDescription: String? { "no vault password was entered, so saved secrets were skipped" }
 }

@@ -181,7 +181,6 @@ final class FakeSharePasswords: SharePasswordSystem, @unchecked Sendable {
                 PackageItem(id: "tree", kind: .formula, resolvers: ["brew": "tree"]),
                 PackageItem(id: "mas", kind: .formula, resolvers: ["brew": "mas"]),
                 PackageItem(id: "rectangle", kind: .cask, resolvers: ["brew": "rectangle"]),       // no sudo
-                PackageItem(id: "blackhole-2ch", kind: .cask, resolvers: ["brew": "blackhole-2ch"]), // pkg: needs sudo
             ],
             apps: [AppItem(id: "937984704", name: "Amphetamine", source: "mas")],
             layout: Layout(dock: DockLayout(apps: ["/System/Applications/Mail.app", "/Applications/Rectangle.app",
@@ -189,6 +188,34 @@ final class FakeSharePasswords: SharePasswordSystem, @unchecked Sendable {
             sensitive: [SensitiveRef(type: CredentialFiles.type, ref: npm)])
         try ManifestCoder.write(manifest, to: folder.appendingPathComponent("manifest.yaml"))
         try SecretsFile(secrets: [npm: try vault.key.seal(Data("//registry.npmjs.org/:_authToken=made-up-npm-token-55\n".utf8), ref: npm)])
+            .write(to: folder.appendingPathComponent(VaultStore.secretsFileName))
+    }
+}
+
+/// Writes the VM's app Restore button test backup (a long cask download, a
+/// small formula, a Dock tile, a made-up ~/.netrc in a
+/// locked vault) when `scripts/vm.sh stage` asks for it; otherwise does nothing.
+@Suite struct VMAppRestoreFixture {
+    @Test func writeWhenAsked() throws {
+        guard let dir = ProcessInfo.processInfo.environment["CAIRN_VM_APP_FIXTURE"] else { return }
+        let folder = URL(fileURLWithPath: dir, isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let vault = try Vault.create(password: "vm-test-vault-pass", iterations: 100_000)
+        try VaultStore.write(vault.envelope, in: folder)
+        let netrc = CredentialFiles.ref(path: ".netrc")
+        let manifest = Manifest(
+            device: Device(name: "vm-app-test", os: "macos", osVersion: "27"), created: Date(),
+            packages: [
+                PackageItem(id: "wget", kind: .formula, resolvers: ["brew": "wget"]),
+                PackageItem(id: "firefox", kind: .cask, resolvers: ["brew": "firefox"]),           // big download
+                PackageItem(id: "google-chrome", kind: .cask, resolvers: ["brew": "google-chrome"]), // another, to watch progress
+            ],
+            layout: Layout(dock: DockLayout(apps: ["/System/Applications/Mail.app", "/Applications/Rectangle.app",
+                                                   "/Applications/Firefox.app", "/System/Applications/System Settings.app"])),
+            sensitive: [SensitiveRef(type: CredentialFiles.type, ref: netrc)])
+        try ManifestCoder.write(manifest, to: folder.appendingPathComponent("manifest.yaml"))
+        try SecretsFile(secrets: [netrc: try vault.key.seal(Data("machine example.invalid login cairn password made-up-netrc-66\n".utf8), ref: netrc)])
             .write(to: folder.appendingPathComponent(VaultStore.secretsFileName))
     }
 }

@@ -461,6 +461,34 @@ private struct DashboardCard<Actions: View, MenuItems: View, Footer: View>: View
 }
 
 /// A circular status ring: a determinate arc, an idle track, or a dashed "not yet" ring.
+/// The sheet's ring while a restore runs: fills with "(3 of 6)" progress lines,
+/// and spins when the current step has no count.
+struct RestoreRunningRing: View {
+    let line: String
+
+    /// 0.5 for a line ending "(3 of 6)".
+    var fraction: Double? {
+        guard let open = line.lastIndex(of: "("), line.hasSuffix(")") else { return nil }
+        let parts = line[line.index(after: open)..<line.index(before: line.endIndex)].split(separator: " ")
+        guard parts.count == 3, parts[1] == "of", let i = Double(parts[0]), let n = Double(parts[2]), n > 0 else { return nil }
+        return (i - 1) / n
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.blue.opacity(0.18), lineWidth: 9)
+            TimelineView(.animation) { context in
+                Circle()
+                    .trim(from: 0, to: fraction.map { max(0.06, $0) } ?? 0.3)
+                    .stroke(Color.blue.gradient, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                    .rotationEffect(.degrees(fraction == nil ? context.date.timeIntervalSinceReferenceDate * 300 : -90))
+            }
+            Image(systemName: "arrow.down.circle").font(.system(size: 22, weight: .medium)).foregroundStyle(.blue)
+        }
+        .padding(5)
+    }
+}
+
 struct StatusRing: View {
     let state: RingState
     let tint: Color
@@ -531,16 +559,29 @@ struct RestorePreviewSheet: View {
         let c = preview.comparison
         VStack(spacing: 0) {
             HStack(spacing: 16) {
-                StatusRing(state: .progress(c.matchFraction, symbol: nil,
-                                            label: "\(Int((c.matchFraction * 100).rounded()))%"), tint: .blue)
-                    .frame(width: 64, height: 64)
+                // Before: how much already matches. After: how many steps checked out
+                // (the comparison is from before the restore, so it would be stale).
+                if case .running(let line) = model.restore.phase {
+                    RestoreRunningRing(line: line).frame(width: 64, height: 64)
+                } else if case .finished(let o) = model.restore.phase {
+                    let total = max(1, o.verified + o.problems)
+                    StatusRing(state: .progress(Double(o.verified) / Double(total), symbol: nil, label: "\(o.verified)/\(total)"),
+                               tint: o.problems == 0 ? .green : .orange)
+                        .frame(width: 64, height: 64)
+                } else {
+                    StatusRing(state: .progress(c.matchFraction, symbol: nil,
+                                                label: "\(Int((c.matchFraction * 100).rounded()))%"), tint: .blue)
+                        .frame(width: 64, height: 64)
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     let finished: Bool = { if case .finished = model.restore.phase { return true } else { return false } }()
-                    Text(finished ? "Restore finished" : "Restore preview").font(.title2.weight(.semibold))
+                    let running: Bool = { if case .running = model.restore.phase { return true } else { return false } }()
+                    Text(finished ? "Restore finished" : running ? "Restoring…" : "Restore preview").font(.title2.weight(.semibold))
                     Text("\(preview.fileName) · from \(preview.backup.device.name)")
                         .foregroundStyle(.secondary)
                     Text(finished ? "Here's what changed, what Cairn checked, and what's left for you."
-                                  : "\(c.matchingCount) of \(c.backupItemCount) items already match this Mac. Nothing has been changed.")
+                         : running ? "Big downloads can take a while. You can keep using your Mac."
+                                   : "\(c.matchingCount) of \(c.backupItemCount) items already match this Mac. Nothing has been changed.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -638,6 +679,11 @@ private struct RestoreFooter: View {
     @Environment(AppModel.self) private var model
     let preview: RestorePreview
 
+    /// The backup has secrets, the vault is locked, and no password was typed.
+    private var skipsSecrets: Bool {
+        model.restore.needsVault(preview, model: model) && model.restore.vaultPassword.isEmpty
+    }
+
     var body: some View {
         @Bindable var run = model.restore
         let empty = preview.comparison.diff.isEmpty
@@ -657,8 +703,10 @@ private struct RestoreFooter: View {
                     .keyboardShortcut(.defaultAction)
             default:
                 if run.needsVault(preview, model: model) {
+                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
                     SecureField("Vault password (for saved secrets)", text: $run.vaultPassword)
                         .frame(maxWidth: 230)
+                        .help("This backup has saved secrets. Without the vault password they're skipped.")
                 } else if !preview.logoutSettings.isEmpty {
                     Label("\(preview.logoutSettings.count) settings need a log out",
                           systemImage: "rectangle.portrait.and.arrow.right")
@@ -677,10 +725,11 @@ private struct RestoreFooter: View {
         .confirmationDialog("Restore this backup to this Mac?",
                             isPresented: Binding(get: { if case .confirming = run.phase { return true } else { return false } },
                                                  set: { if !$0, case .confirming = run.phase { run.phase = .idle } })) {
-            Button("Restore") { run.start(preview, model: model) }
+            Button(skipsSecrets ? "Restore Without Secrets" : "Restore") { run.start(preview, model: model) }
             Button("Cancel", role: .cancel) { run.phase = .idle }
         } message: {
-            Text("Cairn installs missing packages and App Store apps, writes settings, secrets, the Dock, and wallpaper, and restarts the Dock and Finder. It never removes anything. macOS may ask for your password or approval along the way.")
+            Text((skipsSecrets ? "No vault password was entered, so this backup's saved secrets will be skipped. " : "")
+                 + "Cairn installs missing packages, writes settings, secrets, the Dock, and wallpaper, and restarts the Dock and Finder. App Store apps and anything that needs your Mac's password are listed for you to finish by hand. It never removes anything.")
         }
     }
 }
