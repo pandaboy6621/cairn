@@ -287,10 +287,24 @@ final class AppModel {
         }
     }
 
-    /// The last backup file, if it still exists.
-    var existingLastBackup: URL? {
-        lastBackupURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    /// The newest backup of this Mac that still exists: the one the app saved last, or a
+    /// newer one found in the backup folder (made by the CLI, automatic backups, or an
+    /// earlier install), so the Back Up and Restore cards agree.
+    var latestBackup: (date: Date, url: URL)? {
+        let saved = lastBackupURL.flatMap { url -> (Date, URL)? in
+            guard FileManager.default.fileExists(atPath: url.path), let date = lastBackupDate else { return nil }
+            return (date, url)
+        }
+        let device = checklist?.source.device.name
+        let found = foundBackups.first { device == nil || $0.deviceName == device }.map { ($0.created, $0.url) }
+        switch (saved, found) {
+        case let (s?, f?): return f.0 > s.0 ? f : s
+        case let (s, f): return s ?? f
+        }
     }
+
+    /// The last backup file, if it still exists.
+    var existingLastBackup: URL? { latestBackup?.url }
 
     // MARK: Backup folder
 

@@ -167,8 +167,6 @@ private struct BackupCard: View {
                 .disabled(model.isScanning)
             Divider()
             SettingsLink { Text("Backup Settings…") }
-            Button("Automatic Backups (Milestone 3)") {}
-                .disabled(true)
         }
     }
 
@@ -179,7 +177,7 @@ private struct BackupCard: View {
         }
         guard let c = model.checklist else { return .idle(symbol: "externaldrive") }
         let fraction = c.items.isEmpty ? 0 : Double(c.checkedCount) / Double(c.items.count)
-        return .progress(fraction, symbol: model.lastBackupDate == nil ? "externaldrive" : "externaldrive.badge.checkmark",
+        return .progress(fraction, symbol: model.latestBackup == nil ? "externaldrive" : "externaldrive.badge.checkmark",
                          label: nil)
     }
 
@@ -193,7 +191,7 @@ private struct BackupCard: View {
     }
 
     private var detail: String {
-        if let date = model.lastBackupDate {
+        if let date = model.latestBackup?.date {
             return "Last backup \(date.formatted(.relative(presentation: .named)))"
         }
         return "No backups yet. Saves a manifest file you can restore from."
