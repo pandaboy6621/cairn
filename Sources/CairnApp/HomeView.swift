@@ -461,29 +461,24 @@ private struct DashboardCard<Actions: View, MenuItems: View, Footer: View>: View
 }
 
 /// A circular status ring: a determinate arc, an idle track, or a dashed "not yet" ring.
-/// The sheet's ring while a restore runs: fills with "(3 of 6)" progress lines,
-/// and spins when the current step has no count.
+/// The ring while a restore runs: fills with overall progress and shows the percentage.
 struct RestoreRunningRing: View {
-    let line: String
-
-    /// 0.5 for a line ending "(3 of 6)".
-    var fraction: Double? {
-        guard let open = line.lastIndex(of: "("), line.hasSuffix(")") else { return nil }
-        let parts = line[line.index(after: open)..<line.index(before: line.endIndex)].split(separator: " ")
-        guard parts.count == 3, parts[1] == "of", let i = Double(parts[0]), let n = Double(parts[2]), n > 0 else { return nil }
-        return (i - 1) / n
-    }
+    let fraction: Double
+    var lineWidth: CGFloat = 9
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.blue.opacity(0.18), lineWidth: 9)
-            TimelineView(.animation) { context in
-                Circle()
-                    .trim(from: 0, to: fraction.map { max(0.06, $0) } ?? 0.3)
-                    .stroke(Color.blue.gradient, style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                    .rotationEffect(.degrees(fraction == nil ? context.date.timeIntervalSinceReferenceDate * 300 : -90))
-            }
-            Image(systemName: "arrow.down.circle").font(.system(size: 22, weight: .medium)).foregroundStyle(.blue)
+            Circle().stroke(Color.blue.opacity(0.18), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: max(0.02, min(1, fraction)))
+                .stroke(Color.blue.gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.4), value: fraction)
+            Text("\(Int((fraction * 100).rounded()))%")
+                .font(.title3.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.blue)
+                .contentTransition(.numericText())
+                .animation(.default, value: fraction)
         }
         .padding(5)
     }
@@ -561,11 +556,10 @@ struct RestorePreviewSheet: View {
             HStack(spacing: 16) {
                 // Before: how much already matches. After: how many steps checked out
                 // (the comparison is from before the restore, so it would be stale).
-                if case .running(let line) = model.restore.phase {
-                    RestoreRunningRing(line: line).frame(width: 64, height: 64)
+                if case .running = model.restore.phase {
+                    RestoreRunningRing(fraction: model.restore.fraction).frame(width: 64, height: 64)
                 } else if case .finished(let o) = model.restore.phase {
-                    let total = max(1, o.verified + o.problems)
-                    StatusRing(state: .progress(Double(o.verified) / Double(total), symbol: nil, label: "\(o.verified)/\(total)"),
+                    StatusRing(state: .progress(1, symbol: o.problems == 0 ? "checkmark" : "exclamationmark", label: nil),
                                tint: o.problems == 0 ? .green : .orange)
                         .frame(width: 64, height: 64)
                 } else {
@@ -592,7 +586,9 @@ struct RestorePreviewSheet: View {
 
             switch model.restore.phase {
             case .finished(let outcome):
-                RestoreResults(outcome: outcome)
+                RestoreResults(outcome: outcome, log: model.restore.log)
+            case .running:
+                RestoreProgressPanel()
             default:
                 diffList(c)
             }
@@ -601,7 +597,20 @@ struct RestorePreviewSheet: View {
             RestoreFooter(preview: preview)
                 .padding(14)
         }
-        .frame(width: 640, height: 520)
+        .frame(width: 640, height: 560)
+        .overlay {
+            switch model.restore.phase {
+            case .unlocking, .skipWarning:
+                ZStack {
+                    Rectangle().fill(.black.opacity(0.25)).ignoresSafeArea()
+                    VaultUnlockPanel(preview: preview)
+                }
+                .transition(.opacity)
+            default:
+                EmptyView()
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: model.restore.isUnlockShowing)
         .interactiveDismissDisabled(model.restore.isRunning)
     }
 
@@ -679,19 +688,17 @@ private struct RestoreFooter: View {
     @Environment(AppModel.self) private var model
     let preview: RestorePreview
 
-    /// The backup has secrets, the vault is locked, and no password was typed.
-    private var skipsSecrets: Bool {
-        model.restore.needsVault(preview, model: model) && model.restore.vaultPassword.isEmpty
-    }
+    /// The user chose to restore without the vault password.
+    private var skipsSecrets: Bool { model.restore.skipSecrets }
 
     var body: some View {
         @Bindable var run = model.restore
         let empty = preview.comparison.diff.isEmpty
         HStack(spacing: 10) {
             switch run.phase {
-            case .running(let line):
+            case .running:
                 ProgressView().controlSize(.small)
-                Text(line).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text("Restoring… you can keep using your Mac.").font(.callout).foregroundStyle(.secondary)
                 Spacer()
             case .finished(let o):
                 Label(o.problems == 0 ? "Restore finished. \(o.verified) items checked."
@@ -702,11 +709,14 @@ private struct RestoreFooter: View {
                 Button("Done") { model.showingRestorePreview = false; run.reset() }
                     .keyboardShortcut(.defaultAction)
             default:
-                if run.needsVault(preview, model: model) {
-                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
-                    SecureField("Vault password (for saved secrets)", text: $run.vaultPassword)
-                        .frame(maxWidth: 230)
-                        .help("This backup has saved secrets. Without the vault password they're skipped.")
+                let secrets = run.secretSummary(preview)
+                if run.unlockedKey != nil {
+                    Label("Secrets unlocked", systemImage: "lock.open.fill")
+                        .font(.caption).foregroundStyle(.green)
+                } else if run.needsVault(preview, model: model) {
+                    Label("\(secrets.count) encrypted secret\(secrets.count == 1 ? "" : "s")", systemImage: "lock.fill")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help(secrets.text + ". Cairn asks for the vault password when you restore.")
                 } else if !preview.logoutSettings.isEmpty {
                     Label("\(preview.logoutSettings.count) settings need a log out",
                           systemImage: "rectangle.portrait.and.arrow.right")
@@ -717,7 +727,7 @@ private struct RestoreFooter: View {
                 Spacer()
                 Button("Cancel") { model.showingRestorePreview = false }
                     .keyboardShortcut(.cancelAction)
-                Button("Restore…") { run.phase = .confirming }
+                Button("Restore…") { run.begin(preview, model: model) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(empty)
             }
@@ -728,7 +738,7 @@ private struct RestoreFooter: View {
             Button(skipsSecrets ? "Restore Without Secrets" : "Restore") { run.start(preview, model: model) }
             Button("Cancel", role: .cancel) { run.phase = .idle }
         } message: {
-            Text((skipsSecrets ? "No vault password was entered, so this backup's saved secrets will be skipped. " : "")
+            Text((skipsSecrets ? "No vault password was entered, so this backup's encrypted secrets will be skipped. " : "")
                  + "Cairn installs missing packages, writes settings, secrets, the Dock, and wallpaper, and restarts the Dock and Finder. App Store apps and anything that needs your Mac's password are listed for you to finish by hand. It never removes anything.")
         }
     }
@@ -737,6 +747,7 @@ private struct RestoreFooter: View {
 /// What a finished restore did, what it checked, and what's left by hand.
 private struct RestoreResults: View {
     let outcome: RestoreRun.Outcome
+    let log: [RestoreRun.LogLine]
 
     var body: some View {
         let problems = outcome.checks.filter { $0.status == .mismatch || $0.status == .failed }
@@ -744,6 +755,11 @@ private struct RestoreResults: View {
         let skipped = outcome.checks.filter { $0.status == .skipped }
         let r = outcome.report
         List {
+            Section {
+                RestoreFinishedNotice(outcome: outcome)
+                    .frame(maxWidth: .infinity)
+                    .listRowSeparator(.hidden)
+            }
             if !r.needsLogout.isEmpty {
                 Section {
                     Label("Log out and back in to finish: \(r.needsLogout.count) setting\(r.needsLogout.count == 1 ? "" : "s") take effect only after that.",
@@ -779,6 +795,13 @@ private struct RestoreResults: View {
                 Section {
                     DisclosureGroup("Skipped (\(skipped.count))") {
                         ForEach(skipped, id: \.id) { line($0, symbol: "minus.circle", color: .secondary) }
+                    }
+                }
+            }
+            if !log.isEmpty {
+                Section {
+                    DisclosureGroup("Details (\(log.count) lines)") {
+                        RestoreLogView(log: log).frame(height: 180)
                     }
                 }
             }

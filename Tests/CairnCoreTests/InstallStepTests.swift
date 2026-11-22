@@ -49,7 +49,11 @@ import Testing
         let ordered = RestorePlan.make(backup: Self.manifest(packages: Self.pkgs, apps: Self.apps), current: Self.manifest())
         var lines: [String] = []
         let lock = NSLock()
-        let report = MacRestorer(runner: runner).apply(ordered) { line in lock.lock(); lines.append(line); lock.unlock() }
+        var started: [String] = []
+        let report = MacRestorer(runner: runner).apply(ordered, progress: { line in lock.lock(); lines.append(line); lock.unlock() },
+                                                       stepStarted: { i, n in lock.lock(); started.append("\(i + 1)/\(n)"); lock.unlock() })
+        // Every step reports when it starts, not just package installs.
+        #expect(started == (1...ordered.steps.count).map { "\($0)/\(ordered.steps.count)" })
         #expect(report.entries[0].outcome == .partial("1 didn't install: vlc"))
         #expect(report.entries[0].written == .packages(["tap:example/tools", "formula:git"]))
         #expect(report.entries[1].outcome == .skipped("needs your password; listed to do by hand"))

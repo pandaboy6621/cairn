@@ -11,6 +11,8 @@ import CairnCore
 /// `CAIRN_SNAPSHOT_SELECT=<home | category rawValue>` selects a sidebar item after launch, like a click.
 /// `CAIRN_SNAPSHOT_BACKUP_FOLDER=<dir>` uses that folder for backups instead of the saved setting.
 /// `CAIRN_SNAPSHOT_VAULT=1` opens the vault password sheet after launch.
+/// `CAIRN_SNAPSHOT_RESTORE=<unlock|wrong|unlocked|skip|running|finished>` shows that
+/// restore sheet state with made-up data (use with `CAIRN_SNAPSHOT_PREVIEW`).
 /// `CAIRN_SNAPSHOT_SCALE=2` renders at 2x even on a non-Retina display.
 enum DebugSnapshot {
     @MainActor
@@ -28,6 +30,9 @@ enum DebugSnapshot {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.7) {
                 if let model = AppModel.current { model.vault.begin(model) }
             }
+        }
+        if let state = env["CAIRN_SNAPSHOT_RESTORE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) { AppModel.current?.restore.debugShow(state) }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let main = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.frame.height > 100 })

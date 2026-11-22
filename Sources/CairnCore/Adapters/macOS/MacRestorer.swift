@@ -101,7 +101,8 @@ public struct MacRestorer: Sendable {
     /// and is only called if a step needs a secret (so it prompts at most once).
     public func apply(_ plan: RestorePlan, backup: String = "", now: Date = Date(),
                       secrets: SecretsFile = SecretsFile(), unlock: (() throws -> VaultKey)? = nil,
-                      progress: (@Sendable (String) -> Void)? = nil) -> RestoreReport {
+                      progress: (@Sendable (String) -> Void)? = nil,
+                      stepStarted: (@Sendable (_ index: Int, _ total: Int) -> Void)? = nil) -> RestoreReport {
         var key: VaultKey?
         var unlockError: String?
         func vaultKey() -> VaultKey? {
@@ -116,7 +117,8 @@ public struct MacRestorer: Sendable {
         var report = RestoreReport()
         var touched: [String] = []
 
-        for step in plan.steps {
+        for (index, step) in plan.steps.enumerated() {
+            stepStarted?(index, plan.steps.count)
             switch step {
             case .commandLineTools:
                 progress?("Opening Apple's Command Line Tools installer")
