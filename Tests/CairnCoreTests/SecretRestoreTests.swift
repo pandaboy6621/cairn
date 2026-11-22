@@ -210,6 +210,8 @@ final class FakeSharePasswords: SharePasswordSystem, @unchecked Sendable {
                 PackageItem(id: "wget", kind: .formula, resolvers: ["brew": "wget"]),
                 PackageItem(id: "firefox", kind: .cask, resolvers: ["brew": "firefox"]),           // big download
                 PackageItem(id: "google-chrome", kind: .cask, resolvers: ["brew": "google-chrome"]), // another, to watch progress
+                PackageItem(id: "visual-studio-code", kind: .cask, resolvers: ["brew": "visual-studio-code"]), // a fresh download to watch the ring
+                PackageItem(id: "libreoffice", kind: .cask, resolvers: ["brew": "libreoffice"]), // large, to watch the menu bar ring
             ],
             layout: Layout(dock: DockLayout(apps: ["/System/Applications/Mail.app", "/Applications/Rectangle.app",
                                                    "/Applications/Firefox.app", "/System/Applications/System Settings.app"])),

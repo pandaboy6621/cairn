@@ -24,6 +24,15 @@ import Testing
         #expect(c.matchingCount == 8)
     }
 
+    @Test func uncheckedItemsOnThisMacStillMatch() {
+        var current = Samples.manifest
+        current.packages[0].include = false   // unchecked in this Mac's checklist
+        current.settings[0].include = false
+        let c = BackupComparison(backup: Samples.manifest, current: current)
+        #expect(c.itemsToRestore == 0)
+        #expect(c.matchFraction == 1)
+    }
+
     @Test func itemsOnlyOnThisMacDontCount() {
         var current = Samples.manifest
         current.packages.append(PackageItem(id: "extra", kind: .formula, resolvers: ["brew": "extra"]))

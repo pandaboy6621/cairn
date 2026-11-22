@@ -16,9 +16,14 @@ public struct BackupComparison: Equatable, Sendable {
         let included = Self.includedItemCount(backup)
         backupItemCount = included
         let wholeItems: Set<String> = ["layout.dock", "layout.displays", "layout.wallpaper"]
-        let toInstall = diff.sections.filter { !wholeItems.contains($0.name) }.reduce(0) { $0 + $1.added.count }
-        let toChange = diff.sections.filter { !wholeItems.contains($0.name) }
-            .reduce(0) { $0 + Set($1.changed.map { Self.itemID($0.id) }).count }
+        // Sensitive items aren't in `included`; they're compared by the restore plan.
+        let items = diff.sections.filter { !wholeItems.contains($0.name) && $0.name != "sensitive" }
+        let toInstall = items.reduce(0) { $0 + $1.added.count }
+        // A different checkbox isn't a difference: restore never changes what's
+        // selected for backup, so "x include" changes don't count.
+        let toChange = items.reduce(0) { n, section in
+            n + Set(section.changed.filter { !$0.id.hasSuffix(" include") }.map { Self.itemID($0.id) }).count
+        }
         // The Dock and the display layout each count as one item.
         let layoutDiffers = diff.sections.filter { wholeItems.contains($0.name) }.count
         matchingCount = max(0, included - toInstall - toChange - layoutDiffers)
