@@ -21,7 +21,7 @@ enum DebugSnapshot {
         guard let path = env["CAIRN_SNAPSHOT"] else { return }
         let delay = Double(env["CAIRN_SNAPSHOT_DELAY"] ?? "") ?? 8
         if let raw = env["CAIRN_SNAPSHOT_SELECT"] {
-            let item: SidebarItem? = raw == "home" ? .home : ChecklistCategory(rawValue: raw).map { .category($0) }
+            let item: SidebarItem? = raw == "home" ? .home : raw == "sync" ? .sync : ChecklistCategory(rawValue: raw).map { .category($0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay / 2) {
                 AppModel.current?.selection = item
             }

@@ -14,6 +14,8 @@ struct ContentView: View {
             Group {
                 if model.selection == .home {
                     HomeView()
+                } else if model.selection == .sync {
+                    SyncView()
                 } else if let checklist = model.checklist, let category = model.selectedCategory {
                     CategoryDetail(checklist: checklist, category: category)
                 } else if model.isScanning {
@@ -27,6 +29,10 @@ struct ContentView: View {
         }
         .searchable(text: $model.query, placement: .toolbar, prompt: "Search items")
         .toolbar { Toolbar() }
+        .onChange(of: model.showingRestorePreview) { _, showing in
+            // A preview of incoming sync changes is temporary; don't leave it on the Restore card.
+            if !showing, let url = model.restorePreview?.url, model.sync.isIncoming(url) { model.restorePreview = nil }
+        }
         .sheet(isPresented: $model.showingRestorePreview) {
             if let preview = model.restorePreview {
                 RestorePreviewSheet(preview: preview)
@@ -109,6 +115,19 @@ private struct Sidebar: View {
             }
             .padding(.vertical, 2)
             .tag(SidebarItem.home)
+
+            HStack(spacing: 9) {
+                SymbolTile(symbol: "arrow.triangle.2.circlepath", tint: .purple)
+                Text("Sync")
+                Spacer()
+                if model.sync.isOn && model.sync.pendingCount > 0 {
+                    CountBadge(text: "\(model.sync.pendingCount)")
+                } else if !model.sync.isOn {
+                    Text("Off").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.vertical, 2)
+            .tag(SidebarItem.sync)
 
             Section("Setup") {
                 ForEach(ChecklistCategory.allCases) { category in
@@ -487,6 +506,13 @@ private struct ItemRow: View {
 
             Spacer(minLength: 12)
 
+            if model.sync.isOn, model.sync.scope(of: item) == .synced {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.purple)
+                    .help("Synced with your other Macs")
+            }
+
             if category == .sensitive, model.vault.captured.contains(Checklist.ref(sensitiveID: item.id)) {
                 Label("Saved", systemImage: "lock.fill")
                     .font(.caption)
@@ -506,6 +532,26 @@ private struct ItemRow: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture { model.setChecked(item.id, !item.isChecked) }
+        .contextMenu {
+            let own = model.sync.config.items[item.id]
+            Section("Sync") {
+                ForEach(SyncScope.allCases) { scope in
+                    Button {
+                        model.sync.setItem(item.id, scope)
+                    } label: {
+                        Label(scope.title, systemImage: own == scope ? "checkmark" : "")
+                    }
+                }
+                Button {
+                    model.sync.setItem(item.id, nil)
+                } label: {
+                    Label("Same as \(category.title)", systemImage: own == nil ? "checkmark" : "")
+                }
+            }
+            if !model.sync.isOn {
+                Button("Set Up Sync…") { model.selection = .sync }
+            }
+        }
     }
 }
 

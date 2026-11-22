@@ -8,7 +8,7 @@ struct CairnCommand: ParsableCommand {
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
         version: Cairn.version,
-        subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self, VaultCommand.self]
+        subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self, VaultCommand.self, SyncCommand.self]
     )
 
     static func main() {
@@ -245,6 +245,22 @@ struct Backup: ParsableCommand {
             if !auto { print("No changes since snapshot \(s.id).") }
         }
         if !auto { for w in report.warnings { stderr("warning: \(w)") } }
+
+        // With sync on, share this Mac's changes too (writes only this Mac's
+        // sync files; changes from other Macs wait for `cairn sync now --apply`).
+        let store = SyncStore(root: folder)
+        let device = report.manifest.device
+        if store.config(device: device.name).enabled, backup.folderIsAvailable() {
+            let run = SyncRun(store: store, device: device)
+            let plan = run.plan(local: report.manifest, secrets: VaultStore.readSecrets(in: folder, device: device.name))
+            do {
+                try run.publish(plan)
+                if !plan.outgoing.isEmpty || !auto { print("\(stamp)Sync: published \(plan.outgoing.count) change(s)"
+                    + (plan.incoming.isEmpty ? "." : "; \(plan.incoming.count) waiting from your other Macs.")) }
+            } catch {
+                stderr("\(stamp)sync: \(error.localizedDescription)")
+            }
+        }
     }
 }
 

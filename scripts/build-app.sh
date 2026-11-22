@@ -52,6 +52,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>Cairn finds your other Macs running Cairn on this network, so they can sync. Only each Mac's name and macOS version are shared; setups travel through your backup folder.</string>
+  <key>NSBonjourServices</key><array><string>_cairn._tcp</string></array>
 </dict>
 </plist>
 PLIST

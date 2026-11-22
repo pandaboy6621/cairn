@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 /// What the sidebar shows: the Home dashboard or one checklist category.
 enum SidebarItem: Hashable {
     case home
+    case sync
     case category(ChecklistCategory)
 
     var category: ChecklistCategory? {
@@ -65,6 +66,8 @@ final class AppModel {
             vault.folderChanged(self)
             // Keep automatic backups going to the same folder.
             if autoBackup != nil { setAutoBackup(true) }
+            // Sync lives in the backup folder too.
+            if let source = checklist?.source { sync.load(device: source.device, folder: backupFolder, scan: source) }
         }
     }
     var isDefaultBackupFolder: Bool { backupFolder.standardizedFileURL == BackupFolder.defaultURL.standardizedFileURL }
@@ -98,6 +101,8 @@ final class AppModel {
     let restore = RestoreRun()
     /// Open at Login.
     let loginItem = LoginItem()
+    /// Sync between this Mac and others using the same backup folder.
+    let sync = SyncFlow()
 
     /// The app's single model, for the debug snapshot hook.
     static weak var current: AppModel?
@@ -134,6 +139,21 @@ final class AppModel {
     }
 
     var selectedCategory: ChecklistCategory? { selection?.category }
+
+    /// Rescans, then syncs with the fresh scan.
+    func syncNow() {
+        scan { [weak self] in
+            guard let self, let source = self.checklist?.source else { return }
+            self.sync.syncNow(scan: source)
+        }
+    }
+
+    /// Opens the restore sheet on incoming sync changes.
+    func reviewIncoming(_ incoming: [SyncIncoming]) {
+        guard let url = sync.prepare(incoming) else { return }
+        restore.reset()
+        previewRestore(url)
+    }
 
     /// A running task, shown as a small ring by the device name. Backup, restore,
     /// and sync tasks plug in here as they arrive.
@@ -179,6 +199,7 @@ final class AppModel {
             for id in excluded { list.setChecked(id, false) }
             previousExclusions = excluded
             checklist = list
+            sync.load(device: report.manifest.device, folder: folder, scan: report.manifest)
             warnings = report.warnings
             lastScan = Date()
             isScanning = false
@@ -297,6 +318,8 @@ final class AppModel {
                 }
                 if !run.flushed.isEmpty { statusMessage! += " Copied \(run.flushed.count) queued snapshot\(run.flushed.count == 1 ? "" : "s") too." }
                 refreshFoundBackups()
+                // Backing up is a good moment to share this Mac's changes.
+                if sync.isOn, folder.standardizedFileURL == backupFolder.standardizedFileURL { sync.syncNow(scan: checklist.source) }
             }
             done?()
         }

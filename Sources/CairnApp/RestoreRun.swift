@@ -9,6 +9,8 @@ final class RestoreRun {
     struct Outcome {
         let report: RestoreReport
         let checks: [RestoreVerification.Result]
+        /// The scan after restoring.
+        var after: Manifest? = nil
         var problems: Int { checks.filter { $0.status == .mismatch || $0.status == .failed }.count }
         var verified: Int { checks.filter { $0.status == .verified }.count }
     }
@@ -184,13 +186,15 @@ final class RestoreRun {
                 // Let restarted apps settle before checking.
                 try? await Task.sleep(for: .seconds(3))
                 let after = SetupScanner().scan().manifest
-                return Outcome(report: report, checks: RestoreVerification.check(report, after: after))
+                return Outcome(report: report, checks: RestoreVerification.check(report, after: after), after: after)
             }.value
             for i in tasks.indices { tasks[i].status = .done }
             fraction = 1
             addLog("Finished: \(outcome.verified) checked, \(outcome.problems) problem\(outcome.problems == 1 ? "" : "s"), \(outcome.report.manualSteps.count) to do by hand", isStep: true)
             phase = .finished(outcome)
             model.lastRestoredURL = url.standardizedFileURL
+            // Changes from other Macs: record which ones landed.
+            if model.sync.isIncoming(url), let after = outcome.after { model.sync.restored(after: after) }
             model.scan() // the Mac changed; refresh the checklist and preview
         }
     }

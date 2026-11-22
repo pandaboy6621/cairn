@@ -332,26 +332,62 @@ private struct FolderRow: View {
 }
 
 private struct SyncCard: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
+        let sync = model.sync
+        let others = sync.machines.filter { !$0.isThisMac && $0.syncing }.count
         DashboardCard(
             title: "Sync",
             tint: .purple,
-            ring: .disabled(symbol: "arrow.triangle.2.circlepath"),
-            status: "Coming later",
-            detail: "Keep settings in step across your Macs through your NAS.",
+            ring: !sync.isOn ? .disabled(symbol: "arrow.triangle.2.circlepath")
+                : sync.pendingCount > 0 ? .idle(symbol: "arrow.down")
+                : .progress(1, symbol: "checkmark", label: nil),
+            status: !sync.isOn ? "Off"
+                : sync.isSyncing ? "Syncing…"
+                : sync.pendingCount > 0 ? "\(sync.pendingCount) change\(sync.pendingCount == 1 ? "" : "s") from your other Macs"
+                : sync.lastSync == nil ? "Not synced yet" : "In sync",
+            detail: !sync.isOn ? "Keep your Macs' setups in step through your backup folder or NAS."
+                : others == 0 ? "No other Macs syncing yet. Turn on sync on another Mac using this folder."
+                : "With \(others) other Mac\(others == 1 ? "" : "s")\(sync.lastSync.map { ", synced \($0.formatted(.relative(presentation: .named)))" } ?? "").",
             footer: {
-                Label("Later milestone", systemImage: "clock")
+                Label(sync.isOn ? "\(sync.config.preset.title) preset" : "Through the backup folder",
+                      systemImage: sync.isOn ? "slider.horizontal.3" : "externaldrive.connected.to.line.below")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         ) {
-            Button {} label: {
-                Text("Coming Soon").frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                if !sync.isOn {
+                    Button {
+                        model.selection = .sync
+                    } label: {
+                        Text("Set Up Sync…").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                } else if let plan = sync.plan, !plan.incoming.isEmpty {
+                    Button {
+                        model.reviewIncoming(plan.incoming)
+                    } label: {
+                        Label("Review Changes", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                } else {
+                    Button {
+                        model.syncNow()
+                    } label: {
+                        Label("Sync Now", systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .disabled(sync.isSyncing || model.isScanning)
+                }
             }
-            .buttonStyle(.bordered)
-            .disabled(true)
         } menu: {
-            EmptyView()
+            Button("Open Sync") { model.selection = .sync }
+            if sync.isOn { Button("Turn Off Sync on This Mac") { sync.turnOff() } }
         }
     }
 }

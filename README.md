@@ -87,7 +87,7 @@ restore onto Windows and Linux.
 | 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
 | 4 | 🔐 Encrypted vault: Wi-Fi networks, SSH keys, API tokens, share passwords, VPN list | ✅ Done |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (all steps built, Restore button in the app; VM testing) |
-| 6 | 🔄 Sync between your Macs, auto-discovered on your network | 📅 Planned |
+| 6 | 🔄 Sync between your Macs, auto-discovered on your network | 🚧 In progress (sync through the backup folder or NAS; pairing next) |
 | 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
 
 ### Coming soon: Windows and Linux
@@ -178,6 +178,14 @@ cairn vault change-password --recovery
 cairn vault secrets                      # Wi-Fi, SSH keys, credential files, share passwords, VPNs
 cairn vault secrets --name "Home"       # save one (macOS asks to approve Keychain reads)
 cairn vault remember                     # keep the vault key in this Mac's Keychain (forget undoes)
+
+cairn sync on                            # preset: portable (default), everything, or nothing
+cairn sync                               # what a sync would do; changes nothing
+cairn sync now                           # publish this Mac's changes, list ones from other Macs
+cairn sync now --apply                   # also bring those in (shown first, then checked)
+cairn sync scope layout:dock synced      # a category or one item: synced, this-mac, ignored, default
+cairn sync resolve <id> --theirs --apply # settle a conflict (or --mine, --skip)
+cairn sync devices
 ```
 
 While developing, use `swift run cairn …` and `swift run CairnApp`.
