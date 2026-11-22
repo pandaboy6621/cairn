@@ -18,10 +18,11 @@ public struct CommandPolicy: Sendable {
         case "brew":
             // `brew tap` with no arguments lists taps; with arguments it adds one.
             if args == ["tap"] { return true }
+            if args == ["--version"] { return true }
             guard let sub = args.first else { return false }
             return ["list", "leaves"].contains(sub)
         case "mas":
-            return args == ["list"]
+            return args == ["list"] || args == ["version"]
         case "defaults":
             // `defaults export <domain> -` writes to stdout only. (`defaults domains`
             // is left out on purpose: it reads other apps' sandbox containers.)
@@ -31,6 +32,8 @@ public struct CommandPolicy: Sendable {
             return (args.count == 2 && args[0] == "--get") || args == ["--nc", "list"]
         case "sw_vers":
             return true
+        case "xcode-select":
+            return args == ["-p"]
         case "system_profiler":
             return args == ["SPDisplaysDataType", "-json"]
         case "mount":
@@ -63,6 +66,15 @@ public struct CommandPolicy: Sendable {
             return args.count == 1 && ["Dock", "Finder", "SystemUIServer", "ControlCenter"].contains(args[0])
         case "launchctl":
             return agents.allows(command)
+        case "brew":
+            // One tap or one package at a time, by name (never a flag or a path).
+            func isName(_ s: String) -> Bool { !s.isEmpty && !s.hasPrefix("-") && !s.hasPrefix("/") && !s.contains("..") }
+            if args.count == 2 && args[0] == "tap" { return isName(args[1]) }
+            return args.count == 3 && args[0] == "install" && ["--formula", "--cask"].contains(args[1]) && isName(args[2])
+        case "mas":
+            return args.count == 2 && args[0] == "install" && !args[1].isEmpty && args[1].allSatisfy(\.isNumber)
+        case "xcode-select":
+            return args == ["--install"]
         case "ssh-keygen":
             // Only printing a key's public half, with an empty passphrase so it can't prompt.
             return args.count == 5 && Array(args[0...3]) == ["-y", "-P", "", "-f"]

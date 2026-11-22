@@ -18,14 +18,16 @@ enum SidebarItem: Hashable {
 /// A restore preview: a backup manifest compared with this Mac.
 struct RestorePreview: Identifiable {
     let id = UUID()
+    let url: URL
     let fileName: String
     let backup: Manifest
     let comparison: BackupComparison
     /// Settings a restore would write that need a log out to take effect.
     let logoutSettings: [String]
 
-    init(fileName: String, backup: Manifest, current: Manifest) {
-        self.fileName = fileName
+    init(url: URL, backup: Manifest, current: Manifest) {
+        self.url = url
+        fileName = url.lastPathComponent
         self.backup = backup
         comparison = BackupComparison(backup: backup, current: current)
         logoutSettings = MacRestorer.logoutSettings(
@@ -90,6 +92,8 @@ final class AppModel {
 
     /// The Sensitive tier's password and unlocked key (memory only).
     let vault = VaultFlow()
+    /// Applying a restore from the preview sheet.
+    let restore = RestoreRun()
 
     /// The app's single model, for the debug snapshot hook.
     static weak var current: AppModel?
@@ -176,16 +180,13 @@ final class AppModel {
             #if DEBUG
             if restorePreview == nil, let path = ProcessInfo.processInfo.environment["CAIRN_SNAPSHOT_PREVIEW"],
                let backup = try? ManifestCoder.read(from: URL(fileURLWithPath: path)) {
-                restorePreview = RestorePreview(fileName: URL(fileURLWithPath: path).lastPathComponent, backup: backup,
-                                                current: report.manifest)
+                restorePreview = RestorePreview(url: URL(fileURLWithPath: path), backup: backup, current: report.manifest)
                 showingRestorePreview = true
             }
             #endif
             // A restore preview compares against the scan; refresh it.
             if let preview = restorePreview {
-                restorePreview = RestorePreview(
-                    fileName: preview.fileName, backup: preview.backup,
-                    current: report.manifest)
+                restorePreview = RestorePreview(url: preview.url, backup: preview.backup, current: report.manifest)
             }
         }
     }
@@ -390,9 +391,8 @@ final class AppModel {
         guard let checklist else { return }
         do {
             let backup = try ManifestCoder.read(from: url)
-            restorePreview = RestorePreview(
-                fileName: url.lastPathComponent, backup: backup,
-                current: checklist.source)
+            restore.reset()
+            restorePreview = RestorePreview(url: url, backup: backup, current: checklist.source)
             showingRestorePreview = true
         } catch {
             errorMessage = "Couldn't read \(url.lastPathComponent): \(error)"

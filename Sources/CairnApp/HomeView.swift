@@ -289,9 +289,10 @@ private struct RestoreCard: View {
             Button("Open Backup Folder") { model.showBackupFolder() }
             Button("Refresh Backup List") { model.refreshFoundBackups() }
                 .disabled(!model.findBackupsAutomatically)
-            Divider()
-            Button("Apply Restore (Milestone 5)") {}
-                .disabled(true)
+            if model.restorePreview != nil {
+                Divider()
+                Button("Restore This Backup…") { model.showingRestorePreview = true }
+            }
         }
     }
 }
@@ -534,10 +535,12 @@ struct RestorePreviewSheet: View {
                                             label: "\(Int((c.matchFraction * 100).rounded()))%"), tint: .blue)
                     .frame(width: 64, height: 64)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Restore preview").font(.title2.weight(.semibold))
+                    let finished: Bool = { if case .finished = model.restore.phase { return true } else { return false } }()
+                    Text(finished ? "Restore finished" : "Restore preview").font(.title2.weight(.semibold))
                     Text("\(preview.fileName) · from \(preview.backup.device.name)")
                         .foregroundStyle(.secondary)
-                    Text("\(c.matchingCount) of \(c.backupItemCount) items already match this Mac. Nothing has been changed.")
+                    Text(finished ? "Here's what changed, what Cairn checked, and what's left for you."
+                                  : "\(c.matchingCount) of \(c.backupItemCount) items already match this Mac. Nothing has been changed.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -546,63 +549,60 @@ struct RestorePreviewSheet: View {
             .padding(20)
             Divider()
 
-            if c.diff.isEmpty {
-                ContentUnavailableView("Nothing to restore", systemImage: "checkmark.circle",
-                                       description: Text("This Mac already matches the backup."))
-            } else {
-                let installs = c.diff.sections.flatMap { sec in sec.added.map { (Self.title(for: sec.name), $0) } }
-                let changes = c.diff.sections.flatMap { sec in sec.changed.map { (Self.title(for: sec.name), $0) } }
-                let onlyHere = c.diff.sections.flatMap { sec in sec.removed.map { (Self.title(for: sec.name), $0) } }
-                List {
-                    if !installs.isEmpty {
-                        Section("Would install (\(installs.count))") {
-                            ForEach(installs, id: \.1) { kind, item in
-                                row(symbol: "plus.circle.fill", color: .green, text: item, note: kind)
-                            }
-                        }
-                    }
-                    if !changes.isEmpty {
-                        Section("Would change (\(changes.count))") {
-                            ForEach(changes, id: \.1.id) { kind, change in
-                                row(symbol: "arrow.triangle.2.circlepath.circle.fill", color: .orange, text: change.id,
-                                    note: "\(change.from) → \(change.to)")
-                            }
-                        }
-                    }
-                    if !onlyHere.isEmpty {
-                        Section {
-                            DisclosureGroup("Only on this Mac (\(onlyHere.count)): restore leaves these alone") {
-                                ForEach(onlyHere, id: \.1) { kind, item in
-                                    row(symbol: "minus.circle", color: .secondary, text: item, note: kind)
-                                }
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .listStyle(.inset)
+            switch model.restore.phase {
+            case .finished(let outcome):
+                RestoreResults(outcome: outcome)
+            default:
+                diffList(c)
             }
 
             Divider()
-            HStack {
-                if !preview.logoutSettings.isEmpty {
-                    Label("\(preview.logoutSettings.count) of these settings take effect only after you log out and back in.",
-                          systemImage: "rectangle.portrait.and.arrow.right")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .help(preview.logoutSettings.joined(separator: "\n"))
-                } else {
-                    Text("Restore from the command line: cairn restore --from <backup> (a dry run until --apply).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { model.showingRestorePreview = false }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(14)
+            RestoreFooter(preview: preview)
+                .padding(14)
         }
         .frame(width: 640, height: 520)
+        .interactiveDismissDisabled(model.restore.isRunning)
+    }
+
+    @ViewBuilder
+    private func diffList(_ c: BackupComparison) -> some View {
+        if c.diff.isEmpty {
+            ContentUnavailableView("Nothing to restore", systemImage: "checkmark.circle",
+                                   description: Text("This Mac already matches the backup."))
+        } else {
+            let installs = c.diff.sections.flatMap { sec in sec.added.map { (Self.title(for: sec.name), $0) } }
+            let changes = c.diff.sections.flatMap { sec in sec.changed.map { (Self.title(for: sec.name), $0) } }
+            let onlyHere = c.diff.sections.flatMap { sec in sec.removed.map { (Self.title(for: sec.name), $0) } }
+            List {
+                if !installs.isEmpty {
+                    Section("Would install (\(installs.count))") {
+                        ForEach(installs, id: \.1) { kind, item in
+                            row(symbol: "plus.circle.fill", color: .green,
+                                text: item.hasPrefix("vault://") ? SecretReader.title(of: item) : item, note: kind)
+                        }
+                    }
+                }
+                if !changes.isEmpty {
+                    Section("Would change (\(changes.count))") {
+                        ForEach(changes, id: \.1.id) { kind, change in
+                            row(symbol: "arrow.triangle.2.circlepath.circle.fill", color: .orange, text: change.id,
+                                note: "\(change.from) → \(change.to)")
+                        }
+                    }
+                }
+                if !onlyHere.isEmpty {
+                    Section {
+                        DisclosureGroup("Only on this Mac (\(onlyHere.count)): restore leaves these alone") {
+                            ForEach(onlyHere, id: \.1) { kind, item in
+                                row(symbol: "minus.circle", color: .secondary, text: item, note: kind)
+                            }
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .listStyle(.inset)
+        }
     }
 
     private func row(symbol: String, color: Color, text: String, note: String) -> some View {
@@ -629,6 +629,120 @@ struct RestorePreviewSheet: View {
         case "layout.wallpaper": return "Wallpaper"
         case "sensitive": return "Sensitive"
         default: return section
+        }
+    }
+}
+
+/// Restore button, confirmation, progress, and the vault password when needed.
+private struct RestoreFooter: View {
+    @Environment(AppModel.self) private var model
+    let preview: RestorePreview
+
+    var body: some View {
+        @Bindable var run = model.restore
+        let empty = preview.comparison.diff.isEmpty
+        HStack(spacing: 10) {
+            switch run.phase {
+            case .running(let line):
+                ProgressView().controlSize(.small)
+                Text(line).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Spacer()
+            case .finished(let o):
+                Label(o.problems == 0 ? "Restore finished. \(o.verified) items checked."
+                                      : "Restore finished with \(o.problems) problem\(o.problems == 1 ? "" : "s").",
+                      systemImage: o.problems == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(o.problems == 0 ? .green : .orange)
+                Spacer()
+                Button("Done") { model.showingRestorePreview = false; run.reset() }
+                    .keyboardShortcut(.defaultAction)
+            default:
+                if run.needsVault(preview, model: model) {
+                    SecureField("Vault password (for saved secrets)", text: $run.vaultPassword)
+                        .frame(maxWidth: 230)
+                } else if !preview.logoutSettings.isEmpty {
+                    Label("\(preview.logoutSettings.count) settings need a log out",
+                          systemImage: "rectangle.portrait.and.arrow.right")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help(preview.logoutSettings.joined(separator: "\n"))
+                }
+                Spacer()
+                Button("Cancel") { model.showingRestorePreview = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Restore…") { run.phase = .confirming }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(empty)
+            }
+        }
+        .confirmationDialog("Restore this backup to this Mac?",
+                            isPresented: Binding(get: { if case .confirming = run.phase { return true } else { return false } },
+                                                 set: { if !$0, case .confirming = run.phase { run.phase = .idle } })) {
+            Button("Restore") { run.start(preview, model: model) }
+            Button("Cancel", role: .cancel) { run.phase = .idle }
+        } message: {
+            Text("Cairn installs missing packages and App Store apps, writes settings, secrets, the Dock, and wallpaper, and restarts the Dock and Finder. It never removes anything. macOS may ask for your password or approval along the way.")
+        }
+    }
+}
+
+/// What a finished restore did, what it checked, and what's left by hand.
+private struct RestoreResults: View {
+    let outcome: RestoreRun.Outcome
+
+    var body: some View {
+        let problems = outcome.checks.filter { $0.status == .mismatch || $0.status == .failed }
+        let verified = outcome.checks.filter { $0.status == .verified }
+        let skipped = outcome.checks.filter { $0.status == .skipped }
+        let r = outcome.report
+        List {
+            if !r.needsLogout.isEmpty {
+                Section {
+                    Label("Log out and back in to finish: \(r.needsLogout.count) setting\(r.needsLogout.count == 1 ? "" : "s") take effect only after that.",
+                          systemImage: "rectangle.portrait.and.arrow.right")
+                        .foregroundStyle(.orange)
+                }
+            }
+            if !problems.isEmpty {
+                Section("Problems (\(problems.count))") {
+                    ForEach(problems, id: \.id) { line($0, symbol: "xmark.circle.fill", color: .red) }
+                }
+            }
+            if !r.manualSteps.isEmpty {
+                Section("Still to do by hand (\(r.manualSteps.count))") {
+                    ForEach(Array(r.manualSteps.enumerated()), id: \.offset) { _, m in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "hand.point.right.fill").foregroundStyle(.blue)
+                            Text(m.text)
+                            Spacer(minLength: 8)
+                            Text(m.category).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            if !verified.isEmpty {
+                Section {
+                    DisclosureGroup("Restored and checked (\(verified.count))") {
+                        ForEach(verified, id: \.id) { line($0, symbol: "checkmark.circle.fill", color: .green) }
+                    }
+                }
+            }
+            if !skipped.isEmpty {
+                Section {
+                    DisclosureGroup("Skipped (\(skipped.count))") {
+                        ForEach(skipped, id: \.id) { line($0, symbol: "minus.circle", color: .secondary) }
+                    }
+                }
+            }
+        }
+        .listStyle(.inset)
+    }
+
+    private func line(_ r: RestoreVerification.Result, symbol: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(color)
+            Text(r.id).lineLimit(1)
+            Spacer(minLength: 12)
+            Text(r.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
     }
 }

@@ -62,6 +62,9 @@ restore onto Windows and Linux.
 
 - **Dry run first, always.** Restore shows exactly what would change. Nothing is written until you
   press Apply (or pass `--apply`).
+- **In order, from the app or the CLI.** Command Line Tools, Homebrew packages (taps, formulae, casks),
+  App Store apps, secrets, settings, then the Dock and wallpaper. Press Restore in the preview, or run
+  `cairn restore --from <backup> --apply`. Each item is checked afterwards against a fresh scan.
 - **Settings and Dock.** Settings are written back and the affected apps restarted.
   Dock icons for apps that aren't installed yet are added back automatically once the app appears.
 - **Displays.** Puts your monitors back in the same arrangement, even on a different desk.
@@ -83,7 +86,7 @@ restore onto Windows and Linux.
 | 2 | SwiftUI checklist app, export manifests | ✅ Done |
 | 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
 | 4 | 🔐 Encrypted vault: Wi-Fi networks, SSH keys, API tokens, share passwords, VPN list | ✅ Done |
-| 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (settings, Dock, displays work) |
+| 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (all steps built, Restore button in the app; VM testing) |
 | 6 | 🔄 Sync between your Macs, auto-discovered on your network | 📅 Planned |
 | 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
 

@@ -29,6 +29,22 @@ public enum VaultStore {
         try encode(envelope).write(to: url(in: folder), atomically: true, encoding: .utf8)
     }
 
+    /// The vault for a backup manifest: beside it, or a few folders up (a
+    /// snapshot sits at `snapshots/<device>/<id>/manifest.yaml`).
+    public static func folder(near manifest: URL, fallback: URL) -> URL {
+        var dir = manifest.deletingLastPathComponent()
+        for _ in 0..<4 {
+            if exists(in: dir) { return dir }
+            dir = dir.deletingLastPathComponent()
+        }
+        return fallback
+    }
+
+    /// The encrypted secrets saved beside a backup manifest (empty if none).
+    public static func secrets(beside manifest: URL) -> SecretsFile {
+        (try? SecretsFile.read(from: manifest.deletingLastPathComponent().appendingPathComponent(secretsFileName))) ?? SecretsFile()
+    }
+
     static func encode<T: Encodable>(_ value: T) throws -> String {
         let encoder = YAMLEncoder()
         encoder.options.sortKeys = true

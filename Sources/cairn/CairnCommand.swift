@@ -17,11 +17,15 @@ struct Restore: ParsableCommand {
         abstract: "Make this Mac match a backup. Dry run unless you pass --apply.",
         discussion: """
             Scans this Mac, then prints what would change to match the backup.
-            With --apply it writes settings and the Dock, restarts the affected apps,
-            scans again, and checks every item it wrote.
-            Saved secrets (Wi-Fi and share passwords, SSH keys) are decrypted only with --apply, after asking for the
-            vault password (or reading it with --password-stdin). Packages and App Store
-            apps are listed but not restored yet.
+            With --apply it works in dependency order: the Command Line Tools (opens
+            Apple's installer), Homebrew packages (taps, formulae, casks, one at a
+            time), App Store apps (via mas, after you sign in), secrets, settings, then
+            the Dock and wallpaper. It restarts the affected apps, scans again, and
+            checks every item it wrote. If Homebrew is missing, packages wait: install
+            it from brew.sh and run restore again.
+            Saved secrets (Wi-Fi and share passwords, SSH keys, credential files) are
+            decrypted only with --apply, after asking for the vault password (or
+            reading it with --password-stdin, or using one this Mac remembers).
             """
     )
 
@@ -47,7 +51,8 @@ struct Restore: ParsableCommand {
         let scanner = SetupScanner()
         let before = scanner.scan()
         let plan = RestorePlan.make(backup: backup, current: before.manifest, manual: MacRestorer.manualStep,
-                                    savedSecrets: Set(secrets.secrets.keys))
+                                    savedSecrets: Set(secrets.secrets.keys),
+                                    environment: MacRestorer.detectEnvironment())
         print(plan.render(), terminator: "")
         let restorer = MacRestorer()
         for case .dock(let layout, _) in plan.changes {
@@ -71,6 +76,8 @@ struct Restore: ParsableCommand {
             // A key this Mac remembers (opt-in, `cairn vault remember`) skips the prompt.
             if let key = Vault.cachedKey(for: envelope, cache: KeychainVaultKeyCache()) { return key }
             return try Vault.unlock(envelope, password: readPassword("Vault password (to restore secrets): ", stdin: passwordStdin))
+        } progress: { line in
+            print("  \(line)")
         }
         if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
         for w in result.warnings { stderr("note: \(w)") }
@@ -99,28 +106,11 @@ struct Restore: ParsableCommand {
 extension Restore {
     /// The nearest folder above the manifest holding vault.yaml, else the app's backup folder.
     static func vaultFolder(near manifest: URL) -> URL {
-        var dir = manifest.deletingLastPathComponent()
-        for _ in 0..<4 {
-            if VaultStore.exists(in: dir) { return dir }
-            dir = dir.deletingLastPathComponent()
-        }
-        return appBackupFolder()
+        VaultStore.folder(near: manifest, fallback: appBackupFolder())
     }
 
     /// What's left after a restore, printed last so it isn't lost in the scroll.
-    static func finishingSteps(_ result: RestoreReport) -> String {
-        var out = ""
-        if !result.manualSteps.isEmpty {
-            out += "\nStill to do by hand\n"
-            for m in result.manualSteps { out += "  - \(m.category): \(m.text)\n" }
-        }
-        if !result.needsLogout.isEmpty {
-            let n = result.needsLogout.count
-            let some = result.needsLogout.prefix(4).joined(separator: ", ") + (n > 4 ? ", …" : "")
-            out += "\n>>> Log out and back in to finish. \(n) setting\(n == 1 ? "" : "s") only take\(n == 1 ? "s" : "") effect after that (\(some)).\n"
-        }
-        return out
-    }
+    static func finishingSteps(_ result: RestoreReport) -> String { result.finishingText }
 }
 
 struct Dock: ParsableCommand {

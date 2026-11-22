@@ -100,7 +100,8 @@ public struct MacRestorer: Sendable {
     /// `secrets` holds the backup's encrypted secrets; `unlock` opens the vault,
     /// and is only called if a step needs a secret (so it prompts at most once).
     public func apply(_ plan: RestorePlan, backup: String = "", now: Date = Date(),
-                      secrets: SecretsFile = SecretsFile(), unlock: (() throws -> VaultKey)? = nil) -> RestoreReport {
+                      secrets: SecretsFile = SecretsFile(), unlock: (() throws -> VaultKey)? = nil,
+                      progress: (@Sendable (String) -> Void)? = nil) -> RestoreReport {
         var key: VaultKey?
         var unlockError: String?
         func vaultKey() -> VaultKey? {
@@ -117,6 +118,52 @@ public struct MacRestorer: Sendable {
 
         for step in plan.steps {
             switch step {
+            case .commandLineTools:
+                progress?("Opening Apple's Command Line Tools installer")
+                let r = try? runner.run(Self.commandLineToolsCommand)
+                // Exit 1 with "already installed" means they arrived meanwhile.
+                let already = r?.stderr.contains("already installed") == true
+                report.entries.append(.init(step: step, outcome: already ? .skipped("already installed")
+                    : r?.exitCode == 0 ? .partial("Apple's installer is open; finish it, then run restore again for packages")
+                    : .failed(r?.stderr.trimmingCharacters(in: .whitespacesAndNewlines) ?? "couldn't run xcode-select"), written: nil))
+                if !already {
+                    report.manualSteps.append(.init(category: "command line tools",
+                        text: "finish Apple's Command Line Tools installer, install Homebrew from https://brew.sh, then run restore again"))
+                }
+
+            case .packages(let items):
+                var done: [String] = [], failed: [String] = []
+                for (i, p) in items.enumerated() {
+                    let name = p.resolvers["brew"] ?? p.id
+                    progress?("Installing \(p.kind.rawValue) \(name) (\(i + 1) of \(items.count))")
+                    let r = try? runner.run(Self.installCommand(p))
+                    if r?.exitCode == 0 { done.append(p.uid) } else {
+                        failed.append(name)
+                        let why = r.map { Self.lastLine($0.stderr) } ?? "couldn't run brew"
+                        report.manualSteps.append(.init(category: "packages", text: "\(p.kind.rawValue) \(name) didn't install: \(why)"))
+                    }
+                }
+                let outcome: RestoreReport.Outcome = failed.isEmpty ? .applied
+                    : done.isEmpty ? .failed("none installed: " + failed.prefix(5).joined(separator: ", "))
+                    : .partial("\(failed.count) didn't install: " + failed.prefix(5).joined(separator: ", "))
+                report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .packages(done)))
+
+            case .appStore(let apps):
+                var done: [String] = [], failed: [String] = []
+                for (i, a) in apps.enumerated() {
+                    progress?("Installing \(a.name) from the App Store (\(i + 1) of \(apps.count))")
+                    let r = try? runner.run(Command("mas", ["install", a.id]))
+                    if r?.exitCode == 0 { done.append(a.id) } else {
+                        failed.append(a.name)
+                        report.manualSteps.append(.init(category: "app store",
+                            text: "install \(a.name) from the App Store (sign in first; it must be on your Apple Account)"))
+                    }
+                }
+                let outcome: RestoreReport.Outcome = failed.isEmpty ? .applied
+                    : done.isEmpty ? .failed("none installed (signed in to the App Store?)")
+                    : .partial("\(failed.count) didn't install: " + failed.prefix(5).joined(separator: ", "))
+                report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .appStore(done)))
+
             case .pending(_, _, let reason):
                 report.entries.append(.init(step: step, outcome: .skipped(reason), written: nil))
 
@@ -294,6 +341,30 @@ public struct MacRestorer: Sendable {
                 text: "\(name).pub wasn't recreated (the key has a passphrase, or a .pub is already there); run ssh-keygen -y -f ~/.ssh/\(name) > ~/.ssh/\(name).pub if you need it"))
         }
         return true
+    }
+
+    static let commandLineToolsCommand = Command("xcode-select", ["--install"])
+
+    /// `brew tap x`, `brew install --formula x`, or `brew install --cask x`.
+    public static func installCommand(_ p: PackageItem) -> Command {
+        let name = p.resolvers["brew"] ?? p.id
+        switch p.kind {
+        case .tap: return Command("brew", ["tap", name])
+        case .formula: return Command("brew", ["install", "--formula", name])
+        case .cask: return Command("brew", ["install", "--cask", name])
+        }
+    }
+
+    static func lastLine(_ text: String) -> String {
+        text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.last { !$0.isEmpty } ?? "no details"
+    }
+
+    /// Which install tools this Mac has. Read-only.
+    public static func detectEnvironment(runner: CommandRunner = ProcessRunner()) -> RestoreEnvironment {
+        func ok(_ c: Command) -> Bool { (try? runner.run(c))?.exitCode == 0 }
+        return RestoreEnvironment(commandLineTools: ok(Command("xcode-select", ["-p"])),
+                                  homebrew: ok(Command("brew", ["--version"])),
+                                  mas: ok(Command("mas", ["version"])))
     }
 
     static func checklistCategory(_ type: String) -> String {

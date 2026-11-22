@@ -7,6 +7,12 @@ import Foundation
 /// Steps are in dependency order: packages, apps, settings, then layout.
 public struct RestorePlan: Equatable, Sendable {
     public enum Step: Equatable, Sendable {
+        /// Open Apple's Command Line Tools installer (Homebrew needs them).
+        case commandLineTools
+        /// Install packages: taps first, then formulae, then casks.
+        case packages([PackageItem])
+        /// Install Mac App Store apps (needs App Store sign-in and `mas`).
+        case appStore([AppItem])
         /// Set a setting the target lacks or holds a different value for.
         case setting(SettingItem, current: SettingValue?)
         /// Rebuild the Dock in this order.
@@ -24,6 +30,9 @@ public struct RestorePlan: Equatable, Sendable {
 
         public var id: String {
             switch self {
+            case .commandLineTools: return "command line tools"
+            case .packages: return "packages"
+            case .appStore: return "app store"
             case .setting(let s, _): return s.key
             case .dock: return "dock"
             case .defaultApps: return "default apps"
@@ -46,17 +55,48 @@ public struct RestorePlan: Equatable, Sendable {
     public typealias ManualCheck = @Sendable (SettingItem) -> (category: String, reason: String)?
 
     /// `savedSecrets`: refs that have an encrypted secret saved with the backup.
+    /// `environment`: which install tools the target has (Command Line Tools, Homebrew, mas).
     public static func make(backup: Manifest, current: Manifest, platform: String = "macos",
-                            manual: ManualCheck = { _ in nil }, savedSecrets: Set<String> = []) -> RestorePlan {
+                            manual: ManualCheck = { _ in nil }, savedSecrets: Set<String> = [],
+                            environment: RestoreEnvironment = .ready) -> RestorePlan {
         var steps: [Step] = []
 
+        // Dependency order: Command Line Tools, Homebrew, packages, App Store apps.
         let installed = Set(current.packages.map(\.uid))
-        for p in backup.packages where p.include && !installed.contains(p.uid) {
-            steps.append(.pending(category: "packages", id: p.uid, reason: "package install comes in a later version"))
+        let order: [PackageItem.Kind: Int] = [.tap: 0, .formula: 1, .cask: 2]
+        let packages = backup.packages.filter { $0.include && !installed.contains($0.uid) }
+            .sorted { (order[$0.kind]!, $0.id) < (order[$1.kind]!, $1.id) }
+        let haveApps = Set(current.apps.map(\.id))
+        let apps = backup.apps.filter { $0.include && !haveApps.contains($0.id) }
+        // `mas` itself may arrive with the packages.
+        let masComing = packages.contains { $0.kind == .formula && ($0.resolvers["brew"] ?? $0.id) == "mas" }
+
+        if !packages.isEmpty || !apps.isEmpty {
+            if !environment.commandLineTools { steps.append(.commandLineTools) }
+            if !environment.homebrew {
+                steps.append(.pending(category: "homebrew", id: "Homebrew",
+                                      reason: "install it from https://brew.sh (it asks for your password), then run restore again"))
+            }
         }
-        let apps = Set(current.apps.map(\.id))
-        for a in backup.apps where a.include && !apps.contains(a.id) {
-            steps.append(.pending(category: "apps", id: "\(a.id) \(a.name)", reason: "needs App Store sign-in; installed later"))
+        if !packages.isEmpty {
+            if environment.canInstallPackages {
+                steps.append(.packages(packages))
+            } else {
+                for p in packages {
+                    steps.append(.pending(category: "packages", id: p.uid,
+                                          reason: "installed once the Command Line Tools and Homebrew are; run restore again"))
+                }
+            }
+        }
+        if !apps.isEmpty {
+            if environment.canInstallPackages && (environment.mas || masComing) {
+                steps.append(.appStore(apps))
+            } else {
+                for a in apps {
+                    steps.append(.pending(category: "apps", id: "\(a.id) \(a.name)",
+                                          reason: "needs mas (brew install mas) and App Store sign-in; run restore again"))
+                }
+            }
         }
 
         let now = Dictionary(current.settings.map { ($0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
@@ -137,6 +177,14 @@ public struct RestorePlan: Equatable, Sendable {
         }
         for step in changes {
             switch step {
+            case .commandLineTools:
+                out += "command line tools (needed for Homebrew)\n  + open Apple's installer\n"
+            case .packages(let items):
+                out += "packages (\(items.count) to install)\n"
+                for p in items { out += "  + \(p.kind.rawValue) \(p.resolvers["brew"] ?? p.id)\n" }
+            case .appStore(let apps):
+                out += "app store (\(apps.count) to install; sign in to the App Store first)\n"
+                for a in apps { out += "  + \(a.name) (\(a.id))\n" }
             case .dock(let d, let c):
                 out += "dock (\(c.count) tiles → \(d.apps.count) tiles)\n"
                 for (i, app) in d.apps.enumerated() { out += "  \(i + 1). \(Self.shortName(app))\n" }
@@ -226,6 +274,10 @@ public struct RestoreReport: Equatable, Sendable {
         case wifi([String])
         /// SSH keys written and share passwords saved, by title, each read back.
         case secrets([String])
+        /// Package uids that `brew` reported installed.
+        case packages([String])
+        /// App Store ids that `mas` reported installed.
+        case appStore([String])
     }
 
     /// Something left for the user to do by hand after restore.
@@ -252,6 +304,23 @@ public struct RestoreReport: Equatable, Sendable {
         self.restarted = restarted
         self.warnings = warnings
         self.waitingForDock = waitingForDock
+    }
+}
+
+extension RestoreReport {
+    /// What's left after a restore: the post-restore checklist and the log-out notice.
+    public var finishingText: String {
+        var out = ""
+        if !manualSteps.isEmpty {
+            out += "\nStill to do by hand\n"
+            for m in manualSteps { out += "  - \(m.category): \(m.text)\n" }
+        }
+        if !needsLogout.isEmpty {
+            let n = needsLogout.count
+            let some = needsLogout.prefix(4).joined(separator: ", ") + (n > 4 ? ", …" : "")
+            out += "\n>>> Log out and back in to finish. \(n) setting\(n == 1 ? "" : "s") only take\(n == 1 ? "s" : "") effect after that (\(some)).\n"
+        }
+        return out
     }
 }
 
@@ -297,6 +366,20 @@ public enum RestoreVerification {
             case .wifi(let saved)?:
                 // Read back from the Keychain as they were saved; a rescan can't see passwords.
                 return Result(id: e.step.id, status: .verified, detail: "\(saved.count) password\(saved.count == 1 ? "" : "s") saved and read back" + note)
+            case .packages(let want)?:
+                let got = Set(after.packages.map(\.uid))
+                // A tap installed as a dependency can be missing from `brew tap`
+                // output only if it was removed again; check formulae and casks.
+                let missing = want.filter { !got.contains($0) && !$0.hasPrefix("tap:") }
+                return missing.isEmpty
+                    ? Result(id: e.step.id, status: .verified, detail: "\(want.count) installed" + note)
+                    : Result(id: e.step.id, status: .mismatch, detail: "not found after install: " + missing.prefix(5).joined(separator: ", "))
+            case .appStore(let want)?:
+                let got = Set(after.apps.map(\.id))
+                let missing = want.filter { !got.contains($0) }
+                return missing.isEmpty
+                    ? Result(id: e.step.id, status: .verified, detail: "\(want.count) installed" + note)
+                    : Result(id: e.step.id, status: .mismatch, detail: "not found after install: " + missing.joined(separator: ", "))
             case .wallpaper(let want)?:
                 let got = after.layout.wallpaper?.pictures ?? []
                 let missing = want.filter { !got.contains($0) }
@@ -352,6 +435,25 @@ public struct WiFiNetwork: Equatable, Sendable {
     public static func ssid(ref: String) -> String? {
         ref.hasPrefix(prefix) && ref.count > prefix.count ? String(ref.dropFirst(prefix.count)) : nil
     }
+}
+
+/// Which install tools the target has. Detected before planning, so the plan
+/// can wait for Homebrew instead of failing every package.
+public struct RestoreEnvironment: Equatable, Sendable {
+    public var commandLineTools: Bool
+    public var homebrew: Bool
+    public var mas: Bool
+
+    public init(commandLineTools: Bool, homebrew: Bool, mas: Bool) {
+        self.commandLineTools = commandLineTools
+        self.homebrew = homebrew
+        self.mas = mas
+    }
+
+    /// Everything installed (the default for tests and older callers).
+    public static let ready = RestoreEnvironment(commandLineTools: true, homebrew: true, mas: true)
+
+    public var canInstallPackages: Bool { commandLineTools && homebrew }
 }
 
 /// An SSH key or share password to restore from the vault. Holds no secret.
