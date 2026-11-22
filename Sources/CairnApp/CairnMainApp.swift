@@ -40,6 +40,11 @@ struct CairnMainApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(model.checklist == nil)
                 Button("Show Backup Folder") { model.showBackupFolder() }
+                Divider()
+                ForEach(TargetPlatform.allCases) { target in
+                    Button("Export for \(target.title)…") { model.exportKit(for: target) }
+                        .disabled(model.checklist == nil)
+                }
             }
         }
 

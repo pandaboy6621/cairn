@@ -1,0 +1,104 @@
+import Foundation
+import Testing
+@testable import CairnCore
+
+@Suite struct PlatformExportTests {
+    static func manifest() -> Manifest {
+        Manifest(
+            device: Device(name: "test-mac", os: "macos", osVersion: "14.5"),
+            created: Date(timeIntervalSince1970: 1_795_255_200),
+            packages: [
+                PackageItem(id: "git", kind: .formula, resolvers: ["brew": "git"]),
+                PackageItem(id: "node", kind: .formula, resolvers: ["brew": "node"]),
+                PackageItem(id: "node@22", kind: .formula, resolvers: ["brew": "node@22"]),
+                PackageItem(id: "vlc", kind: .cask, resolvers: ["brew": "vlc"]),
+                PackageItem(id: "mas", kind: .formula, resolvers: ["brew": "mas"]),
+                PackageItem(id: "tap", kind: .tap, resolvers: ["brew": "someone/tap"]),
+                PackageItem(id: "obscure-tool", kind: .formula, resolvers: ["brew": "obscure-tool"]),
+                PackageItem(id: "unchecked", kind: .cask, resolvers: ["brew": "firefox"], include: false),
+            ],
+            apps: [AppItem(id: "1", name: "Things", source: "mas")],
+            settings: [
+                SettingItem(key: "appearance.style", value: .string("Dark"), platforms: ["macos"], adapter: SettingAdapters()),
+                SettingItem(key: "finder.show_all_extensions", value: .int(1), platforms: ["macos"], adapter: SettingAdapters()),
+                SettingItem(key: "trackpad.natural_scrolling", value: .bool(false), platforms: ["macos"], adapter: SettingAdapters()),
+                SettingItem(key: "dock.autohide", value: .bool(true), platforms: ["macos"], adapter: SettingAdapters()),
+            ],
+            layout: Layout(dock: DockLayout(apps: ["/Applications/Safari.app"])),
+            shares: [ShareItem(url: "smb://nas.local/media/films", username: "me")],
+            sensitive: [SensitiveRef(type: "wifi", ref: "vault://wifi/Example")]
+        )
+    }
+
+    @Test func windowsMapsPackagesAndSettings() {
+        let e = PlatformExport.make(Self.manifest(), for: .windows)
+        #expect(e.winget.map(\.id) == ["Git.Git", "OpenJS.NodeJS.LTS", "VideoLAN.VLC"])
+        #expect(e.macOnly.sorted() == ["mas", "someone/tap"])
+        #expect(e.unmapped == ["obscure-tool"])
+        #expect(e.registry.map(\.name) == ["AppsUseLightTheme", "SystemUsesLightTheme", "HideFileExt"])
+        #expect(e.registry.last?.dword == 0)
+        #expect(e.settingsLeft == 2)
+        #expect(e.appStore == ["Things"])
+        #expect(e.secrets == 1 && e.hasLayout)
+    }
+
+    @Test func linuxPrefersFlathubForAppsAndDistroForTools() {
+        let e = PlatformExport.make(Self.manifest(), for: .linux)
+        #expect(e.apt.map(\.id) == ["git", "nodejs"])
+        #expect(e.dnf.map(\.id) == ["git", "nodejs"])
+        #expect(e.flatpak.map(\.id) == ["org.videolan.VLC"])
+        #expect(e.gsettings.map(\.key) == ["color-scheme", "natural-scroll"])
+        #expect(e.gsettings.last?.value == "false")
+        #expect(e.packageCount == 3) // node and node@22 are one install
+    }
+
+    @Test func manifestResolversWinAndBadIdsAreDropped() {
+        var m = Self.manifest()
+        m.packages = [
+            PackageItem(id: "git", kind: .formula, resolvers: ["brew": "git", "winget": "My.Git"]),
+            PackageItem(id: "evil", kind: .formula, resolvers: ["brew": "evil", "winget": "x; Remove-Item C:\\"]),
+        ]
+        let e = PlatformExport.make(m, for: .windows)
+        #expect(e.winget.map(\.id) == ["My.Git"])
+        #expect(e.unmapped == ["evil"])
+        #expect(!e.files()["setup.ps1"]!.contains("Remove-Item"))
+    }
+
+    @Test func scriptsAreDryRunsAndQuoteSafely() {
+        var m = Self.manifest()
+        m.device.name = "it's\nmine"
+        let linux = PlatformExport.make(m, for: .linux).files()
+        let sh = linux["setup.sh"]!
+        #expect(sh.contains("APPLY=0"))
+        #expect(sh.contains(#"set_setting 'org.gnome.desktop.interface' 'color-scheme' ''\''prefer-dark'\'''"#))
+        #expect(!sh.contains("it's\nmine"))
+        let win = PlatformExport.make(m, for: .windows).files()
+        #expect(win["setup.ps1"]!.hasPrefix("# Cairn"))
+        #expect(win["setup.ps1"]!.contains("param([switch]$Apply)"))
+        #expect(win["setup.ps1"]!.contains("'Git.Git' = 'git'"))
+        #expect(win["winget.json"]!.contains(#""PackageIdentifier": "VideoLAN.VLC""#))
+    }
+
+    @Test func checklistListsWhatToDoByHandAndNeverSecrets() {
+        let text = PlatformExport.make(Self.manifest(), for: .windows).files()["CHECKLIST.md"]!
+        #expect(text.contains("- [ ] obscure-tool"))
+        #expect(text.contains("- [ ] Things"))
+        #expect(text.contains(#"`\\nas.local\media\films` (as me)"#))
+        #expect(text.contains("1 secret"))
+        #expect(!text.contains("Example"))
+    }
+
+    @Test func linuxScriptPassesBashSyntaxCheck() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = try PlatformExport.make(Self.manifest(), for: .linux).write(into: dir)
+        let script = folder.appendingPathComponent("setup.sh")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = ["-n", script.path]
+        try p.run(); p.waitUntilExit()
+        #expect(p.terminationStatus == 0)
+        let mode = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions] as? Int
+        #expect(mode == 0o755)
+    }
+}

@@ -403,6 +403,29 @@ final class AppModel {
     func resetBackupFolder() { backupFolder = BackupFolder.defaultURL }
 
     /// Opens the backup folder in Finder (creating the default one if needed).
+    /// Makes a Windows or Linux setup kit from the checked items. Read-only here:
+    /// the kit's script changes nothing until it's run with -Apply / --apply on the PC.
+    func exportKit(for target: TargetPlatform) {
+        guard let checklist else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Export for \(target.title)"
+        panel.message = "Choose where to put the \(target.title) setup kit: a script and a checklist. Secrets aren't included."
+        panel.prompt = "Export"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let parent = panel.url else { return }
+        let kit = PlatformExport.make(checklist.exportManifest(), for: target)
+        do {
+            let folder = try kit.write(into: parent)
+            statusMessage = "\(kit.summary). Saved to \(BackupFolder.displayPath(folder))."
+            NSWorkspace.shared.activateFileViewerSelecting([folder])
+        } catch {
+            errorMessage = "Couldn't export for \(target.title): \(error.localizedDescription)"
+        }
+    }
+
     func showBackupFolder() {
         if isDefaultBackupFolder { try? BackupFolder.ensureExists(backupFolder) }
         guard FileManager.default.fileExists(atPath: backupFolder.path) else {

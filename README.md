@@ -13,7 +13,7 @@ app preferences, displays, and network shares. It never touches your files.
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-first-2BB5A5)
 ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)
 ![Status](https://img.shields.io/badge/status-early%20development-F9C74F)
-![Windows & Linux](https://img.shields.io/badge/Windows%20%26%20Linux-coming%20soon-lightgrey)
+![Windows & Linux](https://img.shields.io/badge/Windows%20%26%20Linux-setup%20kits-2BB5A5)
 
 <br>
 
@@ -27,8 +27,8 @@ app preferences, displays, and network shares. It never touches your files.
 
 Think **Homebrew Bundle + macprefs + a dotfiles playbook**, wrapped in a native SwiftUI app with a
 checklist, snapshots, and NAS storage. Cairn records your setup as a readable YAML manifest of
-*intent* ("VLC is installed", "the Dock auto-hides"), not raw OS files. The same manifest will later
-restore onto Windows and Linux.
+*intent* ("VLC is installed", "the Dock auto-hides"), not raw OS files. The same manifest can
+set up a Windows or Linux PC.
 
 > [!NOTE]
 > Cairn is not Time Machine. It never backs up Documents, Photos, or other personal files. It
@@ -88,23 +88,33 @@ restore onto Windows and Linux.
 | 4 | 🔐 Encrypted vault: Wi-Fi networks, SSH keys, API tokens, share passwords, VPN list | ✅ Done |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (all steps built, Restore button in the app; VM testing) |
 | 6 | 🔄 Sync between your Macs, auto-discovered on your network | 🚧 In progress (NAS or device-to-device, pairing with codes; VM testing) |
-| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 📅 Planned |
+| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 🚧 In progress (setup kits from any backup) |
 
-### Coming soon: Windows and Linux
+### Windows and Linux
 
-Cairn's manifest describes what you want, not how one OS stores it. Each package carries resolvers
-for every platform, and each setting has a per-platform adapter:
+Cairn's manifest describes what you want, not how one OS stores it. **File → Export for Windows…**
+(or Linux, or `cairn export windows|linux`) turns a backup into a setup kit for a PC:
+
+- **Windows:** `setup.ps1` installs packages with `winget` and sets a few matching settings (dark
+  mode, file extensions, hidden files). `winget.json` works with `winget import` too.
+- **Linux:** `setup.sh` installs tools with `apt` or `dnf`, apps from Flathub, and a few GNOME
+  settings.
+- **`CHECKLIST.md`:** what to do by hand: packages with no known equivalent, App Store apps, and
+  network shares (as `\\server\share` on Windows).
+
+Both scripts only list what they would do until you run them with `-Apply` / `--apply`. Homebrew
+names are matched through a built-in catalog; a package's own `resolvers` in the manifest win:
 
 ```yaml
 packages:
   - id: vlc
     kind: cask
-    resolvers: { brew: vlc, winget: VideoLAN.VLC, apt: vlc }
+    resolvers: { brew: vlc, winget: VideoLAN.VLC, flatpak: org.videolan.VLC }
     include: true
 ```
 
-So a backup made on your Mac will set up a Windows PC with `winget` or a Linux box with `apt`, `dnf`,
-or Flatpak. Mac-only settings are kept and marked as Mac-only, never lost.
+Mac-only packages and settings are kept in the backup and listed in the checklist, never lost.
+Secrets are never exported: they stay encrypted in your backup.
 
 ### Encryption (milestone 4)
 
@@ -191,6 +201,7 @@ cairn sync now --apply                   # also bring those in (shown first, the
 cairn sync scope layout:dock synced      # a category or one item: synced, this-mac, ignored, default
 cairn sync resolve <id> --theirs --apply # settle a conflict (or --mine, --skip)
 cairn sync devices
+cairn export windows --out ~/Desktop    # or linux: a setup kit for a PC (from the newest snapshot)
 ```
 
 While developing, use `swift run cairn …` and `swift run CairnApp`.
