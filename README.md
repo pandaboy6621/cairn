@@ -38,7 +38,7 @@ restore onto Windows and Linux.
 
 ### Back up
 
-| | |
+| Category | What's saved |
 |---|---|
 | 📦 **Homebrew** | Formulae, casks, and taps you installed on purpose |
 | 🛍️ **Mac App Store** | Your purchased apps, saved to install after you sign in |
@@ -76,7 +76,7 @@ restore onto Windows and Linux.
 
 ## 🗺️ Roadmap
 
-| | Milestone | Status |
+| # | Milestone | Status |
 |---|---|---|
 | 1 | Manifest format, `cairn scan`, `cairn diff` | ✅ Done |
 | 2 | SwiftUI checklist app, export manifests | ✅ Done |
