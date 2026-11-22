@@ -12,10 +12,10 @@ import Testing
     @Test func freshMachineGetsEverythingInOrder() {
         let plan = RestorePlan.make(backup: Samples.manifest, current: Self.empty)
         let ids = plan.steps.map(\.id)
-        // Packages and apps first (pending), then settings, then the Dock, then secrets.
+        // Packages and apps first (pending), then settings, Wi-Fi, then the Dock.
         #expect(ids.prefix(4).allSatisfy { $0.hasPrefix("packages:") })
-        #expect(plan.changes.map(\.id) == ["dock.autohide", "dock.tile_size", "macos.com.example.app.Things", "dock"])
-        #expect(plan.pending.contains { $0.id == "sensitive:vault://wifi/ExampleNet" })
+        #expect(plan.changes.map(\.id) == ["dock.autohide", "dock.tile_size", "macos.com.example.app.Things", "wi-fi", "dock"])
+        #expect(plan.changes.contains(.wifi([WiFiNetwork(ssid: "ExampleNet", ref: "vault://wifi/ExampleNet", hasPassword: false)])))
     }
 
     @Test func onlyChangedSettingsAndIncludedItems() {

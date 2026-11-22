@@ -19,7 +19,9 @@ struct Restore: ParsableCommand {
             Scans this Mac, then prints what would change to match the backup.
             With --apply it writes settings and the Dock, restarts the affected apps,
             scans again, and checks every item it wrote.
-            Packages, App Store apps and secrets are listed but not restored yet.
+            Saved Wi-Fi passwords are decrypted only with --apply, after asking for the
+            vault password (or reading it with --password-stdin). Packages and App Store
+            apps are listed but not restored yet.
             """
     )
 
@@ -32,12 +34,20 @@ struct Restore: ParsableCommand {
     @Option(name: .long, help: "With --apply: also write a verification report here.")
     var report: String?
 
+    @Flag(name: .long, help: "Read the vault password from the first line of stdin instead of prompting.")
+    var passwordStdin = false
+
     func run() throws {
         let source = try Snapshots.resolve(from)
         let backup = try ManifestCoder.read(from: source)
+        // Secrets are saved beside the manifest (secrets.yaml); the vault sits at the
+        // backup folder's root, a few levels up for a snapshot.
+        let secrets = (try? SecretsFile.read(from: source.deletingLastPathComponent()
+            .appendingPathComponent(VaultStore.secretsFileName))) ?? SecretsFile()
         let scanner = SetupScanner()
         let before = scanner.scan()
-        let plan = RestorePlan.make(backup: backup, current: before.manifest, manual: MacRestorer.manualStep)
+        let plan = RestorePlan.make(backup: backup, current: before.manifest, manual: MacRestorer.manualStep,
+                                    savedSecrets: Set(secrets.secrets.keys))
         print(plan.render(), terminator: "")
         let restorer = MacRestorer()
         for case .dock(let layout, _) in plan.changes {
@@ -55,7 +65,11 @@ struct Restore: ParsableCommand {
         guard !plan.changes.isEmpty else { return }
 
         print("\nApplying…")
-        let result = restorer.apply(plan, backup: source.standardized.path)
+        let vaultFolder = Self.vaultFolder(near: source)
+        let result = restorer.apply(plan, backup: source.standardized.path, secrets: secrets) {
+            let envelope = try VaultStore.read(in: vaultFolder)
+            return try Vault.unlock(envelope, password: readPassword("Vault password (to restore Wi-Fi passwords): ", stdin: passwordStdin))
+        }
         if !result.restarted.isEmpty { print("Restarted: \(result.restarted.joined(separator: ", "))") }
         for w in result.warnings { stderr("note: \(w)") }
         if !result.waitingForDock.isEmpty {
@@ -81,6 +95,16 @@ struct Restore: ParsableCommand {
 }
 
 extension Restore {
+    /// The nearest folder above the manifest holding vault.yaml, else the app's backup folder.
+    static func vaultFolder(near manifest: URL) -> URL {
+        var dir = manifest.deletingLastPathComponent()
+        for _ in 0..<4 {
+            if VaultStore.exists(in: dir) { return dir }
+            dir = dir.deletingLastPathComponent()
+        }
+        return appBackupFolder()
+    }
+
     /// What's left after a restore, printed last so it isn't lost in the scroll.
     static func finishingSteps(_ result: RestoreReport) -> String {
         var out = ""

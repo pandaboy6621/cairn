@@ -15,6 +15,8 @@ public struct RestorePlan: Equatable, Sendable {
         case defaultApps([DefaultAppHandler])
         /// Set the desktop pictures.
         case wallpaper(WallpaperLayout, current: WallpaperLayout?)
+        /// Save Wi-Fi networks this machine doesn't know yet.
+        case wifi([WiFiNetwork])
         /// Something the backup wants that this version can't restore yet.
         case pending(category: String, id: String, reason: String)
 
@@ -24,6 +26,7 @@ public struct RestorePlan: Equatable, Sendable {
             case .dock: return "dock"
             case .defaultApps: return "default apps"
             case .wallpaper: return "wallpaper"
+            case .wifi: return "wi-fi"
             case .pending(let c, let id, _): return "\(c):\(id)"
             }
         }
@@ -39,8 +42,9 @@ public struct RestorePlan: Equatable, Sendable {
     /// post-restore checklist and the reason. Supplied by the platform adapter.
     public typealias ManualCheck = @Sendable (SettingItem) -> (category: String, reason: String)?
 
+    /// `savedSecrets`: refs that have an encrypted secret saved with the backup.
     public static func make(backup: Manifest, current: Manifest, platform: String = "macos",
-                            manual: ManualCheck = { _ in nil }) -> RestorePlan {
+                            manual: ManualCheck = { _ in nil }, savedSecrets: Set<String> = []) -> RestorePlan {
         var steps: [Step] = []
 
         let installed = Set(current.packages.map(\.uid))
@@ -87,9 +91,19 @@ public struct RestorePlan: Equatable, Sendable {
             steps.append(.pending(category: "shares", id: s.url,
                                   reason: "reconnect in Finder (Go > Connect to Server); the password comes from the Keychain or you"))
         }
-        let secrets = Set(current.sensitive.map(\.ref))
-        for s in backup.sensitive where s.include && !secrets.contains(s.ref) {
-            steps.append(.pending(category: "sensitive", id: s.ref, reason: "encrypted vault comes in a later version"))
+        let known = Set(current.sensitive.map(\.ref))
+        var networks: [WiFiNetwork] = []
+        for s in backup.sensitive where s.include && !known.contains(s.ref) {
+            if s.type == "wifi", let ssid = WiFiNetwork.ssid(ref: s.ref) {
+                networks.append(WiFiNetwork(ssid: ssid, ref: s.ref, hasPassword: savedSecrets.contains(s.ref)))
+            } else {
+                steps.append(.pending(category: "sensitive", id: s.ref, reason: "restoring \(s.type) secrets comes in a later version"))
+            }
+        }
+        // Before the layout: in dependency order, networks come with settings.
+        if !networks.isEmpty {
+            let at = steps.firstIndex { if case .dock = $0 { return true }; if case .wallpaper = $0 { return true }; return false } ?? steps.count
+            steps.insert(.wifi(networks), at: at)
         }
         return RestorePlan(steps: steps)
     }
@@ -114,6 +128,9 @@ public struct RestorePlan: Equatable, Sendable {
                 out += "default apps (\(handlers.count) to set)\n"
                 for h in handlers.prefix(20) { out += "  ~ \(h.summary)\n" }
                 if handlers.count > 20 { out += "  … and \(handlers.count - 20) more\n" }
+            case .wifi(let networks):
+                out += "wi-fi (\(networks.count) network\(networks.count == 1 ? "" : "s") to save)\n"
+                for n in networks { out += "  + \(n.ssid) (\(n.hasPassword ? "password saved" : "no password saved"))\n" }
             case .wallpaper(let w, let c):
                 out += "wallpaper\n"
                 for p in w.pictures {
@@ -186,6 +203,8 @@ public struct RestoreReport: Equatable, Sendable {
         case dock([String])
         case defaultApps([DefaultAppHandler])
         case wallpaper([DesktopPicture])
+        /// Networks whose password was saved and read back.
+        case wifi([String])
     }
 
     /// Something left for the user to do by hand after restore.
@@ -251,6 +270,9 @@ public enum RestoreVerification {
                 // A rescan can't show these (LaunchServices omits choices that match
                 // the system default), so the restorer read each one back as it went.
                 return Result(id: e.step.id, status: .verified, detail: "\(want.count) confirmed with LaunchServices" + note)
+            case .wifi(let saved)?:
+                // Read back from the Keychain as they were saved; a rescan can't see passwords.
+                return Result(id: e.step.id, status: .verified, detail: "\(saved.count) password\(saved.count == 1 ? "" : "s") saved and read back" + note)
             case .wallpaper(let want)?:
                 let got = after.layout.wallpaper?.pictures ?? []
                 let missing = want.filter { !got.contains($0) }
@@ -285,5 +307,25 @@ public enum RestoreVerification {
         let count = { (s: Result.Status) in results.filter { $0.status == s }.count }
         out += "\(count(.verified)) verified, \(count(.mismatch)) mismatched, \(count(.failed)) failed, \(count(.skipped)) skipped\n"
         return out
+    }
+}
+
+/// A saved Wi-Fi network to restore. Never holds the password: that stays
+/// encrypted in the backup until the moment it's saved.
+public struct WiFiNetwork: Equatable, Sendable {
+    public var ssid: String
+    public var ref: String
+    /// The backup has its password, encrypted in the vault.
+    public var hasPassword: Bool
+
+    public init(ssid: String, ref: String, hasPassword: Bool) {
+        self.ssid = ssid
+        self.ref = ref
+        self.hasPassword = hasPassword
+    }
+
+    static let prefix = "vault://wifi/"
+    public static func ssid(ref: String) -> String? {
+        ref.hasPrefix(prefix) && ref.count > prefix.count ? String(ref.dropFirst(prefix.count)) : nil
     }
 }

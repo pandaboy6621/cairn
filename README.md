@@ -157,6 +157,8 @@ cairn snapshots --diff 2026-11-20 2026-11-21-101500
 # Restore or roll back (dry run until --apply)
 cairn restore --from 2026-11-20-090000
 cairn restore --from backup.yaml --apply
+# Saved Wi-Fi passwords are decrypted only with --apply, after the vault password
+# (prompted, or --password-stdin); they never appear in output or a command line
 
 # Dock icons waiting for their apps; display arrangement
 cairn dock --resume

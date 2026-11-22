@@ -77,7 +77,7 @@ stage)
     scripts/build-app.sh
     # The VM's shared-folder mount caches files by path, so a rebuilt app at the
     # same path can still run the old binary. Give every build a new folder.
-    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
+    rm -rf "$SHARE/Cairn.app" "$SHARE"/build-* "$SHARE/vm.yaml" "$SHARE"/restore-*.txt "$SHARE"/restore-*.yaml "$SHARE"/wifi-*.txt "$SHARE"/wifi-test "$SHARE"/dock-status.txt "$SHARE"/auto-backup*.txt "$SHARE"/Test\ fake-install\ *.command
     BUILD_DIR="build-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$SHARE/$BUILD_DIR"
     cp -R dist/Cairn.app "$SHARE/$BUILD_DIR/"
@@ -169,6 +169,30 @@ EOF2
 D="/Volumes/My Shared Files/cairn"
 cd "\$D" || exit 1
 { "$CAIRN_VM" restore --from restore-light.yaml --apply; echo "== now the backup"; "$CAIRN_VM" restore --from restore-test.yaml --apply; echo "exit: \$?"; } 2>&1 | tee "\$D/restore-test.txt"
+EOF2
+    chmod +x "$SHARE"/*.command; xattr -c "$SHARE"/*.command 2>/dev/null || true
+    # Wi-Fi restore test (VM only): a backup with one made-up network whose password
+    # is in a test vault, and one without. The runner watches every process's
+    # arguments while it restores, to prove the password never reaches a command line.
+    CAIRN_VM_WIFI_FIXTURE="$SHARE/wifi-test" swift test --filter VMWiFiFixture >/dev/null
+    cat > "$SHARE/Wi-Fi restore test.command" <<EOF2
+#!/bin/sh
+# Runs inside cairn-test only: writes the Keychain. Made-up networks and passwords.
+D="/Volumes/My Shared Files/cairn"
+cd "\$D" || exit 1
+seen="\$D/wifi-argv.txt"; : > "\$seen"
+( while :; do ps -axww -o args= | grep -c "made-up-wifi-pass-42" | grep -v '^1\$' >> "\$seen"; sleep 0.05; done ) &
+watcher=\$!
+{
+  echo vm-test-vault-pass | "$CAIRN_VM" restore --from wifi-test/manifest.yaml --apply --password-stdin
+  echo "exit: \$?"
+  for kc in ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain; do
+    echo "== Cairn-Test-Cafe in \$kc"
+    security find-generic-password -D "AirPort network password" -a Cairn-Test-Cafe "\$kc" 2>&1 | grep -E 'keychain:|"acct"|"svce"|"desc"|could not'
+  done
+} 2>&1 | tee "\$D/wifi-restore.txt"
+kill \$watcher
+echo "== ps lines showing the password (other than the watcher's own grep): \$(wc -l < "\$seen" | tr -d ' ')" | tee -a "\$D/wifi-restore.txt"
 EOF2
     chmod +x "$SHARE"/*.command; xattr -c "$SHARE"/*.command 2>/dev/null || true
     ;;

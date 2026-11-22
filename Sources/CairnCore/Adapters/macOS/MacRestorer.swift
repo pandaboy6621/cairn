@@ -11,13 +11,16 @@ public struct MacRestorer: Sendable {
     public var appExists: @Sendable (String) -> Bool
     public var displays: DisplaySystem
     public var defaultApps: DefaultAppsSystem
+    public var wifi: WiFiSystem
 
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore),
         appExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
         displays: DisplaySystem = CoreGraphicsDisplays(),
-        defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps()
+        defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps(),
+        wifi: WiFiSystem = CoreWLANWiFi()
     ) {
+        self.wifi = wifi
         self.runner = runner
         self.appExists = appExists
         self.displays = displays
@@ -85,7 +88,21 @@ public struct MacRestorer: Sendable {
     }
 
     /// `backup` names the manifest, recorded with any Dock tiles left out for later.
-    public func apply(_ plan: RestorePlan, backup: String = "", now: Date = Date()) -> RestoreReport {
+    /// `secrets` holds the backup's encrypted secrets; `unlock` opens the vault,
+    /// and is only called if a step needs a secret (so it prompts at most once).
+    public func apply(_ plan: RestorePlan, backup: String = "", now: Date = Date(),
+                      secrets: SecretsFile = SecretsFile(), unlock: (() throws -> VaultKey)? = nil) -> RestoreReport {
+        var key: VaultKey?
+        var unlockError: String?
+        func vaultKey() -> VaultKey? {
+            if key == nil && unlockError == nil {
+                do {
+                    guard let unlock else { throw VaultError.noVault }
+                    key = try unlock()
+                } catch { unlockError = error.localizedDescription }
+            }
+            return key
+        }
         var report = RestoreReport()
         var touched: [String] = []
 
@@ -126,6 +143,42 @@ public struct MacRestorer: Sendable {
                     report.manualSteps.append(.init(category: "default apps",
                         text: "set these in Finder > Get Info > Open with: " + refused.map(\.summary).joined(separator: ", ")))
                 }
+
+            case .wifi(let networks):
+                var saved: [String] = [], notes: [String] = [], places: [String: [String]] = [:]
+                for n in networks {
+                    guard n.hasPassword, let sealed = secrets.secrets[n.ref] else {
+                        report.manualSteps.append(.init(category: "wi-fi", text: "join \(n.ssid) from the Wi-Fi menu and type its password (none was saved)"))
+                        continue
+                    }
+                    guard let key = vaultKey() else { notes.append("\(n.ssid): vault not unlocked"); continue }
+                    do {
+                        var password = try key.open(sealed, ref: n.ref)
+                        defer { Vault.zero(&password) }
+                        if let place = wifi.savePassword(password, ssid: n.ssid), wifi.hasPassword(password, ssid: n.ssid) {
+                            saved.append(n.ssid)
+                            places[place, default: []].append(n.ssid)
+                        } else {
+                            notes.append("\(n.ssid): the Keychain didn't take the password")
+                        }
+                    } catch {
+                        notes.append("\(n.ssid): couldn't decrypt (\(error.localizedDescription))")
+                    }
+                }
+                if let unlockError { notes.append("vault: \(unlockError)") }
+                // macOS adds a network to its list the first time it's joined (backups don't
+                // record the security type needed to add it blind). Without root, CoreWLAN
+                // saves to the login keychain (seen in VM testing); whether joining picks it
+                // up there needs real Wi-Fi hardware to confirm, so say where it is.
+                for (place, ssids) in places.sorted(by: { $0.key < $1.key }) {
+                    report.manualSteps.append(.init(category: "wi-fi",
+                        text: "pick \(ssids.joined(separator: ", ")) once in the Wi-Fi menu. The password is saved in your \(place); "
+                            + "if macOS still asks for it, Keychain Access shows it (search for the network name)"))
+                }
+                let outcome: RestoreReport.Outcome = saved.isEmpty
+                    ? (notes.isEmpty ? .skipped("no passwords saved in the backup") : .failed(notes.joined(separator: "; ")))
+                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                report.entries.append(.init(step: step, outcome: outcome, written: saved.isEmpty ? nil : .wifi(saved)))
 
             case .wallpaper(let w, _):
                 let (applied, notes) = applyWallpaper(w)
