@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import CairnCore
+import Yams
 
 /// Sync between made-up Macs, with made-up packages and settings.
 @Suite struct SyncTests {
@@ -67,7 +68,9 @@ import Testing
         let a = plan(Self.mac("a"))
         // b has jq too, autohide off, and an extra package.
         let b = plan(Self.mac("b", packages: ["jq", "tree"], autohide: false), group: a.outgoing, at: Self.at(2))
-        #expect(Set(b.outgoing.keys) == ["package:formula:tree"])    // only what the group lacks
+        // What the group lacks, plus what matches (so the group sees all of b), not autohide.
+        #expect(Set(b.outgoing.keys) == ["package:formula:jq", "package:formula:tree"])
+        #expect(b.outgoing["package:formula:jq"]?.updated == a.outgoing["package:formula:jq"]?.updated) // wins nothing
         #expect(b.incoming.map(\.id) == ["setting:dock.autohide"])   // the group's value, offered
         #expect(b.incoming.first?.current?.setting?.value == .bool(false))
         #expect(b.conflicts.isEmpty)
@@ -226,8 +229,8 @@ import Testing
         #expect(store.group() != nil)
         #expect(Set(store.devices().map(\.info.name)) == ["mac-a", "mac-b"])
         #expect(store.devices().first?.info.name == "mac-b") // newest sync first
-        // Each Mac wrote only its own folder.
-        #expect(store.published(device: "mac-b").entries.isEmpty)
+        // b published what matches the group, not wget (not taken in yet).
+        #expect(Set(store.published(device: "mac-b").entries.keys) == ["package:formula:jq", "setting:dock.autohide"])
     }
 
     @Test func bonjourAnnouncementIsMinimal() {
@@ -242,5 +245,48 @@ import Testing
         #expect(SyncPeer(service: "Other", txt: ["v": "1"]) == nil)
         // The tag doesn't reveal the group id.
         #expect(!txt["group"]!.contains("x") || txt["group"]!.count == 12)
+    }
+}
+
+@Suite struct SyncFixesTests {
+    static let t0 = Date(timeIntervalSince1970: 1_795_255_200)
+    static func item(_ id: String) -> SyncItem {
+        SyncItem(id: "package:formula:\(id)", category: .packages, title: id,
+                 value: SyncValue(package: PackageItem(id: id, kind: .formula, resolvers: ["brew": id])))
+    }
+
+    @Test func removalStaysListedUntilDismissed() {
+        let tree = Self.item("tree")
+        let removal = SyncEntry(value: nil, removed: true, updated: Self.t0.addingTimeInterval(10), device: "mac-b")
+        let base = SyncBase(local: [tree.id: tree.value.hash], seen: [tree.id: Self.t0], lastSync: Self.t0)
+        let config = SyncConfig()
+        // A background sync sees the removal first...
+        let first = SyncEngine.plan(local: [tree], group: [tree.id: removal], base: base, config: config, device: "mac-a", now: Self.t0.addingTimeInterval(20))
+        #expect(first.removedElsewhere.map(\.id) == [tree.id])
+        // ...and a later one still lists it.
+        let second = SyncEngine.plan(local: [tree], group: [tree.id: removal], base: first.base, config: config, device: "mac-a", now: Self.t0.addingTimeInterval(30))
+        #expect(second.removedElsewhere.map(\.id) == [tree.id])
+        #expect(second.incoming.isEmpty)
+        // Dismissed: gone.
+        let dismissed = SyncEngine.dismissRemoval(tree.id, base: second.base)
+        let third = SyncEngine.plan(local: [tree], group: [tree.id: removal], base: dismissed, config: config, device: "mac-a", now: Self.t0.addingTimeInterval(40))
+        #expect(third.removedElsewhere.isEmpty)
+        // Removed here too: no longer listed either.
+        let gone = SyncEngine.plan(local: [], group: [tree.id: removal], base: second.base, config: config, device: "mac-a", now: Self.t0.addingTimeInterval(50))
+        #expect(gone.removedElsewhere.isEmpty && gone.base.removed.isEmpty)
+    }
+
+    @Test func oldBasesWithoutRemovalsStillLoad() throws {
+        let yaml = "local: {}\nseen: {}\nconflicts: {}\n"
+        let base = try YAMLDecoder().decode(SyncBase.self, from: yaml)
+        #expect(base.removed.isEmpty)
+    }
+
+    @Test func floatsReadAsPeopleWriteThem() {
+        #expect(SettingValue.double(0.30000001192092896).summary == "0.3")
+        #expect(SettingValue.double(0.800000011920929).summary == "0.8")
+        #expect(SettingValue.double(2.0).summary == "2")
+        #expect(SettingValue.double(1.5).summary == "1.5")
+        #expect(SettingValue.double(0.000012).summary == "1.2e-05")
     }
 }

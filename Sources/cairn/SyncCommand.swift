@@ -91,7 +91,8 @@ struct SyncCommand: ParsableCommand {
         }
         if !plan.removedElsewhere.isEmpty {
             out += "Removed on another Mac (left as is here; sync never removes):\n"
-            for r in plan.removedElsewhere { out += "  · \(r.title) on \(r.entry.device)\n" }
+            for r in plan.removedElsewhere { out += "  · \(r.title) on \(r.entry.device)  [\(r.id)]\n" }
+            out += "  Remove them here yourself if you like; `cairn sync resolve <id> --skip` stops listing one.\n"
         }
         return out.isEmpty ? "In sync.\n" : out
     }
@@ -197,6 +198,8 @@ struct SyncCommand: ParsableCommand {
             print(SyncCommand.render(p.plan), terminator: "")
 
             let incoming = p.plan.incoming.filter { only.isEmpty || only.contains($0.id) }
+            let unknown = only.filter { id in !p.plan.incoming.contains { $0.id == id } }
+            if !unknown.isEmpty { stderr("Not waiting to come in: \(unknown.joined(separator: ", ")) (see the ids above).") }
             guard !incoming.isEmpty else { return }
             try SyncCommand.applyIncoming(incoming, run: p.run, before: p.scan, backupFolder: options.backupFolder,
                                           apply: apply, passwordStdin: passwordStdin)
@@ -209,10 +212,19 @@ struct SyncCommand: ParsableCommand {
         let (manifest, secrets) = SyncEngine.manifest(for: incoming, device: before.device, now: Date())
         let plan = RestorePlan.make(backup: manifest, current: before, manual: MacRestorer.manualStep,
                                     savedSecrets: Set(secrets.secrets.keys), environment: MacRestorer.detectEnvironment())
+        // Ones this Mac already has (changed here by hand, or by an earlier restore).
+        let here = Dictionary(SyncItems.from(before).map { ($0.id, $0.value.hash) }, uniquingKeysWith: { a, _ in a })
+        let same = incoming.filter { $0.entry.hash != nil && here[$0.id] == $0.entry.hash }
         print("\nTo bring in:")
-        print(plan.render(), terminator: "")
+        if plan.changes.isEmpty { print("  nothing to change on this Mac") } else { print(plan.render(), terminator: "") }
+        if !same.isEmpty { print("Already the same here: " + same.map(\.title).joined(separator: ", ")) }
         guard apply else {
             if !plan.changes.isEmpty { stderr("Dry run: nothing changed on this Mac. Add --apply to bring these in.") }
+            return
+        }
+        guard !plan.changes.isEmpty else {
+            try run.taken(incoming, after: before, secrets: VaultStore.readSecrets(in: folder, device: before.device.name))
+            if !same.isEmpty { print("Recorded as synced.") }
             return
         }
         print("\nApplying…")
@@ -289,7 +301,8 @@ struct SyncCommand: ParsableCommand {
             discussion: """
                 --mine keeps this Mac's value (already published). --theirs brings in the
                 other Mac's value (with --apply). --skip stops offering an incoming change
-                until that item changes again elsewhere.
+                until that item changes again elsewhere, or stops listing an item another
+                Mac removed.
                 """
         )
         @OptionGroup var options: Options
@@ -307,6 +320,11 @@ struct SyncCommand: ParsableCommand {
             guard [mine, theirs, skip].filter({ $0 }).count == 1 else { throw ValidationError("Pick one of --mine, --theirs, or --skip.") }
             let p = try SyncCommand.prepare(options)
             let store = p.run.store, device = p.scan.device.name
+            if skip, p.plan.removedElsewhere.contains(where: { $0.id == id }) {
+                try store.saveBase(SyncEngine.dismissRemoval(id, base: store.base(device: device)), device: device)
+                print("Stopped listing \(id) as removed elsewhere.")
+                return
+            }
             if skip {
                 guard let item = p.plan.incoming.first(where: { $0.id == id }) else { throw ValidationError("No incoming change for \(id).") }
                 try store.saveBase(SyncEngine.skip(item, base: store.base(device: device)), device: device)
@@ -457,7 +475,11 @@ struct SyncCommand: ParsableCommand {
             var trust = local.trust()
             trust.trust(id, name: info.name, publicKey: info.publicKey, how: .folder, now: Date())
             try local.saveTrust(trust)
-            print("Now syncing with \(info.name).")
+            if SyncStore(root: options.url).config(device: SetupScanner().device().name).enabled {
+                print("Now syncing with \(info.name).")
+            } else {
+                print("Accepted \(info.name). Sync is off on this Mac: turn it on with `cairn sync on` to start syncing.")
+            }
         }
     }
 

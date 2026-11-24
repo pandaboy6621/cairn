@@ -77,6 +77,9 @@ public enum SyncEngine {
 
             // Already the same: just remember it.
             if let theirs, theirs.hash == localHash || (theirs.removed && localHash == nil) {
+                // A Mac's first sync publishes everything it has, matching ones too, so
+                // the others can see its whole setup. Same value, same time: it wins nothing.
+                if firstSync, let mine { plan.outgoing[id] = SyncEntry(value: mine.value, updated: theirs.updated, device: device) }
                 plan.base.local[id] = localHash
                 plan.base.seen[id] = max(seen, theirs.updated)
                 plan.base.conflicts[id] = nil
@@ -107,7 +110,7 @@ public enum SyncEngine {
             } else if theirsNew, let theirs {
                 let incoming = SyncIncoming(id: id, category: category, title: title, entry: theirs, current: mine?.value)
                 if theirs.removed {
-                    plan.removedElsewhere.append(incoming)
+                    plan.base.removed[id] = theirs
                     plan.base.seen[id] = theirs.updated
                 } else {
                     plan.incoming.append(incoming)
@@ -119,8 +122,27 @@ public enum SyncEngine {
             // An incoming change that didn't land when applied keeps `seen` behind,
             // so it's offered again by the `theirsNew` branch above.
         }
+        // Removals stay listed until dismissed, while the item is still here and
+        // no Mac has added it back since.
+        for (id, entry) in plan.base.removed.sorted(by: { $0.key < $1.key }) {
+            let back = group[id].map { !$0.removed && $0.updated > entry.updated } ?? false
+            guard let mine = localByID[id], !back,
+                  config.scope(for: id, in: mine.category).travels else {
+                plan.base.removed[id] = nil
+                continue
+            }
+            plan.removedElsewhere.append(SyncIncoming(id: id, category: mine.category, title: mine.title,
+                                                      entry: entry, current: mine.value))
+        }
         plan.base.lastSync = now
         return plan
+    }
+
+    /// The user has seen that another Mac removed this; stop listing it.
+    public static func dismissRemoval(_ id: String, base: SyncBase) -> SyncBase {
+        var base = base
+        base.removed[id] = nil
+        return base
     }
 
     /// A manifest of incoming values, for the restore engine to diff and apply,

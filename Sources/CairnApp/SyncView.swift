@@ -464,6 +464,10 @@ private struct SyncChanges: View {
                             Text(r.title)
                             Spacer()
                             Text("on \(r.entry.device)").font(.caption).foregroundStyle(.secondary)
+                            Button("Dismiss") { sync.dismissRemoval(r) }
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+                                .help("Stop listing this. It stays installed here.")
                         }
                         .padding(.vertical, 2)
                     }

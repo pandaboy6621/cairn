@@ -61,14 +61,65 @@ extension CommandRunner {
     }
 }
 
+/// Lets the user skip the command that's running (a hung `brew install`, say) or
+/// stop a whole restore. Shared between the UI and the runner; thread-safe.
+public final class RestoreControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var reason: String?
+    private var stopped = false
+
+    public init() {}
+
+    /// The user asked to stop: no more steps start.
+    public var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
+
+    /// Ends the running command; the restore carries on with the next one.
+    public func skipCurrent() { end("skipped by you") }
+
+    /// Ends the running command and starts no more.
+    public func stop() {
+        lock.lock(); stopped = true; lock.unlock()
+        end("stopped by you")
+    }
+
+    func attach(_ p: Process) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        process = p
+        reason = nil
+        return !stopped
+    }
+
+    /// Why the last command was ended early, if it was.
+    func detach() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        process = nil
+        return reason
+    }
+
+    func end(_ why: String) {
+        lock.lock()
+        let p = process
+        if p != nil { reason = why }
+        lock.unlock()
+        if let p { ProcessRunner.terminate(p) }
+    }
+}
+
 /// Runs real processes. Every command is checked against `policy` first.
 public struct ProcessRunner: CommandRunner {
     public var policy: CommandPolicy
     /// Extra PATH entries: GUI apps launch with a minimal PATH that lacks Homebrew.
     public var extraPath = ["/opt/homebrew/bin", "/usr/local/bin", "/sbin", "/usr/sbin"]
+    /// End a command that prints nothing for this long (a download stuck on a dead
+    /// connection would otherwise hang forever). Nil waits for ever.
+    public var stallTimeout: TimeInterval?
+    public var control: RestoreControl?
 
-    public init(policy: CommandPolicy = .readOnly) {
+    public init(policy: CommandPolicy = .readOnly, stallTimeout: TimeInterval? = nil, control: RestoreControl? = nil) {
         self.policy = policy
+        self.stallTimeout = stallTimeout
+        self.control = control
     }
 
     public func run(_ command: Command) throws -> CommandResult {
@@ -99,24 +150,54 @@ public struct ProcessRunner: CommandRunner {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        try process.run()
-        // Drain stderr on another thread so a full pipe can't deadlock us.
-        var errData = Data()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global().async {
-            errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
+        // Read both pipes as data arrives, noting when output last came.
+        let io = PipeCollector()
+        outPipe.fileHandleForReading.readabilityHandler = { h in io.append(h.availableData, err: false) }
+        errPipe.fileHandleForReading.readabilityHandler = { h in io.append(h.availableData, err: true) }
 
+        try process.run()
+        if let control, !control.attach(process) { Self.terminate(process) }
+        var timedOut = false
+        if let stallTimeout {
+            while process.isRunning {
+                Thread.sleep(forTimeInterval: 0.2)
+                if process.isRunning, io.quietFor > stallTimeout {
+                    timedOut = true
+                    Self.terminate(process)
+                    break
+                }
+            }
+        }
+        process.waitUntilExit()
+        let ended = control?.detach()
+        outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+        io.append(outPipe.fileHandleForReading.readDataToEndOfFile(), err: false)
+        io.append(errPipe.fileHandleForReading.readDataToEndOfFile(), err: true)
+
+        var stderr = io.text(err: true)
+        if timedOut {
+            stderr += "\nstopped after \(Int(stallTimeout! / 60)) minutes with no progress"
+        } else if let ended {
+            stderr += "\n\(ended)"
+        }
         return CommandResult(
-            stdout: String(decoding: outData, as: UTF8.self),
-            stderr: String(decoding: errData, as: UTF8.self),
-            exitCode: process.terminationStatus
+            stdout: io.text(err: false),
+            stderr: stderr,
+            exitCode: (timedOut || ended != nil) && process.terminationStatus == 0 ? 1 : process.terminationStatus
         )
+    }
+
+    /// Ends a child and anything it started (brew runs curl, for one): its process
+    /// group gets SIGTERM, then SIGKILL if it's still there a few seconds later.
+    static func terminate(_ p: Process) {
+        let pid = p.processIdentifier
+        guard pid > 0 else { return }
+        kill(-pid, SIGTERM)
+        kill(pid, SIGTERM)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+            if p.isRunning { kill(-pid, SIGKILL); kill(pid, SIGKILL) }
+        }
     }
 
     private var searchPath: [String] {
@@ -134,5 +215,27 @@ public struct ProcessRunner: CommandRunner {
             if FileManager.default.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
         }
         return nil
+    }
+}
+
+/// Collects a child's output as it arrives.
+private final class PipeCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var out = Data()
+    private var err = Data()
+    private var last = Date()
+
+    func append(_ d: Data, err isErr: Bool) {
+        guard !d.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        if isErr { err.append(d) } else { out.append(d) }
+        last = Date()
+    }
+
+    var quietFor: TimeInterval { lock.lock(); defer { lock.unlock() }; return Date().timeIntervalSince(last) }
+
+    func text(err isErr: Bool) -> String {
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: isErr ? err : out, as: UTF8.self)
     }
 }

@@ -282,6 +282,12 @@ final class SyncFlow {
         plan?.incoming.removeAll { $0.id == item.id }
     }
 
+    func dismissRemoval(_ item: SyncIncoming) {
+        guard let store, let device else { return }
+        try? store.saveBase(SyncEngine.dismissRemoval(item.id, base: store.base(device: device.name)), device: device.name)
+        plan?.removedElsewhere.removeAll { $0.id == item.id }
+    }
+
     func keepMine(_ conflict: SyncConflict) {
         guard let store, let device else { return }
         try? store.saveBase(SyncEngine.keepMine(conflict.id, base: store.base(device: device.name)), device: device.name)

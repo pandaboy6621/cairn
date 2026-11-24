@@ -722,10 +722,20 @@ private struct RestoreFooter: View {
         let empty = preview.comparison.diff.isEmpty
         HStack(spacing: 10) {
             switch run.phase {
-            case .running:
+            case .running(let line):
                 ProgressView().controlSize(.small)
-                Text("Restoring… you can keep using your Mac.").font(.callout).foregroundStyle(.secondary)
+                Text(run.stopping ? "Stopping…" : "Restoring… you can keep using your Mac.")
+                    .font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                // A package that hangs (a dead download) can be skipped; the rest carries on.
+                if line.hasPrefix("Installing "), line.hasSuffix(")") {
+                    Button("Skip This Package") { run.skipCurrent() }
+                        .disabled(run.stopping)
+                        .help("Stops installing this package and moves on. It's listed to do by hand.")
+                }
+                Button("Stop") { run.stop() }
+                    .disabled(run.stopping)
+                    .help("Finishes nothing more: what's done stays done, the rest is left as it is.")
             case .finished(let o):
                 Label(o.problems == 0 ? "Restore finished. \(o.verified) items checked."
                                       : "Restore finished with \(o.problems) problem\(o.problems == 1 ? "" : "s").",

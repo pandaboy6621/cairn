@@ -17,7 +17,7 @@ public struct MacRestorer: Sendable {
     public var credentialFiles: CredentialFileSystem
 
     public init(
-        runner: CommandRunner = ProcessRunner(policy: .restore),
+        runner: CommandRunner = ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout),
         appExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
         displays: DisplaySystem = CoreGraphicsDisplays(),
         defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps(),
@@ -35,6 +35,10 @@ public struct MacRestorer: Sendable {
         self.displays = displays
         self.defaultApps = defaultApps
     }
+
+    /// A command that prints nothing for this long is ended (a big download on a
+    /// slow link still prints now and then; a dead connection doesn't).
+    public static let stallTimeout: TimeInterval = 10 * 60
 
     /// Domains whose changes most apps only pick up after logging out and back in.
     static let logoutDomains: Set<String> = [
@@ -102,7 +106,8 @@ public struct MacRestorer: Sendable {
     public func apply(_ plan: RestorePlan, backup: String = "", now: Date = Date(),
                       secrets: SecretsFile = SecretsFile(), unlock: (() throws -> VaultKey)? = nil,
                       progress: (@Sendable (String) -> Void)? = nil,
-                      stepStarted: (@Sendable (_ index: Int, _ total: Int) -> Void)? = nil) -> RestoreReport {
+                      stepStarted: (@Sendable (_ index: Int, _ total: Int) -> Void)? = nil,
+                      control: RestoreControl? = nil) -> RestoreReport {
         var key: VaultKey?
         var unlockError: String?
         var skippedByUser = false
@@ -138,6 +143,11 @@ public struct MacRestorer: Sendable {
         var touched: [String] = []
 
         for (index, step) in plan.steps.enumerated() {
+            // Stopped: the rest is left as it is, and said so.
+            if control?.isStopped == true {
+                report.entries.append(.init(step: step, outcome: .skipped("stopped by you"), written: nil))
+                continue
+            }
             stepStarted?(index, plan.steps.count)
             switch step {
             case .commandLineTools:
@@ -155,8 +165,10 @@ public struct MacRestorer: Sendable {
 
             case .packages(let items):
                 var done: [String] = [], failed: [String] = []
+                var stopped: [String] = []
                 for (i, p) in items.enumerated() {
                     let name = p.resolvers["brew"] ?? p.id
+                    if control?.isStopped == true { stopped.append(name); continue }
                     progress?("Installing \(p.kind.rawValue) \(name) (\(i + 1) of \(items.count))")
                     let r = try? runner.run(Self.installCommand(p))
                     if r?.exitCode == 0 { done.append(p.uid) } else {
@@ -168,9 +180,16 @@ public struct MacRestorer: Sendable {
                         report.manualSteps.append(.init(category: "packages", text: text))
                     }
                 }
-                let outcome: RestoreReport.Outcome = failed.isEmpty ? .applied
+                var outcome: RestoreReport.Outcome = failed.isEmpty ? .applied
                     : done.isEmpty ? .failed("none installed: " + failed.prefix(5).joined(separator: ", "))
                     : .partial("\(failed.count) didn't install: " + failed.prefix(5).joined(separator: ", "))
+                if !stopped.isEmpty {
+                    let note = "stopped by you before " + stopped.prefix(5).joined(separator: ", ")
+                    outcome = done.isEmpty && failed.isEmpty ? .skipped(note)
+                        : done.isEmpty ? .failed("none installed: " + failed.prefix(5).joined(separator: ", ") + "; " + note)
+                        : .partial(([failed.isEmpty ? nil : "\(failed.count) didn't install: " + failed.prefix(5).joined(separator: ", "), note]
+                            .compactMap { $0 }).joined(separator: "; "))
+                }
                 report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .packages(done)))
 
             case .appStore(let apps):

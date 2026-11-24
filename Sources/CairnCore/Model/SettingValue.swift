@@ -33,12 +33,20 @@ public indirect enum SettingValue: Codable, Equatable, Sendable {
         }
     }
 
+    /// A number as people would write it: macOS stores many settings as 32-bit
+    /// floats, so 0.3 reads back as 0.30000001192092896.
+    static func display(_ v: Double) -> String {
+        guard v.isFinite, v != 0, abs(v) >= 1e-4, abs(v) < 1e12 else { return String(v) }
+        let rounded = Double(String(format: "%.7g", v)) ?? v
+        return rounded == rounded.rounded() && abs(rounded) < 1e15 ? String(Int(rounded)) : String(rounded)
+    }
+
     /// Short human-readable form for diffs and the checklist UI.
     public var summary: String {
         switch self {
         case .bool(let v): return v ? "true" : "false"
         case .int(let v): return String(v)
-        case .double(let v): return String(v)
+        case .double(let v): return Self.display(v)
         case .string(let v): return v.count > 60 ? "\"\(v.prefix(57))...\"" : "\"\(v)\""
         case .array(let v): return "[\(v.count) items]"
         case .dict(let v): return "{\(v.count) keys}"

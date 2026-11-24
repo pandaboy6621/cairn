@@ -200,14 +200,30 @@ public struct SyncBase: Codable, Equatable, Sendable {
     /// Group changes that collided with a change here. This Mac's value was kept
     /// and published; the other one waits here until the user picks.
     public var conflicts: [String: SyncEntry]
+    /// Items another Mac removed that are still here, kept until the user has
+    /// dismissed the notice (a background sync mustn't be the only one to see it).
+    public var removed: [String: SyncEntry]
     public var lastSync: Date?
 
     public init(local: [String: String] = [:], seen: [String: Date] = [:],
-                conflicts: [String: SyncEntry] = [:], lastSync: Date? = nil) {
+                conflicts: [String: SyncEntry] = [:], removed: [String: SyncEntry] = [:], lastSync: Date? = nil) {
         self.local = local
         self.seen = seen
         self.conflicts = conflicts
+        self.removed = removed
         self.lastSync = lastSync
+    }
+
+    enum CodingKeys: String, CodingKey { case local, seen, conflicts, removed, lastSync }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        local = try c.decodeIfPresent([String: String].self, forKey: .local) ?? [:]
+        seen = try c.decodeIfPresent([String: Date].self, forKey: .seen) ?? [:]
+        conflicts = try c.decodeIfPresent([String: SyncEntry].self, forKey: .conflicts) ?? [:]
+        // Optional: bases saved before removals were kept have none.
+        removed = try c.decodeIfPresent([String: SyncEntry].self, forKey: .removed) ?? [:]
+        lastSync = try c.decodeIfPresent(Date.self, forKey: .lastSync)
     }
 }
 

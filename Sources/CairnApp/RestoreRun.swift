@@ -56,6 +56,22 @@ final class RestoreRun {
     static let checkingTask = "Checking the results"
 
     var tasks: [TaskRow] = []
+    /// The user pressed Stop; the running command is ending.
+    var stopping = false
+    @ObservationIgnored private var control = RestoreControl()
+
+    /// Ends the package install that's running; the restore moves on.
+    func skipCurrent() {
+        control.skipCurrent()
+        addLog("Skipping this package", isStep: false)
+    }
+
+    /// Ends what's running and starts nothing more (checking still runs).
+    func stop() {
+        stopping = true
+        control.stop()
+        addLog("Stopping", isStep: true)
+    }
     var log: [LogLine] = []
     /// Overall progress, 0...1, while running.
     var fraction: Double = 0
@@ -172,6 +188,9 @@ final class RestoreRun {
         let skip = skipSecrets
         vaultPassword = ""
         let cairn = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/cairn").path
+        let control = RestoreControl()
+        self.control = control
+        stopping = false
         tasks = []
         log = []
         fraction = 0
@@ -180,7 +199,7 @@ final class RestoreRun {
         Task {
             let outcome = await Task.detached(priority: .userInitiated) { () -> Outcome in
                 let report = Self.apply(url: url, backup: backup, fallback: fallback, knownKey: knownKey,
-                                        skipSecrets: skip, cairn: cairn) { event in
+                                        skipSecrets: skip, cairn: cairn, control: control) { event in
                     Task { @MainActor in self.handle(event) }
                 }
                 // Let restarted apps settle before checking.
@@ -191,6 +210,7 @@ final class RestoreRun {
             for i in tasks.indices { tasks[i].status = .done }
             fraction = 1
             addLog("Finished: \(outcome.verified) checked, \(outcome.problems) problem\(outcome.problems == 1 ? "" : "s"), \(outcome.report.manualSteps.count) to do by hand", isStep: true)
+            stopping = false
             phase = .finished(outcome)
             model.lastRestoredURL = url.standardizedFileURL
             // Changes from other Macs: record which ones landed.
@@ -274,7 +294,8 @@ final class RestoreRun {
     }
 
     nonisolated static func apply(url: URL, backup: Manifest, fallback: URL, knownKey: VaultKey?, skipSecrets: Bool,
-                                  cairn: String, progress: @escaping @Sendable (Event) -> Void) -> RestoreReport {
+                                  cairn: String, control: RestoreControl,
+                                  progress: @escaping @Sendable (Event) -> Void) -> RestoreReport {
         let secrets = VaultStore.secrets(beside: url)
         let before = SetupScanner().scan().manifest
         let plan = RestorePlan.make(backup: backup, current: before, manual: MacRestorer.manualStep,
@@ -284,7 +305,8 @@ final class RestoreRun {
         var groups: [String] = []
         for g in steps.compactMap(group(of:)) where !groups.contains(g) { groups.append(g) }
         progress(.planned(groups))
-        let report = MacRestorer().apply(plan, backup: url.standardized.path, secrets: secrets, unlock: {
+        let restorer = MacRestorer(runner: ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout, control: control))
+        let report = restorer.apply(plan, backup: url.standardized.path, secrets: secrets, unlock: {
             if let knownKey { return knownKey }
             if skipSecrets { throw VaultError.skippedByUser }
             let envelope = try VaultStore.read(in: VaultStore.folder(near: url, fallback: fallback))
@@ -293,7 +315,7 @@ final class RestoreRun {
         }, progress: { progress(.detail($0)) }, stepStarted: { index, total in
             let step = steps[index]
             progress(.step(index: index, total: total, group: group(of: step) ?? "", title: title(of: step)))
-        })
+        }, control: control)
         progress(.checking)
         // Dock tiles for apps that aren't installed yet: added once they are.
         if var pending = try? PendingDock.read(), pending.update(after: report) {
@@ -327,7 +349,7 @@ extension RestoreRun {
                          ("Installing cask example-app (2 of 2)", false), ("Setting dock.autohide", true)]
             log = lines.enumerated().map { LogLine(id: $0.offset, time: Date(), text: $0.element.0, isStep: $0.element.1) }
             fraction = 0.45
-            phase = .running("Setting dock.autohide")
+            phase = .running("Installing cask vlc (2 of 4)")
             if state == "finished" {
                 for i in tasks.indices { tasks[i].status = .done }
                 var report = RestoreReport()
