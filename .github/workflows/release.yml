@@ -1,0 +1,86 @@
+# Builds Cairn.app on a GitHub macOS runner and publishes a GitHub Release.
+#
+# Release: bump `Cairn.version` in Sources/CairnCore/Cairn.swift, commit, then
+#   git tag v0.1.0 && git push origin v0.1.0
+# Or run it by hand from the Actions tab (workflow_dispatch) to test a build
+# without publishing.
+#
+# Signing: the app is ad-hoc signed (as scripts/build-app.sh does locally), so
+# macOS warns on first open. Developer ID signing and notarization come later,
+# once there are certificates to store as repository secrets.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release and upload its files
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Check the tag matches Cairn.version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="$(sed -n 's/.*version = "\(.*\)".*/\1/p' Sources/CairnCore/Cairn.swift)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match Cairn.version ($version)"
+            exit 1
+          fi
+
+      - name: Test
+        run: swift test
+
+      - name: Build Cairn.app
+        run: scripts/build-app.sh
+
+      - name: Package
+        id: package
+        run: |
+          version="$(sed -n 's/.*version = "\(.*\)".*/\1/p' Sources/CairnCore/Cairn.swift)"
+          name="Cairn-$version-macOS"
+          ditto -c -k --keepParent --sequesterRsrc dist/Cairn.app "dist/$name.zip"
+          (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256")
+          echo "zip=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          echo "sha=dist/$name.zip.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the build (for manual runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cairn-app
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.sha }}
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          Cairn $GITHUB_REF_NAME, built from $(git rev-parse --short HEAD).
+
+          **Install:** unzip, move Cairn.app to Applications, then right-click it and choose Open the first time.
+          This build is ad-hoc signed, not yet notarized, so macOS asks before opening it.
+
+          The \`cairn\` command-line tool is inside the app: \`Cairn.app/Contents/MacOS/cairn\`.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.package.outputs.zip }}" "${{ steps.package.outputs.sha }}" \
+            --title "Cairn $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
