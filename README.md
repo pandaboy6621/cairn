@@ -103,7 +103,8 @@ Cairn's manifest describes what you want, not how one OS stores it. **File → E
   network shares (as `\\server\share` on Windows).
 
 Both scripts only list what they would do until you run them with `-Apply` / `--apply`. Homebrew
-names are matched through a built-in catalog; a package's own `resolvers` in the manifest win:
+names are matched through a built-in catalog, checked against winget-pkgs, Flathub, Ubuntu and Fedora
+by `scripts/check-catalog.py`; a package's own `resolvers` in the manifest win:
 
 ```yaml
 packages:
@@ -190,6 +191,7 @@ cairn vault secrets --name "Home"       # save one (macOS asks to approve Keycha
 cairn vault remember                     # keep the vault key in this Mac's Keychain (forget undoes)
 
 cairn sync mode direct                   # or folder (through the backup folder / NAS, the default)
+cairn sync folder --connect smb://nas.local/Backups Cairn  # sync through a folder on a NAS share (or any path)
 cairn sync on                            # preset: portable (default), everything, or nothing
 cairn sync id                            # this Mac's device ID
 cairn sync pair                          # Macs found on the network; then --to <name> (both show a code)

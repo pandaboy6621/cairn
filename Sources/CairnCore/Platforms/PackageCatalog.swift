@@ -19,6 +19,9 @@ public struct PackageNames: Equatable, Sendable {
 
 /// Homebrew names mapped to winget, apt, dnf and Flathub ids.
 ///
+/// Checked against winget-pkgs, Flathub, Ubuntu and Fedora with
+/// `scripts/check-catalog.py`; run it after editing.
+///
 /// Looked up when exporting rather than written into backups, so improving the
 /// table never makes old snapshots look changed. A manifest's own `resolvers`
 /// (say, edited by hand) win over this table.
@@ -68,7 +71,7 @@ public enum PackageCatalog {
     /// Command-line tools, by Homebrew formula name.
     static let formulae: [String: PackageNames] = [
         "7zip": .init(winget: "7zip.7zip", apt: "7zip", dnf: "7zip"),
-        "p7zip": .init(winget: "7zip.7zip", apt: "p7zip-full", dnf: "p7zip"),
+        "p7zip": .init(winget: "7zip.7zip", apt: "p7zip-full", dnf: "7zip"),
         "android-platform-tools": .init(winget: "Google.PlatformTools", apt: "android-sdk-platform-tools", dnf: "android-tools"),
         "awscli": .init(winget: "Amazon.AWSCLI", apt: "awscli", dnf: "awscli2"),
         "bat": .init(winget: "sharkdp.bat", apt: "bat", dnf: "bat"),
@@ -91,7 +94,7 @@ public enum PackageCatalog {
         "imagemagick": .init(winget: "ImageMagick.ImageMagick", apt: "imagemagick", dnf: "ImageMagick"),
         "iperf3": .init(apt: "iperf3", dnf: "iperf3"),
         "jq": .init(winget: "jqlang.jq", apt: "jq", dnf: "jq"),
-        "kubernetes-cli": .init(winget: "Kubernetes.kubectl", dnf: "kubernetes-client"),
+        "kubernetes-cli": .init(winget: "Kubernetes.kubectl"),
         "lazygit": .init(winget: "JesseDuffield.lazygit"),
         "mkvtoolnix": .init(winget: "MoritzBunkus.MKVToolNix", apt: "mkvtoolnix", dnf: "mkvtoolnix"),
         "neovim": .init(winget: "Neovim.Neovim", apt: "neovim", dnf: "neovim"),
@@ -103,7 +106,7 @@ public enum PackageCatalog {
         "python": .init(winget: "Python.Python.3.13", apt: "python3", dnf: "python3"),
         "python@3.12": .init(winget: "Python.Python.3.12", apt: "python3", dnf: "python3"),
         "python@3.13": .init(winget: "Python.Python.3.13", apt: "python3", dnf: "python3"),
-        "redis": .init(apt: "redis-server", dnf: "redis"),
+        "redis": .init(apt: "redis-server", dnf: "valkey"),
         "ripgrep": .init(winget: "BurntSushi.ripgrep.MSVC", apt: "ripgrep", dnf: "ripgrep"),
         "rustup": .init(winget: "Rustlang.Rustup", apt: "rustup", dnf: "rustup"),
         "scrcpy": .init(winget: "Genymobile.scrcpy", apt: "scrcpy"),
@@ -113,7 +116,7 @@ public enum PackageCatalog {
         "tree": .init(apt: "tree", dnf: "tree"),
         "uv": .init(winget: "astral-sh.uv", dnf: "uv"),
         "vim": .init(winget: "vim.vim", apt: "vim", dnf: "vim-enhanced"),
-        "wget": .init(winget: "JernejSimoncic.Wget", apt: "wget", dnf: "wget"),
+        "wget": .init(winget: "JernejSimoncic.Wget", apt: "wget", dnf: "wget2-wget"),
         "wireguard-tools": .init(winget: "WireGuard.WireGuard", apt: "wireguard-tools", dnf: "wireguard-tools"),
         "yt-dlp": .init(winget: "yt-dlp.yt-dlp", apt: "yt-dlp", dnf: "yt-dlp"),
         "zsh": .init(apt: "zsh", dnf: "zsh"),
@@ -163,8 +166,8 @@ public enum PackageCatalog {
         "spotify": .init(winget: "Spotify.Spotify", flatpak: "com.spotify.Client"),
         "steam": .init(winget: "Valve.Steam", flatpak: "com.valvesoftware.Steam"),
         "sublime-text": .init(winget: "SublimeHQ.SublimeText.4", flatpak: "com.sublimetext.three"),
-        "tailscale": .init(winget: "tailscale.tailscale"),
-        "tailscale-app": .init(winget: "tailscale.tailscale"),
+        "tailscale": .init(winget: "Tailscale.Tailscale"),
+        "tailscale-app": .init(winget: "Tailscale.Tailscale"),
         "telegram": .init(winget: "Telegram.TelegramDesktop", flatpak: "org.telegram.desktop"),
         "telegram-desktop": .init(winget: "Telegram.TelegramDesktop", flatpak: "org.telegram.desktop"),
         "temurin": .init(winget: "EclipseAdoptium.Temurin.21.JDK", apt: "openjdk-21-jdk", dnf: "java-21-openjdk-devel"),

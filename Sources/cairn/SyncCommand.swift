@@ -18,7 +18,7 @@ struct SyncCommand: ParsableCommand {
             Sync never removes anything, and changes from other Macs are only applied
             with --apply, after the plan is shown.
             """,
-        subcommands: [Status.self, On.self, Off.self, Now.self, Scope.self, Resolve.self, Devices.self,
+        subcommands: [Status.self, On.self, Off.self, Now.self, Scope.self, Resolve.self, Devices.self, Folder.self,
                       Mode.self, ID.self, Pair.self, Requests.self, Accept.self, Ignore.self, Unpair.self],
         defaultSubcommand: Status.self
     )
@@ -388,6 +388,72 @@ struct SyncCommand: ParsableCommand {
             let after = options.local.syncRoot(mode: mode, backupFolder: options.backupFolder)
             try SyncStore(root: after).saveConfig(config, device: device)
             print("\(mode.title). \(mode.summary)")
+        }
+    }
+
+    struct Folder: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Choose the folder Macs sync through (folder mode): a NAS share or any folder.",
+            discussion: """
+                Every Mac should use the same folder. Examples:
+                  cairn sync folder                                  # show it
+                  cairn sync folder /Volumes/Backups/Cairn           # a folder (a mounted share is remembered)
+                  cairn sync folder --connect smb://nas.local/Backups Cairn
+                                                                     # connect the share, use its Cairn folder
+                  cairn sync folder --default                        # back to the backup folder
+                Connecting asks macOS, which shows its own sign-in window if the NAS needs one.
+                """
+        )
+        @OptionGroup var options: Options
+        @Argument(help: "The folder. With --connect: a folder inside the share (default: its top).")
+        var path: String?
+        @Option(name: .long, help: "A share to connect first, e.g. smb://nas.local/Backups.")
+        var connect: String?
+        @Flag(name: .long, help: "Use the backup folder again.")
+        var `default` = false
+
+        func run() async throws {
+            let local = options.local
+            if path == nil, connect == nil, !`default` {
+                let f = local.folder()
+                print(BackupFolder.displayPath(f?.url ?? options.backupFolder) + (f == nil ? " (the backup folder)" : ""))
+                if let share = f?.share { print("On \(share)") }
+                if options.mode != .folder { print("Not used now: this Mac syncs directly (`cairn sync mode folder` to change).") }
+                return
+            }
+            var chosen: SyncFolder?
+            if !`default` {
+                var url: URL
+                if let connect {
+                    guard SyncFolder.withoutPassword(connect) != nil else { throw ValidationError("\(connect) isn't a share address, e.g. smb://nas.local/Backups.") }
+                    let mount = try await withCheckedThrowingContinuation { (c: CheckedContinuation<URL, Error>) in
+                        NetworkShareMounter.mount(connect) { c.resume(with: $0) }
+                    }
+                    url = path.map { mount.appendingPathComponent($0, isDirectory: true) } ?? mount
+                } else {
+                    url = URL(fileURLWithPath: (path! as NSString).expandingTildeInPath, isDirectory: true)
+                }
+                url = url.standardizedFileURL
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+                    throw ValidationError("\(url.path) isn't a folder (create it first).")
+                }
+                if url != options.backupFolder.standardizedFileURL {
+                    chosen = SyncFolder(path: url.path, share: NetworkShareMounter.share(containing: url)?.address)
+                }
+            }
+            // Keep this Mac's choices in the new folder.
+            let device = SetupScanner().device().name
+            let config = SyncStore(root: options.url).config(device: device)
+            try local.saveFolder(chosen)
+            let store = SyncStore(root: options.url)
+            if config.enabled, options.mode == .folder {
+                try store.saveConfig(config, device: device)
+                _ = try store.ensureGroup(now: Date())
+            }
+            let note = chosen == nil ? " (the backup folder)" : chosen?.share.map { " (on \($0))" } ?? ""
+            print("Macs sync through \(BackupFolder.displayPath(chosen?.url ?? options.backupFolder))\(note).")
+            if options.mode != .folder { print("It's used in folder mode: `cairn sync mode folder`.") }
         }
     }
 

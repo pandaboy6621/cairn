@@ -98,6 +98,34 @@ public struct SyncTrust: Codable, Equatable, Sendable {
     }
 }
 
+/// The folder Macs sync through in folder mode, if not the backup folder: a
+/// local folder, or one on a NAS share (remembered so it can be reconnected).
+public struct SyncFolder: Codable, Equatable, Sendable {
+    public var path: String
+    /// The share it's on, e.g. `smb://nas.local/Backups`. Never holds a password.
+    public var share: String?
+
+    public init(path: String, share: String? = nil) {
+        self.path = path
+        self.share = share.flatMap(SyncFolder.withoutPassword)
+    }
+
+    public var url: URL { URL(fileURLWithPath: path, isDirectory: true) }
+
+    /// `smb://me:secret@nas/share` → `smb://me@nas/share`. Nil if it isn't a share address.
+    public static func withoutPassword(_ address: String) -> String? {
+        guard var c = URLComponents(string: address.trimmingCharacters(in: .whitespaces)),
+              let scheme = c.scheme?.lowercased(), shareSchemes.contains(scheme),
+              let host = c.host, !host.isEmpty else { return nil }
+        c.scheme = scheme
+        c.password = nil
+        return c.string
+    }
+
+    /// What `NetFS` can mount.
+    public static let shareSchemes: Set<String> = ["smb", "afp", "nfs", "webdav", "http", "https"]
+}
+
 /// Sync's files on this Mac, in `~/Library/Application Support/Cairn`:
 /// the identity key (0600), the trust list, the chosen mode, and, for direct
 /// sync, the same `sync/` layout the shared folder uses.
@@ -114,6 +142,7 @@ public struct SyncLocal: Sendable {
     var identityURL: URL { root.appendingPathComponent("sync-identity.key") }
     var trustURL: URL { root.appendingPathComponent("sync-trust.yaml") }
     var modeURL: URL { root.appendingPathComponent("sync-mode") }
+    var folderURL: URL { root.appendingPathComponent("sync-folder.yaml") }
 
     /// This Mac's identity, created the first time.
     public func identity() throws -> SyncIdentity {
@@ -153,8 +182,25 @@ public struct SyncLocal: Sendable {
         try m.rawValue.write(to: modeURL, atomically: true, encoding: .utf8)
     }
 
-    /// Where sync's files live for a mode: the backup folder, or here.
+    /// The folder chosen for folder mode, if one was (else the backup folder is used).
+    public func folder() -> SyncFolder? {
+        guard let text = try? String(contentsOf: folderURL, encoding: .utf8) else { return nil }
+        return try? YAMLDecoder().decode(SyncFolder.self, from: text)
+    }
+
+    /// Nil goes back to using the backup folder.
+    public func saveFolder(_ f: SyncFolder?) throws {
+        guard let f else {
+            if FileManager.default.fileExists(atPath: folderURL.path) { try FileManager.default.removeItem(at: folderURL) }
+            return
+        }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try VaultStore.encode(f).write(to: folderURL, atomically: true, encoding: .utf8)
+    }
+
+    /// Where sync's files live for a mode: the chosen folder (else the backup
+    /// folder), or here for direct sync.
     public func syncRoot(mode: SyncMode, backupFolder: URL) -> URL {
-        mode == .folder ? backupFolder : root
+        mode == .folder ? (folder()?.url ?? backupFolder) : root
     }
 }

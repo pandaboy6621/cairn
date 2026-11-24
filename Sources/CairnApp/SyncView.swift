@@ -12,7 +12,9 @@ struct SyncView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 SyncHeader()
-                if sync.isOn {
+                if sync.folderOffline {
+                    SyncFolderOffline()
+                } else if sync.isOn {
                     if !sync.requests.isEmpty { SyncRequests() }
                     if let plan = sync.plan, !(plan.incoming.isEmpty && plan.conflicts.isEmpty && plan.removedElsewhere.isEmpty) {
                         SyncChanges(plan: plan)
@@ -28,6 +30,45 @@ struct SyncView: View {
             .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+    }
+}
+
+/// The sync folder (on a NAS, usually) isn't reachable: reconnect it or pick another.
+private struct SyncFolderOffline: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let sync = model.sync
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "externaldrive.badge.exclamationmark").foregroundStyle(.orange)
+                Text("The sync folder isn't connected").font(.title3.weight(.semibold))
+            }
+            Text("\(sync.folderPath) can't be reached\(sync.folder?.share.map { " (\($0))" } ?? ""). Nothing is lost: syncing picks up again once it's back.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let error = sync.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+            }
+            HStack {
+                if sync.folder?.share != nil {
+                    Button {
+                        sync.reconnect()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if sync.connecting != nil { ProgressView().controlSize(.small) }
+                            Text("Reconnect")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .disabled(sync.connecting != nil)
+                }
+                Button("Choose Another Folder…") { sync.error = nil; sync.showingFolderSetup = true }
+            }
+        }
+        .padding(18)
+        .background(CardBackground(tint: .orange))
     }
 }
 
@@ -101,16 +142,23 @@ private struct SyncTurnOn: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("How your Macs connect").font(.headline)
-            ModePicker(selection: mode.projectedValue, folder: BackupFolder.displayPath(model.backupFolder))
+            ModePicker(selection: mode.projectedValue, folder: model.sync.folderPath)
             Text("What syncs").font(.headline).padding(.top, 4)
             PresetPicker(selection: preset.projectedValue)
             HStack {
                 Spacer()
                 Button {
-                    model.sync.turnOn(preset.wrappedValue, mode: mode.wrappedValue)
-                    model.syncNow()
+                    if mode.wrappedValue == .folder {
+                        // First, where: the backup folder, a NAS share, or another folder.
+                        model.sync.error = nil
+                        model.sync.pendingTurnOn = preset.wrappedValue
+                        model.sync.showingFolderSetup = true
+                    } else {
+                        model.sync.turnOn(preset.wrappedValue, mode: mode.wrappedValue)
+                        model.syncNow()
+                    }
                 } label: {
-                    Text("Turn On Sync").frame(minWidth: 120)
+                    Text(mode.wrappedValue == .folder ? "Choose Folder…" : "Turn On Sync").frame(minWidth: 120)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.purple)
@@ -184,9 +232,28 @@ private struct SyncConnection: View {
                 .fixedSize()
                 Spacer()
             }
-            Text(sync.mode.summary + (sync.mode == .folder ? " Folder: \(BackupFolder.displayPath(model.backupFolder))." : ""))
+            Text(sync.mode.summary)
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if sync.mode == .folder {
+                HStack(spacing: 10) {
+                    Image(systemName: sync.folder?.share != nil ? "externaldrive.connected.to.line.below" : "folder.fill")
+                        .foregroundStyle(.purple)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sync folder").font(.caption).foregroundStyle(.secondary)
+                        Text(sync.folderPath).lineLimit(1).truncationMode(.middle)
+                        if let share = sync.folder?.share {
+                            Text("On \(share)").font(.caption).foregroundStyle(.secondary)
+                        } else if sync.folder == nil {
+                            Text("Your backup folder").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("Change…") { sync.error = nil; sync.showingFolderSetup = true }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.45)))
+            }
             HStack(spacing: 10) {
                 Image(systemName: "person.badge.key").foregroundStyle(.purple)
                 VStack(alignment: .leading, spacing: 2) {

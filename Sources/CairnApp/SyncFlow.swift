@@ -51,6 +51,15 @@ final class SyncFlow {
     var pairRequest: PairRequest?
     var pairing: Pairing?
     var showingAddDevice = false
+    /// The folder-mode folder, when one was chosen (else the backup folder).
+    private(set) var folder: SyncFolder?
+    /// The sync folder (a NAS share, say) isn't reachable right now.
+    private(set) var folderOffline = false
+    var showingFolderSetup = false
+    /// A share being connected, for the setup sheet.
+    var connecting: String?
+    /// Turning on waits for a folder to be picked.
+    @ObservationIgnored var pendingTurnOn: SyncPreset?
     private(set) var deviceID: DeviceID?
     private(set) var groupTag: String?
 
@@ -87,13 +96,17 @@ final class SyncFlow {
         self.device = device
         backupFolder = folder
         mode = local.mode()
+        self.folder = local.folder()
         identity = identity ?? (try? local.identity())
         deviceID = identity?.deviceID
         trust = local.trust()
-        guard let store else { return }
+        guard let store, let root else { return }
+        // An offline NAS: keep what's known, never block; Reconnect brings it back.
+        folderOffline = mode == .folder && !FileManager.default.fileExists(atPath: root.path)
+        if folderOffline { updateNetwork(); return }
         config = store.config(device: device.name)
         lastSync = store.info(device: device.name)?.lastSync
-        groupTag = mode == .folder ? SyncStore(root: folder).group()?.tag : nil
+        groupTag = mode == .folder ? store.group()?.tag : nil
         if changed { plan = nil }
         refreshRequests()
         refreshMachines()
@@ -121,7 +134,7 @@ final class SyncFlow {
         config.enabled = true
         config.apply(preset)
         save()
-        if mode == .folder, let backupFolder { groupTag = (try? SyncStore(root: backupFolder).ensureGroup(now: Date()))?.tag }
+        if mode == .folder, let store { groupTag = (try? store.ensureGroup(now: Date()))?.tag }
         updateNetwork()
     }
 
@@ -141,13 +154,74 @@ final class SyncFlow {
         plan = nil
         config = kept
         if let store { try? store.saveConfig(kept, device: device.name) }
-        if new == .folder, isOn, let backupFolder { groupTag = (try? SyncStore(root: backupFolder).ensureGroup(now: Date()))?.tag }
+        if new == .folder, isOn, let store { groupTag = (try? store.ensureGroup(now: Date()))?.tag }
         if new == .direct { groupTag = nil }
         lastSync = store?.info(device: device.name)?.lastSync
         refreshRequests()
         refreshMachines()
         updateNetwork()
         if let lastScan { preview(scan: lastScan) }
+    }
+
+    // MARK: Sync folder
+
+    /// The folder Macs meet in for folder mode: shown on the Sync page.
+    var folderPath: String {
+        guard let backupFolder else { return "" }
+        return BackupFolder.displayPath(folder?.url ?? backupFolder)
+    }
+
+    /// Uses `new` (nil: the backup folder) for folder mode, keeping this Mac's choices.
+    func setFolder(_ new: SyncFolder?) {
+        guard let device else { return }
+        let kept = config
+        do { try local.saveFolder(new) } catch { self.error = error.localizedDescription; return }
+        folder = new
+        plan = nil
+        error = nil
+        if let pending = pendingTurnOn {
+            pendingTurnOn = nil
+            turnOn(pending, mode: .folder)
+        } else if mode == .folder, let store {
+            config = kept
+            if isOn {
+                try? store.saveConfig(kept, device: device.name)
+                groupTag = (try? store.ensureGroup(now: Date()))?.tag
+            }
+        }
+        folderOffline = false
+        refreshRequests()
+        refreshMachines()
+        updateNetwork()
+        if let lastScan { isOn ? syncNow(scan: lastScan) : preview(scan: lastScan) }
+    }
+
+    /// Connects a NAS share; `done` gets where it's mounted.
+    func connect(_ address: String, done: @escaping @MainActor (URL) -> Void) {
+        connecting = address
+        error = nil
+        NetworkShareMounter.mount(address) { result in
+            Task { @MainActor in
+                self.connecting = nil
+                switch result {
+                case .success(let url): done(url)
+                case .failure(let e): self.error = e.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// Reconnects the sync folder's NAS share, then picks up where it left off.
+    func reconnect() {
+        guard let share = folder?.share else {
+            error = "\(folderPath) isn't available. Is the drive or NAS connected?"
+            return
+        }
+        connect(share) { [weak self] _ in
+            guard let self, let device = self.device, let backupFolder = self.backupFolder else { return }
+            self.load(device: device, folder: backupFolder, scan: self.lastScan)
+            if self.folderOffline { self.error = "Connected, but \(self.folderPath) isn't on that share any more. Choose the folder again." }
+        }
     }
 
     func apply(_ preset: SyncPreset) {
@@ -529,6 +603,8 @@ extension SyncFlow {
         case "pairing": pairing = Pairing(peer: "example-imac", stage: .waiting(code: "482 913"))
         case "paired": pairing = Pairing(peer: "example-imac", stage: .done)
         case "add": showingAddDevice = true
+        case "folder": showingFolderSetup = true
+        case "offline": folderOffline = true; folder = SyncFolder(path: "/Volumes/Backups/Cairn", share: "smb://nas.local/Backups")
         default: break
         }
     }

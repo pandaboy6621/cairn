@@ -57,6 +57,10 @@ struct ContentView: View {
                 .sheet(isPresented: Binding(get: { model.sync.showingAddDevice }, set: { model.sync.showingAddDevice = $0 })) {
                     AddDeviceSheet().environment(model)
                 }
+            Color.clear
+                .sheet(isPresented: Binding(get: { model.sync.showingFolderSetup }, set: { model.sync.showingFolderSetup = $0 })) {
+                    SyncFolderSheet().environment(model)
+                }
         }
         .onAppear {
             model.sync.showWindow = { [openWindow] in
