@@ -51,6 +51,6 @@ struct Export: ParsableCommand {
         }
         stderr("No snapshots yet: scanning this Mac.")
         // No secret scanners: an export never carries secrets, so don't prompt for them.
-        return SetupScanner().scan([.brew, .mas, .dock, .displays, .defaults, .shares]).manifest
+        return SetupScanner().scan([.brew, .mas, .dock, .displays, .defaults, .shares, .dotfiles]).manifest
     }
 }

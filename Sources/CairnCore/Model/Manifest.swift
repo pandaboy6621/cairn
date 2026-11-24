@@ -18,6 +18,8 @@ public struct Manifest: Codable, Equatable, Sendable {
     /// Network shares (SMB, AFP, NFS, WebDAV). Optional in the file: manifests
     /// from before shares were scanned simply have none.
     public var shares: [ShareItem]
+    /// Shell, git and SSH config files. Optional in the file, like `shares`.
+    public var dotfiles: [DotfileItem]
     public var sensitive: [SensitiveRef]
 
     public init(
@@ -29,6 +31,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         settings: [SettingItem] = [],
         layout: Layout = Layout(),
         shares: [ShareItem] = [],
+        dotfiles: [DotfileItem] = [],
         sensitive: [SensitiveRef] = []
     ) {
         self.schema = schema
@@ -39,6 +42,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         self.settings = settings
         self.layout = layout
         self.shares = shares
+        self.dotfiles = dotfiles
         self.sensitive = sensitive
     }
 
@@ -55,6 +59,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         settings = try c.decodeIfPresent([SettingItem].self, forKey: .settings) ?? []
         layout = try c.decodeIfPresent(Layout.self, forKey: .layout) ?? Layout()
         shares = try c.decodeIfPresent([ShareItem].self, forKey: .shares) ?? []
+        dotfiles = try c.decodeIfPresent([DotfileItem].self, forKey: .dotfiles) ?? []
         sensitive = try c.decodeIfPresent([SensitiveRef].self, forKey: .sensitive) ?? []
     }
 
@@ -66,6 +71,7 @@ public struct Manifest: Codable, Equatable, Sendable {
         m.apps.sort { $0.id < $1.id }
         m.settings.sort { $0.key < $1.key }
         m.shares.sort { $0.url < $1.url }
+        m.dotfiles.sort { $0.path < $1.path }
         m.sensitive.sort { ($0.type, $0.ref) < ($1.type, $1.ref) }
         m.layout.displays?.displays.sort { $0.id < $1.id }
         m.layout.wallpaper?.pictures.sort { $0.display < $1.display }

@@ -15,6 +15,7 @@ public struct MacRestorer: Sendable {
     public var sshKeys: SSHKeySystem
     public var sharePasswords: SharePasswordSystem
     public var credentialFiles: CredentialFileSystem
+    public var dotfiles: DotfileFileSystem
 
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout),
@@ -24,9 +25,11 @@ public struct MacRestorer: Sendable {
         wifi: WiFiSystem = CoreWLANWiFi(),
         sshKeys: SSHKeySystem = FileSSHKeys(),
         sharePasswords: SharePasswordSystem = KeychainSharePasswords(),
-        credentialFiles: CredentialFileSystem = HomeCredentialFiles()
+        credentialFiles: CredentialFileSystem = HomeCredentialFiles(),
+        dotfiles: DotfileFileSystem = HomeDotfiles()
     ) {
         self.credentialFiles = credentialFiles
+        self.dotfiles = dotfiles
         self.wifi = wifi
         self.sshKeys = sshKeys
         self.sharePasswords = sharePasswords
@@ -297,6 +300,44 @@ public struct MacRestorer: Sendable {
                 }
                 let outcome = secretOutcome(done: done, notes: notes, locked: locked, nothing: "nothing new to restore")
                 report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .secrets(done)))
+
+            case .dotfiles(let changes):
+                progress?("Writing \(changes.count) config file\(changes.count == 1 ? "" : "s")")
+                var done: [String] = []
+                var notes: [String] = []
+                for c in changes {
+                    let path = c.item.path
+                    switch dotfiles.state(path) {
+                    case .link:
+                        notes.append("\(path) is a link (a dotfiles tool may manage it); left alone")
+                        report.manualSteps.append(.init(category: "developer",
+                            text: "\(path) is a link, so Cairn didn't replace it; update it with the tool that manages it"))
+                        continue
+                    case .other:
+                        notes.append("\(path) isn't a plain file; left alone")
+                        continue
+                    case .missing, .file:
+                        break
+                    }
+                    do {
+                        let kept = try dotfiles.write(c.item.content, path: path)
+                        done.append(path)
+                        if let kept {
+                            report.manualSteps.append(.init(category: "developer",
+                                text: "your previous \(path) is at \(kept), in case it had anything to keep"))
+                        }
+                        if c.item.redacted > 0 {
+                            report.manualSteps.append(.init(category: "developer",
+                                text: "\(path): \(c.item.redacted) line\(c.item.redacted == 1 ? "" : "s") that looked like secrets weren't backed up; add them back by hand (look for \"# cairn: removed\")"))
+                        }
+                    } catch {
+                        notes.append("\(path): \(error)")
+                    }
+                }
+                let outcome: RestoreReport.Outcome = done.isEmpty
+                    ? (notes.isEmpty ? .skipped("nothing to write") : .failed(notes.joined(separator: "; ")))
+                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .dotfiles(done)))
 
             case .wallpaper(let w, _):
                 let (applied, notes) = applyWallpaper(w)

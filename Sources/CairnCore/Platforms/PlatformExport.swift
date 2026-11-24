@@ -30,6 +30,22 @@ public struct PlatformExport: Equatable, Sendable {
     public var apt: [Install] = []
     public var dnf: [Install] = []
     public var flatpak: [Install] = []
+    /// A config file carried in the kit's `dotfiles` folder.
+    public struct KitDotfile: Equatable, Sendable {
+        /// File name in the kit: `gitconfig`, `ssh-config`.
+        public var name: String
+        /// Where it goes, below the home folder: `.gitconfig`, `.ssh/config`.
+        public var target: String
+        public var kind: DotfileItem.Kind
+        public var text: String
+        /// The script puts it in place (git and SSH config). Shell config is
+        /// only there to read: it was written for macOS.
+        public var installs: Bool
+        /// macOS-only lines commented out, and secret-looking lines left out of the backup.
+        public var commented: Int
+        public var redacted: Int
+    }
+
     public var registry: [RegistryWrite] = []
     public var gsettings: [GSettingsWrite] = []
 
@@ -38,6 +54,7 @@ public struct PlatformExport: Equatable, Sendable {
     public var macOnly: [String] = []
     public var appStore: [String] = []
     public var shares: [ShareItem] = []
+    public var dotfiles: [KitDotfile] = []
     /// Included settings with no equivalent on the target.
     public var settingsLeft = 0
     public var hasLayout = false
@@ -89,6 +106,12 @@ public struct PlatformExport: Equatable, Sendable {
             }
         }
         e.shares = m.shares.filter(\.include)
+        for d in m.dotfiles where d.include && Dotfiles.isKnown(d.path) {
+            let installs = d.kind != .shell
+            let p = installs ? Dotfiles.portable(d, windows: target == .windows) : (text: d.content, commented: 0)
+            e.dotfiles.append(KitDotfile(name: Dotfiles.kitName(d.path), target: d.relativePath, kind: d.kind,
+                                         text: p.text, installs: installs, commented: p.commented, redacted: d.redacted))
+        }
         e.hasLayout = m.layout.dock?.include == true || m.layout.displays?.include == true
             || m.layout.wallpaper?.include == true
         e.secrets = m.sensitive.filter(\.include).count
@@ -109,14 +132,17 @@ public struct PlatformExport: Equatable, Sendable {
     /// The kit's folder name, e.g. `Cairn for Windows (studio-mac)`.
     public var folderName: String { "Cairn for \(target.title) (\(Self.fileSafe(device.name)))" }
 
-    /// File name → contents.
+    /// File name → contents. Config files are in a `dotfiles` folder.
     public func files() -> [String: String] {
+        var out: [String: String]
         switch target {
         case .windows:
-            return ["setup.ps1": powershell(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
+            out = ["setup.ps1": powershell(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
         case .linux:
-            return ["setup.sh": bash(), "CHECKLIST.md": checklist()]
+            out = ["setup.sh": bash(), "CHECKLIST.md": checklist()]
         }
+        for d in dotfiles { out["dotfiles/" + d.name] = d.text }
+        return out
     }
 
     /// Writes the kit into a new folder inside `parent` and returns that folder.
@@ -126,6 +152,7 @@ public struct PlatformExport: Equatable, Sendable {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for (name, text) in files() {
             let url = folder.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try text.write(to: url, atomically: true, encoding: .utf8)
             if name.hasSuffix(".sh") {
                 try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
@@ -138,7 +165,9 @@ public struct PlatformExport: Equatable, Sendable {
     public var summary: String {
         var parts = ["\(packageCount) package\(packageCount == 1 ? "" : "s")"]
         if settingCount > 0 { parts.append("\(settingCount) setting\(settingCount == 1 ? "" : "s")") }
-        let byHand = unmapped.count + appStore.count + shares.count
+        let installs = dotfiles.filter(\.installs).count
+        if installs > 0 { parts.append("\(installs) config file\(installs == 1 ? "" : "s")") }
+        let byHand = unmapped.count + appStore.count + shares.count + dotfiles.filter { !$0.installs }.count
         var s = "\(target.title) setup: " + parts.joined(separator: ", ")
         if byHand > 0 { s += "; \(byHand) to do by hand" }
         return s
@@ -200,6 +229,7 @@ public struct PlatformExport: Equatable, Sendable {
         }
         if ($Apply -and $restartExplorer -and $settings.Count -gt 0) { Stop-Process -Name explorer -Force }
 
+        \(powershellDotfiles())
         Write-Host ''
         if (-not $Apply) { Write-Host 'Dry run: nothing changed. Run again with -Apply to make these changes.' }
         elseif ($failed.Count -gt 0) { Write-Host "Didn't install: $($failed -join ', ')" }
@@ -305,6 +335,7 @@ public struct PlatformExport: Equatable, Sendable {
             for g in gsettings { s += "  set_setting \(sh(g.schema)) \(sh(g.key)) \(sh(g.value))\n" }
             s += "else\n  echo \"Settings skipped: they're for GNOME, and gsettings isn't here.\"\nfi\n"
         }
+        s += bashDotfiles()
         s += """
 
         echo
@@ -313,6 +344,63 @@ public struct PlatformExport: Equatable, Sendable {
         echo "See CHECKLIST.md for what to do by hand."
 
         """
+        return s
+    }
+
+    // MARK: Config files
+
+    var installedDotfiles: [KitDotfile] { dotfiles.filter(\.installs) }
+
+    func powershellDotfiles() -> String {
+        let files = installedDotfiles
+        guard !files.isEmpty else { return "" }
+        var s = "$dotfiles = @(\n"
+        s += files.map { "    @{ File = \(ps($0.name)); Target = \(ps($0.target.replacingOccurrences(of: "/", with: "\\"))) }" }
+            .joined(separator: ",\n")
+        s += "\n)\n"
+        s += """
+        Write-Host "Config files ($($dotfiles.Count))"
+        foreach ($d in $dotfiles) {
+            $src = Join-Path (Join-Path $PSScriptRoot 'dotfiles') $d.File
+            $dst = Join-Path $HOME $d.Target
+            if ((Test-Path $dst) -and (Get-FileHash $src).Hash -eq (Get-FileHash $dst).Hash) { Write-Host "  $($d.Target) already matches"; continue }
+            if ($Apply) {
+                New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+                if (Test-Path $dst) { Copy-Item $dst "$dst.before-cairn" -Force; Write-Host "  kept your old $($d.Target) as $($d.Target).before-cairn" }
+                Copy-Item $src $dst -Force
+                if ($?) { Write-Host "  wrote $($d.Target)" } else { $failed += $d.Target }
+            } elseif (Test-Path $dst) {
+                Write-Host "  would replace $($d.Target) (keeping the old one as $($d.Target).before-cairn)"
+            } else {
+                Write-Host "  would write $($d.Target)"
+            }
+        }
+
+        """
+        return s
+    }
+
+    func bashDotfiles() -> String {
+        let files = installedDotfiles
+        guard !files.isEmpty else { return "" }
+        var s = """
+
+        KIT="$(cd "$(dirname "$0")" && pwd)"
+        put_config() { # kit file, path below $HOME, mode
+          local src="$KIT/dotfiles/$1" dst="$HOME/$2"
+          if [ -L "$dst" ]; then echo "  skipped $2: it's a link (a dotfiles tool may manage it)"; return; fi
+          if [ -f "$dst" ] && cmp -s "$src" "$dst"; then echo "  $2 already matches"; return; fi
+          if [ $APPLY = 1 ]; then
+            if [ "$3" = 600 ]; then mkdir -p -m 700 "$(dirname "$dst")"; else mkdir -p "$(dirname "$dst")"; fi
+            if [ -e "$dst" ]; then cp -p "$dst" "$dst.before-cairn" && echo "  kept your old $2 as $2.before-cairn"; fi
+            if install -m "$3" "$src" "$dst"; then echo "  wrote $2"; else failed+=("$2"); fi
+          elif [ -e "$dst" ]; then echo "  would replace $2 (keeping the old one as $2.before-cairn)"
+          else echo "  would write $2"; fi
+        }
+
+        """
+        s += "echo \"Config files (\(files.count))\"\n"
+        for d in files { s += "put_config \(sh(d.name)) \(sh(d.target)) \(d.kind == .ssh ? "600" : "644")\n" }
         return s
     }
 
@@ -356,6 +444,24 @@ public struct PlatformExport: Equatable, Sendable {
                 let user = share.username.map { " (as \(Self.oneLine($0)))" } ?? ""
                 return "- [ ] `\(Self.oneLine(address))`\(user)"
             }.joined(separator: "\n") + "\n\n"
+        }
+        let shells = dotfiles.filter { !$0.installs }
+        if !shells.isEmpty {
+            byHand += "### Shell config (\(shells.count))\n\n"
+            byHand += target == .windows
+                ? "These are for zsh or bash on the Mac. In the `dotfiles` folder to read; carry over aliases and settings to your PowerShell profile (or WSL) by hand.\n\n"
+                : "These were written for the Mac (Homebrew paths, macOS commands), so the script doesn't install them. They're in the `dotfiles` folder: merge what you want into yours.\n\n"
+            byHand += shells.map { "- [ ] `\($0.name)` → `~/\(Self.oneLine($0.target))`" }.joined(separator: "\n") + "\n\n"
+        }
+        let commented = dotfiles.reduce(0) { $0 + $1.commented }
+        if commented > 0 {
+            byHand += "### macOS-only config lines (\(commented))\n\n"
+            byHand += "Lines in your git or SSH config that only work on a Mac (Keychain, Homebrew or /Applications paths) are commented out in the kit's copy. Look for `# cairn: macOS only` and set them up for \(target.title).\n\n"
+        }
+        let redacted = dotfiles.reduce(0) { $0 + $1.redacted }
+        if redacted > 0 {
+            byHand += "### Left out of the backup (\(redacted))\n\n"
+            byHand += "Lines that looked like secrets (tokens, passwords) were never backed up. Look for `# cairn: removed` and add them back yourself.\n\n"
         }
         if !byHand.isEmpty { s += "## Do by hand\n\n" + byHand }
 

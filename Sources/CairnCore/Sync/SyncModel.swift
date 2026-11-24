@@ -109,15 +109,16 @@ public struct SyncValue: Codable, Equatable, Sendable {
     public var displays: DisplayLayout?
     public var wallpaper: WallpaperLayout?
     public var share: ShareItem?
+    public var dotfile: DotfileItem?
     public var secret: SensitiveRef?
     public var sealed: SealedData?
 
     public init(package: PackageItem? = nil, app: AppItem? = nil, setting: SettingItem? = nil,
                 dock: DockLayout? = nil, displays: DisplayLayout? = nil, wallpaper: WallpaperLayout? = nil,
-                share: ShareItem? = nil, secret: SensitiveRef? = nil, sealed: SealedData? = nil) {
+                share: ShareItem? = nil, dotfile: DotfileItem? = nil, secret: SensitiveRef? = nil, sealed: SealedData? = nil) {
         self.package = package; self.app = app; self.setting = setting
         self.dock = dock; self.displays = displays; self.wallpaper = wallpaper
-        self.share = share; self.secret = secret; self.sealed = sealed
+        self.share = share; self.dotfile = dotfile; self.secret = secret; self.sealed = sealed
     }
 
     /// A manifest holding just this item (include flags on), for titles and restore.
@@ -135,6 +136,7 @@ public struct SyncValue: Codable, Equatable, Sendable {
         if var d = displays { d.include = true; m.layout.displays = d }
         if var w = wallpaper { w.include = true; m.layout.wallpaper = w }
         if var s = share { s.include = true; m.shares.append(s) }
+        if var d = dotfile { d.include = true; m.dotfiles.append(d) }
         if var s = secret { s.include = true; m.sensitive.append(s) }
     }
 
@@ -144,7 +146,7 @@ public struct SyncValue: Codable, Equatable, Sendable {
         var v = self
         v.package?.include = true; v.app?.include = true; v.setting?.include = true
         v.dock?.include = true; v.displays?.include = true; v.wallpaper?.include = true
-        v.share?.include = true; v.secret?.include = true
+        v.share?.include = true; v.dotfile?.include = true; v.secret?.include = true
         return v
     }
 
@@ -291,6 +293,7 @@ public enum SyncItems {
         if let d = m.layout.displays { add(Checklist.displaysID, SyncValue(displays: d)) }
         if let w = m.layout.wallpaper { add(Checklist.wallpaperID, SyncValue(wallpaper: w)) }
         for s in m.shares { add(Checklist.id(share: s), SyncValue(share: s)) }
+        for d in m.dotfiles { add(Checklist.id(dotfile: d), SyncValue(dotfile: d)) }
         for s in m.sensitive where s.type != VPNScanner.type {
             // The ciphertext goes along when this Mac saved it in the vault.
             // (VPNs are set up again by hand, so they don't sync.)
@@ -314,6 +317,7 @@ public enum SyncItems {
         if id.hasPrefix("app:") { return .appStore }
         if id.hasPrefix("layout:") { return .lookAndLayout }
         if id.hasPrefix("share:") { return .networkShares }
+        if id.hasPrefix("dotfile:") { return .developer }
         if id.hasPrefix("sensitive:") { return .sensitive }
         return .systemSettings
     }

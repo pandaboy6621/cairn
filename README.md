@@ -46,6 +46,7 @@ set up a Windows or Linux PC.
 | ⚙️ **System settings** | Keyboard, trackpad, sound, energy, and more |
 | 🧩 **App preferences** | Allowlisted app settings, with caches, window state, IDs, and anything that looks like a token filtered out |
 | 🖥️ **Displays** | Monitor arrangement, main display, resolution, refresh rate, and mirroring, matched per monitor |
+| 💻 **Developer config** | `~/.gitconfig`, git ignore files, `~/.ssh/config`, and zsh, bash and fish startup files. Lines that look like tokens or passwords are left out, and a file holding a private key is skipped |
 | 🌐 **Network shares** | SMB, AFP, NFS, and WebDAV shares plus Finder's Connect to Server favorites (usernames only, never passwords) |
 | 🔐 **Secrets** | Wi-Fi passwords, SSH keys, credential files (GitHub CLI, npm, AWS, Docker, and more), and share passwords you choose, encrypted in your vault. VPN configurations are listed for the post-restore checklist |
 
@@ -63,8 +64,10 @@ set up a Windows or Linux PC.
 - **Dry run first, always.** Restore shows exactly what would change. Nothing is written until you
   press Apply (or pass `--apply`).
 - **In order, from the app or the CLI.** Command Line Tools, Homebrew packages (taps, formulae, casks),
-  App Store apps, secrets, settings, then the Dock and wallpaper. Press Restore in the preview, or run
+  App Store apps, secrets, settings, developer config, then the Dock and wallpaper. Press Restore in the preview, or run
   `cairn restore --from <backup> --apply`. Each item is checked afterwards against a fresh scan.
+- **Config files.** Git, SSH and shell config are written back; a file that's replaced is kept as
+  `~/.zshrc.before-cairn` (and so on), and a file that's a link from a dotfiles tool is left alone.
 - **Settings and Dock.** Settings are written back and the affected apps restarted.
   Dock icons for apps that aren't installed yet are added back automatically once the app appears.
 - **Displays.** Puts your monitors back in the same arrangement, even on a different desk.
@@ -88,7 +91,7 @@ set up a Windows or Linux PC.
 | 4 | 🔐 Encrypted vault: Wi-Fi networks, SSH keys, API tokens, share passwords, VPN list | ✅ Done |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (all steps built, Restore button in the app; VM testing) |
 | 6 | 🔄 Sync between your Macs, auto-discovered on your network | 🚧 In progress (NAS or device-to-device, pairing with codes; VM testing) |
-| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 🚧 In progress (setup kits from any backup) |
+| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 🚧 In progress (setup kits from any backup, with git and SSH config) |
 
 ### Windows and Linux
 
@@ -99,6 +102,10 @@ Cairn's manifest describes what you want, not how one OS stores it. **File → E
   mode, file extensions, hidden files). `winget.json` works with `winget import` too.
 - **Linux:** `setup.sh` installs tools with `apt` or `dnf`, apps from Flathub, and a few GNOME
   settings.
+- **Git and SSH config** (`~/.gitconfig`, `~/.ssh/config`...) go in the kit's `dotfiles` folder and the
+  script puts them in place, keeping any file it replaces as `.before-cairn`. Mac-only lines (Keychain,
+  Homebrew paths) are commented out; on Windows the Keychain credential helper becomes Git Credential
+  Manager. Shell config (`~/.zshrc`...) comes along to read, not installed: it was written for a Mac.
 - **`CHECKLIST.md`:** what to do by hand: packages with no known equivalent, App Store apps, and
   network shares (as `\\server\share` on Windows).
 

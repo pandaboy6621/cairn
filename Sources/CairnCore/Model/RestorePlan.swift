@@ -15,6 +15,8 @@ public struct RestorePlan: Equatable, Sendable {
         case appStore([AppItem])
         /// Set a setting the target lacks or holds a different value for.
         case setting(SettingItem, current: SettingValue?)
+        /// Write shell, git and SSH config files (keeping any file replaced).
+        case dotfiles([DotfileChange])
         /// Rebuild the Dock in this order.
         case dock(DockLayout, current: [String])
         /// Set these default apps (only the ones this machine doesn't have yet).
@@ -35,6 +37,7 @@ public struct RestorePlan: Equatable, Sendable {
             case .appStore: return "app store"
             case .setting(let s, _): return s.key
             case .dock: return "dock"
+            case .dotfiles: return "developer config"
             case .defaultApps: return "default apps"
             case .wallpaper: return "wallpaper"
             case .wifi: return "wi-fi"
@@ -117,6 +120,11 @@ public struct RestorePlan: Equatable, Sendable {
             steps.append(.setting(s, current: cur))
         }
 
+        let haveFiles = Dictionary(current.dotfiles.map { ($0.path, $0.content) }, uniquingKeysWith: { a, _ in a })
+        let files = backup.dotfiles.filter { $0.include && Dotfiles.isKnown($0.path) && haveFiles[$0.path] != $0.content }
+            .map { DotfileChange(item: $0, current: haveFiles[$0.path]) }
+        if !files.isEmpty { steps.append(.dotfiles(files)) }
+
         if let dock = backup.layout.dock, dock.include, dock.apps != (current.layout.dock?.apps ?? []) {
             steps.append(.dock(dock, current: current.layout.dock?.apps ?? []))
         }
@@ -198,6 +206,9 @@ public struct RestorePlan: Equatable, Sendable {
             case .secrets(let items):
                 out += "secrets (\(items.count) to restore)\n"
                 for i in items { out += "  + \(i.summary)\n" }
+            case .dotfiles(let files):
+                out += "developer config (\(files.count) file\(files.count == 1 ? "" : "s") to write)\n"
+                for f in files { out += "  \(f.current == nil ? "+" : "~") \(f.summary)\n" }
             case .wallpaper(let w, let c):
                 out += "wallpaper\n"
                 for p in w.pictures {
@@ -274,6 +285,8 @@ public struct RestoreReport: Equatable, Sendable {
         case wifi([String])
         /// SSH keys written and share passwords saved, by title, each read back.
         case secrets([String])
+        /// Config files written, by path (`~/.zshrc`).
+        case dotfiles([String])
         /// Package uids that `brew` reported installed.
         case packages([String])
         /// App Store ids that `mas` reported installed.
@@ -374,6 +387,13 @@ public enum RestoreVerification {
                 return missing.isEmpty
                     ? Result(id: e.step.id, status: .verified, detail: "\(want.count) installed" + note)
                     : Result(id: e.step.id, status: .mismatch, detail: "not found after install: " + missing.prefix(5).joined(separator: ", "))
+            case .dotfiles(let paths)?:
+                guard case .dotfiles(let changes) = e.step else { return Result(id: e.step.id, status: .skipped, detail: "nothing written") }
+                let got = Dictionary(after.dotfiles.map { ($0.path, $0.content) }, uniquingKeysWith: { a, _ in a })
+                let wrong = changes.filter { paths.contains($0.item.path) && got[$0.item.path] != $0.item.content }.map(\.item.path)
+                return wrong.isEmpty
+                    ? Result(id: e.step.id, status: .verified, detail: "\(paths.count) file\(paths.count == 1 ? "" : "s") match the backup" + note)
+                    : Result(id: e.step.id, status: .mismatch, detail: "differ after restore: " + wrong.joined(separator: ", "))
             case .appStore(let want)?:
                 let got = Set(after.apps.map(\.id))
                 let missing = want.filter { !got.contains($0) }

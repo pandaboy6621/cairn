@@ -271,6 +271,7 @@ final class RestoreRun {
         case .packages: return "Installing packages"
         case .appStore: return "App Store apps"
         case .setting, .defaultApps: return "Writing settings"
+        case .dotfiles: return "Developer config"
         case .dock, .wallpaper: return "Dock and wallpaper"
         case .wifi, .secrets: return "Restoring secrets"
         case .pending: return nil
@@ -289,6 +290,7 @@ final class RestoreRun {
         case .wallpaper: return "Setting the wallpaper"
         case .wifi(let n): return "Saving \(n.count) Wi-Fi network\(n.count == 1 ? "" : "s")"
         case .secrets(let s): return "Restoring \(s.count) secret\(s.count == 1 ? "" : "s")"
+        case .dotfiles(let f): return "Writing \(f.count) config file\(f.count == 1 ? "" : "s")"
         case .pending(let category, let id, _): return "Noting \(category) \(id) for later"
         }
     }

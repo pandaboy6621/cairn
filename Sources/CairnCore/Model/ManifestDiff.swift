@@ -52,6 +52,14 @@ public struct ManifestDiff: Equatable, Sendable {
                 if a.include != b.include { parts.append(Change(id: "\(a.url) include", from: "\(a.include)", to: "\(b.include)")) }
                 return parts
             },
+            keyed("dotfiles", old.dotfiles, new.dotfiles, id: \.path) { a, b in
+                var parts: [Change] = []
+                if a.content != b.content {
+                    parts.append(Change(id: a.path, from: "\(a.lineCount) lines", to: Dotfiles.describeChange(from: a.content, to: b.content)))
+                }
+                if a.include != b.include { parts.append(Change(id: "\(a.path) include", from: "\(a.include)", to: "\(b.include)")) }
+                return parts
+            },
             keyed("sensitive", old.sensitive, new.sensitive, id: \.ref) { a, b in
                 a.include != b.include ? [Change(id: "\(a.ref) include", from: "\(a.include)", to: "\(b.include)")] : []
             },

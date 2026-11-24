@@ -8,6 +8,8 @@ public enum ManifestCoder {
         let encoder = YAMLEncoder()
         encoder.options.sortKeys = true
         encoder.options.width = -1 // never wrap long strings
+        // Multi-line text (config files) as | blocks, so snapshot diffs show changed lines.
+        encoder.options.newLineScalarStyle = .literal
         return try encoder.encode(manifest.normalized())
     }
 

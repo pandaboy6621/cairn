@@ -1,0 +1,42 @@
+import Foundation
+
+/// Reads the shell, git and SSH config files in `Dotfiles.known`. Read-only.
+/// Lines that look like secrets are left out; a file holding a private key is
+/// skipped entirely (keys belong in the Sensitive tier).
+public struct DotfilesScanner: SetupScanning {
+    public var home: String
+
+    public init(home: String = NSHomeDirectory()) { self.home = home }
+
+    public func scan(using runner: CommandRunner) throws -> ScanContribution {
+        var c = ScanContribution()
+        for (path, kind) in Dotfiles.known {
+            let full = home + "/" + path.dropFirst(2)
+            // Follows links: dotfile managers keep the real file elsewhere.
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: full, isDirectory: &isDir), !isDir.boolValue else { continue }
+            guard let data = FileManager.default.contents(atPath: full) else {
+                c.warnings.append("\(path): couldn't read it")
+                continue
+            }
+            guard data.count <= Dotfiles.maxBytes else {
+                c.warnings.append("\(path): skipped, larger than \(Dotfiles.maxBytes / 1024) KB")
+                continue
+            }
+            guard !data.contains(0), let text = String(data: data, encoding: .utf8) else {
+                c.warnings.append("\(path): skipped, not a text file")
+                continue
+            }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            guard let safe = Dotfiles.redact(text) else {
+                c.warnings.append("\(path): skipped, it holds a private key")
+                continue
+            }
+            if safe.removed > 0 {
+                c.warnings.append("\(path): left out \(safe.removed) line\(safe.removed == 1 ? "" : "s") that looked like a secret")
+            }
+            c.dotfiles.append(DotfileItem(path: path, kind: kind, content: safe.text, redacted: safe.removed))
+        }
+        return c
+    }
+}

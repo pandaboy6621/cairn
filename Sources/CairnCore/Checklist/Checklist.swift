@@ -38,7 +38,7 @@ public enum ChecklistCategory: String, CaseIterable, Identifiable, Sendable {
     /// Categories with no scanner yet. They show as "not scanned yet".
     public var isScanned: Bool {
         switch self {
-        case .developer, .fonts, .sensitive: return false
+        case .fonts, .sensitive: return false
         default: return true
         }
     }
@@ -196,6 +196,7 @@ public struct Checklist: Sendable {
             m.layout.displays = nil
         }
         m.shares = source.shares.filter { checked.contains(Self.id(share: $0)) }.map { var s = $0; s.include = true; return s }
+        m.dotfiles = source.dotfiles.filter { checked.contains(Self.id(dotfile: $0)) }.map { var d = $0; d.include = true; return d }
         m.sensitive = sensitiveUnlocked ? source.sensitive.filter { checked.contains(Self.id(sensitive: $0)) } : []
         return m
     }
@@ -211,6 +212,7 @@ public struct Checklist: Sendable {
     static func id(sensitive s: SensitiveRef) -> String { "sensitive:\(s.ref)" }
     public static func ref(sensitiveID id: String) -> String { String(id.dropFirst("sensitive:".count)) }
     static func id(share s: ShareItem) -> String { "share:\(s.url)" }
+    static func id(dotfile d: DotfileItem) -> String { "dotfile:\(d.path)" }
 
     static func buildItems(_ m: Manifest) -> [ChecklistItem] {
         var out: [ChecklistItem] = []
@@ -258,6 +260,15 @@ public struct Checklist: Sendable {
             let user = s.username.map { "as \($0)" } ?? ""
             out.append(ChecklistItem(id: id(share: s), category: .networkShares, group: group,
                                      title: s.url, detail: user, isChecked: s.include))
+        }
+        for kind in DotfileItem.Kind.allCases {
+            for d in m.dotfiles where d.kind == kind {
+                let n = d.lineCount
+                var detail = "\(n) line\(n == 1 ? "" : "s")"
+                if d.redacted > 0 { detail += " · \(d.redacted) secret-looking line\(d.redacted == 1 ? "" : "s") left out" }
+                out.append(ChecklistItem(id: id(dotfile: d), category: .developer, group: kind.title,
+                                         title: d.path, detail: detail, isChecked: d.include))
+            }
         }
         for s in m.sensitive {
             let groups = [WiFiPasswords.type: "Wi-Fi networks", SSHKeyScanner.type: "SSH keys",

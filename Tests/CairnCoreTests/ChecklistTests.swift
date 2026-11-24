@@ -15,7 +15,7 @@ import Testing
         let c = makeChecklist()
         #expect(c.count(in: .packages) == (7, 7))
         #expect(c.count(in: .appStore) == (3, 3))
-        #expect(c.count(in: .developer).total == 0)
+        #expect(c.count(in: .developer) == (1, 1)) // the fixture home's ~/.ssh/config
         #expect(c.count(in: .fonts).total == 0)
         #expect(c.count(in: .sensitive) == (0, 1))
         // Every setting, the dock layout and the display layout land in exactly one category.
