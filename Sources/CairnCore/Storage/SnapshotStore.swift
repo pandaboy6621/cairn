@@ -64,7 +64,7 @@ public struct SnapshotStore: Sendable {
 
     public var snapshotsURL: URL { root.appendingPathComponent("snapshots", isDirectory: true) }
 
-    /// `Aidan's MBP` → `Aidan-s-MBP`: safe as a folder name on any share.
+    /// `Sam's MBP` → `Sam-s-MBP`: safe as a folder name on any share.
     public static func folderName(device: String) -> String {
         String(device.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." ? $0 : "-" })
     }

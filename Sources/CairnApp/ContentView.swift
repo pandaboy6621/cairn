@@ -235,8 +235,14 @@ struct ActivityRing: View {
 
 /// Facts about this Mac for display (UI only; the manifest keeps its own device record).
 enum DeviceInfo {
-    /// The name from System Settings > General > Sharing, e.g. "Aidan's MacBook Pro".
-    static let friendlyName = Host.current().localizedName ?? "This Mac"
+    /// The name from System Settings > General > Sharing, e.g. "Sam's MacBook Pro".
+    static let friendlyName: String = {
+        #if DEBUG
+        // Screenshots for the README use a made-up name, not the real Mac's.
+        if let name = ProcessInfo.processInfo.environment["CAIRN_SNAPSHOT_DEVICE_NAME"] { return name }
+        #endif
+        return Host.current().localizedName ?? "This Mac"
+    }()
 
     /// The system's own picture of this Mac model.
     static let icon: NSImage = NSImage(named: NSImage.computerName) ?? NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")

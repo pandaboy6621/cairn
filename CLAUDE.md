@@ -23,7 +23,7 @@ YAML, versioned (`schema: 1`). Describes intent, not OS artifacts.
 
 ```yaml
 schema: 1
-device: { name: "aidans-mbp", os: macos, os_version: "14.5" }
+device: { name: "studio-mac", os: macos, os_version: "14.5" }
 created: 2026-11-21T10:00:00Z
 packages:
   - id: vlc                    # canonical id

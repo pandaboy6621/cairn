@@ -14,6 +14,7 @@ import CairnCore
 /// `CAIRN_SNAPSHOT_RESTORE=<unlock|wrong|unlocked|skip|running|finished>` shows that
 /// restore sheet state with made-up data (use with `CAIRN_SNAPSHOT_PREVIEW`).
 /// `CAIRN_SNAPSHOT_SYNC=<request|pairing|paired|add|folder|offline>` shows a pairing sheet with made-up data.
+/// `CAIRN_SNAPSHOT_DEVICE_NAME=<name>` shows that name for this Mac (for README screenshots).
 /// `CAIRN_SNAPSHOT_SCALE=2` renders at 2x even on a non-Retina display.
 enum DebugSnapshot {
     @MainActor
@@ -58,6 +59,12 @@ enum DebugSnapshot {
         }
         if let state = env["CAIRN_SNAPSHOT_RESTORE"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.75) { AppModel.current?.restore.debugShow(state) }
+        }
+        // Bring the window forward first, so it renders active (colored buttons)
+        // even if another app took focus during the scan.
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay * 0.9) {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first(where: { $0.isVisible && $0.frame.height > 100 })?.makeKeyAndOrderFront(nil)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let main = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.frame.height > 100 })

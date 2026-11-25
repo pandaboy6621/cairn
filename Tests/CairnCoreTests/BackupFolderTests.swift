@@ -33,8 +33,8 @@ import Testing
     }
 
     @Test func fileNamesAreSafeAndSortable() {
-        let name = BackupFolder.fileName(device: "aidan's mbp", date: Date(timeIntervalSince1970: 0))
-        #expect(name.hasPrefix("cairn-aidan-s-mbp-19"))
+        let name = BackupFolder.fileName(device: "sam's mbp", date: Date(timeIntervalSince1970: 0))
+        #expect(name.hasPrefix("cairn-sam-s-mbp-19"))
         #expect(name.hasSuffix(".yaml"))
         #expect(!name.contains(" ") && !name.contains("'"))
     }
