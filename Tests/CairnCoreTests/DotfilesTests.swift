@@ -127,9 +127,12 @@ import Testing
         let new = DotfileItem(path: "~/.ssh/config", kind: .ssh, content: "Host a\n")
         let unknown = DotfileItem(path: "~/.evil", kind: .shell, content: "rm -rf ~\n")
         let off = DotfileItem(path: "~/.bashrc", kind: .shell, content: "z\n", include: false)
-        let plan = RestorePlan.make(backup: Self.manifest([same, changed, new, unknown, off]),
-                                    current: Self.manifest([same, DotfileItem(path: "~/.zshrc", kind: .shell, content: "a\n")]))
-        guard case .dotfiles(let files)? = plan.steps.first else { Issue.record("no dotfiles step"); return }
+        let linked = DotfileItem(path: "~/.zprofile", kind: .shell, content: "new\n")
+        let plan = RestorePlan.make(backup: Self.manifest([same, changed, new, unknown, off, linked]),
+                                    current: Self.manifest([same, DotfileItem(path: "~/.zshrc", kind: .shell, content: "a\n"),
+                                                            DotfileItem(path: "~/.zprofile", kind: .shell, content: "old\n", link: true)]))
+        #expect(plan.pending.map(\.id) == ["developer:~/.zprofile"])
+        guard case .dotfiles(let files)? = plan.steps.first(where: { $0.id == "developer config" }) else { Issue.record("no dotfiles step"); return }
         #expect(files.map(\.item.path) == ["~/.zshrc", "~/.ssh/config"])
         let text = plan.render()
         #expect(text.contains("developer config (2 files to write)"))
@@ -171,6 +174,9 @@ import Testing
 
         // A rescan reads back what was written.
         let after = Self.manifest(try DotfilesScanner(home: home).scan(using: FixtureRunner()).dotfiles)
+        #expect(after.dotfiles.first { $0.path == "~/.bashrc" }?.isLink == true)
+        #expect(after.dotfiles.first { $0.path == "~/.zshrc" }?.link == nil)
+        #expect(report.manualSteps.contains { $0.text.contains("1 line that looked like a secret wasn't backed up; add it back") })
         let checks = RestoreVerification.check(report, after: after)
         #expect(checks.first?.status == .verified)
     }

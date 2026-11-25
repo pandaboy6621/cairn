@@ -322,6 +322,10 @@ struct Snapshots: ParsableCommand {
 
     /// A manifest path, or a snapshot id in the app's backup folder.
     static func resolve(_ from: String) throws -> URL {
+        // An empty id would match every snapshot by prefix and pick the newest.
+        guard !from.trimmingCharacters(in: .whitespaces).isEmpty else {
+            throw ValidationError("--from needs a backup file or a snapshot id (see `cairn snapshots --all`).")
+        }
         let path = (from as NSString).expandingTildeInPath
         if FileManager.default.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
         if let s = SnapshotStore(root: appBackupFolder()).find(from) { return s.manifestURL }

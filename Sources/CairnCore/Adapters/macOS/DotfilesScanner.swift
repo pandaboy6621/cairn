@@ -35,7 +35,8 @@ public struct DotfilesScanner: SetupScanning {
             if safe.removed > 0 {
                 c.warnings.append("\(path): left out \(safe.removed) line\(safe.removed == 1 ? "" : "s") that looked like a secret")
             }
-            c.dotfiles.append(DotfileItem(path: path, kind: kind, content: safe.text, redacted: safe.removed))
+            let isLink = (try? FileManager.default.destinationOfSymbolicLink(atPath: full)) != nil
+            c.dotfiles.append(DotfileItem(path: path, kind: kind, content: safe.text, redacted: safe.removed, link: isLink))
         }
         return c
     }

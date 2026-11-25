@@ -120,9 +120,17 @@ public struct RestorePlan: Equatable, Sendable {
             steps.append(.setting(s, current: cur))
         }
 
-        let haveFiles = Dictionary(current.dotfiles.map { ($0.path, $0.content) }, uniquingKeysWith: { a, _ in a })
-        let files = backup.dotfiles.filter { $0.include && Dotfiles.isKnown($0.path) && haveFiles[$0.path] != $0.content }
-            .map { DotfileChange(item: $0, current: haveFiles[$0.path]) }
+        let haveFiles = Dictionary(current.dotfiles.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        var files: [DotfileChange] = []
+        for d in backup.dotfiles where d.include && Dotfiles.isKnown(d.path) && haveFiles[d.path]?.content != d.content {
+            if haveFiles[d.path]?.isLink == true {
+                // Restore never replaces a link; the tool that manages it should update it.
+                steps.append(.pending(category: "developer", id: d.path,
+                                      reason: "it's a link (a dotfiles tool may manage it), so restore leaves it alone; update it with that tool"))
+            } else {
+                files.append(DotfileChange(item: d, current: haveFiles[d.path]?.content))
+            }
+        }
         if !files.isEmpty { steps.append(.dotfiles(files)) }
 
         if let dock = backup.layout.dock, dock.include, dock.apps != (current.layout.dock?.apps ?? []) {

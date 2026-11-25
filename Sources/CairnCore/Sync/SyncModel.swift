@@ -146,7 +146,7 @@ public struct SyncValue: Codable, Equatable, Sendable {
         var v = self
         v.package?.include = true; v.app?.include = true; v.setting?.include = true
         v.dock?.include = true; v.displays?.include = true; v.wallpaper?.include = true
-        v.share?.include = true; v.dotfile?.include = true; v.secret?.include = true
+        v.share?.include = true; v.dotfile?.include = true; v.dotfile?.link = nil; v.secret?.include = true
         return v
     }
 

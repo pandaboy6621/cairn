@@ -328,7 +328,9 @@ public struct MacRestorer: Sendable {
                         }
                         if c.item.redacted > 0 {
                             report.manualSteps.append(.init(category: "developer",
-                                text: "\(path): \(c.item.redacted) line\(c.item.redacted == 1 ? "" : "s") that looked like secrets weren't backed up; add them back by hand (look for \"# cairn: removed\")"))
+                                text: c.item.redacted == 1
+                                    ? "\(path): 1 line that looked like a secret wasn't backed up; add it back by hand (look for \"# cairn: removed\")"
+                                    : "\(path): \(c.item.redacted) lines that looked like secrets weren't backed up; add them back by hand (look for \"# cairn: removed\")"))
                         }
                     } catch {
                         notes.append("\(path): \(error)")

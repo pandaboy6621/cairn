@@ -24,15 +24,21 @@ public struct DotfileItem: Codable, Equatable, Sendable {
     public var content: String
     /// How many lines were left out because they looked like secrets.
     public var redacted: Int
+    /// The file is a symbolic link on the scanned Mac (a dotfiles tool such as
+    /// stow or chezmoi manages it). Restore leaves links alone. Nil when not.
+    public var link: Bool?
     public var include: Bool
 
-    public init(path: String, kind: Kind, content: String, redacted: Int = 0, include: Bool = true) {
+    public init(path: String, kind: Kind, content: String, redacted: Int = 0, link: Bool = false, include: Bool = true) {
         self.path = path
         self.kind = kind
         self.content = content
         self.redacted = redacted
+        self.link = link ? true : nil
         self.include = include
     }
+
+    public var isLink: Bool { link == true }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -40,6 +46,7 @@ public struct DotfileItem: Codable, Equatable, Sendable {
         kind = try c.decode(Kind.self, forKey: .kind)
         content = try c.decode(String.self, forKey: .content)
         redacted = try c.decodeIfPresent(Int.self, forKey: .redacted) ?? 0
+        link = try c.decodeIfPresent(Bool.self, forKey: .link) == true ? true : nil
         include = try c.decodeIfPresent(Bool.self, forKey: .include) ?? true
     }
 
