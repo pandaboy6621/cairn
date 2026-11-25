@@ -25,6 +25,9 @@ public enum PortableSettings {
     static let personalize = #"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"#
     static let touchpad = "org.gnome.desktop.peripherals.touchpad"
     static let interface = "org.gnome.desktop.interface"
+    static let keyboard = "org.gnome.desktop.peripherals.keyboard"
+    /// Ubuntu's dock. `setup.sh` skips it where it isn't installed.
+    static let dashToDock = "org.gnome.shell.extensions.dash-to-dock"
 
     public static func windows(_ s: SettingItem) -> [RegistryWrite] {
         switch s.key {
@@ -41,6 +44,11 @@ public enum PortableSettings {
         case "menubar.clock_show_seconds":
             guard let b = bool(s.value) else { return [] }
             return [RegistryWrite(path: explorer, name: "ShowSecondsInSystemClock", dword: b ? 1 : 0, restartsExplorer: true)]
+        case "appearance.show_scroll_bars":
+            // Windows can only choose between always and hiding them when not in use.
+            guard case .string(let v) = s.value, v == "Always" || v == "WhenScrolling" else { return [] }
+            return [RegistryWrite(path: #"Control Panel\Accessibility"#, name: "DynamicScrollbars",
+                                  dword: v == "Always" ? 0 : 1, restartsExplorer: false)]
         default:
             return []
         }
@@ -67,6 +75,27 @@ public enum PortableSettings {
         case "menubar.clock_show_day_of_week":
             guard let b = bool(s.value) else { return [] }
             return [GSettingsWrite(schema: interface, key: "clock-show-weekday", value: String(b))]
+        case "menubar.clock_show_date":
+            // macOS: 0 when space allows, 1 always, 2 never.
+            guard case .int(let i) = s.value, (0...2).contains(i) else { return [] }
+            return [GSettingsWrite(schema: interface, key: "clock-show-date", value: String(i != 2))]
+        case "appearance.show_scroll_bars":
+            guard case .string(let v) = s.value, v == "Always" || v == "WhenScrolling" else { return [] }
+            return [GSettingsWrite(schema: interface, key: "overlay-scrolling", value: String(v == "WhenScrolling"))]
+        case "keyboard.key_repeat", "keyboard.initial_key_repeat":
+            // macOS counts in 15 ms steps; GNOME takes milliseconds.
+            guard let steps = int(s.value), (1...300).contains(steps) else { return [] }
+            let key = s.key == "keyboard.key_repeat" ? "repeat-interval" : "delay"
+            return [GSettingsWrite(schema: keyboard, key: key, value: "uint32 \(steps * 15)")]
+        case "sound.ui_sounds":
+            guard let b = bool(s.value) else { return [] }
+            return [GSettingsWrite(schema: "org.gnome.desktop.sound", key: "event-sounds", value: String(b))]
+        case "dock.autohide":
+            guard let b = bool(s.value) else { return [] }
+            return [GSettingsWrite(schema: dashToDock, key: "dock-fixed", value: String(!b))]
+        case "dock.position":
+            guard case .string(let v) = s.value, ["left", "bottom", "right"].contains(v) else { return [] }
+            return [GSettingsWrite(schema: dashToDock, key: "dock-position", value: "'\(v.uppercased())'")]
         default:
             return []
         }
@@ -75,6 +104,14 @@ public enum PortableSettings {
     static func isDark(_ v: SettingValue) -> Bool {
         if case .string(let s) = v { return s.lowercased() == "dark" }
         return false
+    }
+
+    static func int(_ v: SettingValue) -> Int? {
+        switch v {
+        case .int(let i): return i
+        case .double(let d) where d == d.rounded(): return Int(d)
+        default: return nil
+        }
     }
 
     /// `defaults` stores many switches as 0/1 integers.

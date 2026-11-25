@@ -47,9 +47,29 @@ import Testing
         #expect(e.apt.map(\.id) == ["git", "nodejs"])
         #expect(e.dnf.map(\.id) == ["git", "nodejs"])
         #expect(e.flatpak.map(\.id) == ["org.videolan.VLC"])
-        #expect(e.gsettings.map(\.key) == ["color-scheme", "natural-scroll"])
-        #expect(e.gsettings.last?.value == "false")
+        #expect(e.gsettings.map(\.key) == ["color-scheme", "natural-scroll", "dock-fixed"])
+        #expect(e.gsettings[1].value == "false" && e.gsettings[2].value == "false")
         #expect(e.packageCount == 3) // node and node@22 are one install
+    }
+
+    @Test func moreSettingsCarryOver() {
+        func item(_ key: String, _ v: SettingValue) -> SettingItem {
+            SettingItem(key: key, value: v, platforms: ["macos"], adapter: SettingAdapters())
+        }
+        let linux = { (s: SettingItem) in PortableSettings.linux(s).map { "\($0.key)=\($0.value)" } }
+        #expect(linux(item("keyboard.key_repeat", .int(2))) == ["repeat-interval=uint32 30"])
+        #expect(linux(item("keyboard.initial_key_repeat", .int(15))) == ["delay=uint32 225"])
+        #expect(linux(item("keyboard.key_repeat", .int(0))).isEmpty)
+        #expect(linux(item("menubar.clock_show_date", .int(0))) == ["clock-show-date=true"])
+        #expect(linux(item("menubar.clock_show_date", .int(2))) == ["clock-show-date=false"])
+        #expect(linux(item("appearance.show_scroll_bars", .string("Always"))) == ["overlay-scrolling=false"])
+        #expect(linux(item("appearance.show_scroll_bars", .string("Automatic"))).isEmpty)
+        #expect(linux(item("sound.ui_sounds", .int(0))) == ["event-sounds=false"])
+        #expect(linux(item("dock.position", .string("left"))) == ["dock-position='LEFT'"])
+        #expect(linux(item("dock.position", .string("'; rm -rf ~"))).isEmpty)
+        let win = PortableSettings.windows(item("appearance.show_scroll_bars", .string("Always")))
+        #expect(win.map(\.name) == ["DynamicScrollbars"] && win[0].dword == 0)
+        #expect(win[0].path == #"Control Panel\Accessibility"#)
     }
 
     @Test func manifestResolversWinAndBadIdsAreDropped() {

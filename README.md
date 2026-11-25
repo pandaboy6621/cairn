@@ -99,9 +99,10 @@ Cairn's manifest describes what you want, not how one OS stores it. **File → E
 (or Linux, or `cairn export windows|linux`) turns a backup into a setup kit for a PC:
 
 - **Windows:** `setup.ps1` installs packages with `winget` and sets a few matching settings (dark
-  mode, file extensions, hidden files). `winget.json` works with `winget import` too.
-- **Linux:** `setup.sh` installs tools with `apt` or `dnf`, apps from Flathub, and a few GNOME
-  settings.
+  mode, file extensions, hidden files, clock seconds, always-visible scroll bars). `winget.json` works with `winget import` too.
+- **Linux:** `setup.sh` installs tools with `apt` or `dnf`, apps from Flathub, and the GNOME
+  settings that match yours: dark style, hidden files, touchpad scrolling and tapping, key repeat
+  speed and delay, clock, scroll bars, interface sounds, and (on Ubuntu) Dock position and auto-hide.
 - **Git and SSH config** (`~/.gitconfig`, `~/.ssh/config`...) go in the kit's `dotfiles` folder and the
   script puts them in place, keeping any file it replaces as `.before-cairn`. Mac-only lines (Keychain,
   Homebrew paths) are commented out; on Windows the Keychain credential helper becomes Git Credential
