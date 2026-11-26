@@ -26,11 +26,11 @@ hand; see `Tests/CairnCoreTests/WindowsCatalogTests.swift`.
 
 ## Build
 
-Needs the .NET 8 SDK.
+Needs the .NET 8 SDK (`global.json` pins it). From this folder:
 
 ```
-dotnet test windows/Cairn.Core.Tests
-dotnet publish windows/Cairn.App/Cairn.App.csproj -c Release -r win-x64 -p:Platform=x64 -o publish/Cairn
+dotnet test Cairn.Core.Tests
+dotnet publish Cairn.App/Cairn.App.csproj -c Release -r win-x64 -p:Platform=x64 -o ../publish/Cairn
 ```
 
 The core and its tests also build on a Mac or Linux. GitHub Actions
