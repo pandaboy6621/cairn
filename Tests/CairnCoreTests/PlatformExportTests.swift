@@ -124,9 +124,10 @@ import Testing
 
     /// Runs the Linux kit's `setup.sh` with stand-in Ubuntu tools on PATH and a
     /// throwaway home folder. Returns what it printed and what `sudo` was asked to do.
-    static func runLinuxKit(_ args: [String]) throws -> (out: String, sudo: String, home: URL) {
+    static func runLinuxKit(_ args: [String], tools extra: [String: String] = [:]) throws -> (out: String, sudo: String, home: URL) {
         var m = manifest()
         m.packages.append(PackageItem(id: "ghost", kind: .formula, resolvers: ["brew": "ghost", "apt": "ghost"]))
+        m.packages.append(PackageItem(id: "uv", kind: .formula, resolvers: ["brew": "uv"]))
         m.dotfiles = [DotfileItem(path: "~/.gitconfig", kind: .git, content: "[user]\n\tname = Test\n")]
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let bin = dir.appendingPathComponent("bin"), home = dir.appendingPathComponent("home")
@@ -148,7 +149,7 @@ import Testing
             esac
             """#,
         ]
-        for (name, body) in tools {
+        for (name, body) in tools.merging(extra, uniquingKeysWith: { $1 }) {
             let url = bin.appendingPathComponent(name)
             try ("#!/bin/bash\n" + body + "\n").write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
@@ -169,7 +170,8 @@ import Testing
         #expect(r.out.contains("git is already installed"))
         #expect(r.out.contains("would install nodejs"))
         #expect(r.out.contains("ghost isn't in apt here"))
-        #expect(r.out.contains("Not available here, install another way: ghost"))
+        #expect(r.out.contains("uv isn't in apt here (try: pipx install uv)"))
+        #expect(r.out.contains("Not available here, install another way: ghost uv"))
         #expect(r.out.contains("would install flatpak first"))
         #expect(r.out.contains("would install org.videolan.VLC"))
         #expect(r.out.contains("would change color-scheme from 'default' to 'prefer-dark'"))
@@ -190,5 +192,30 @@ import Testing
         #expect(r.out.contains("wrote .gitconfig"))
         let written = try String(contentsOf: r.home.appendingPathComponent(".gitconfig"), encoding: .utf8)
         #expect(written.contains("name = Test"))
+    }
+
+    @Test func linuxSkipsFlathubAppsInstalledAnotherWay() throws {
+        // Ubuntu's Firefox is a snap: `snap list firefox` succeeds, so no second copy.
+        let snap = #"[ "$1 $2" = "list vlc" ]"#
+        let r = try Self.runLinuxKit(["--apply"], tools: ["snap": snap, "flatpak": "exit 1"])
+        #expect(r.out.contains("vlc is already installed (not from Flathub), so skipping org.videolan.VLC"))
+        #expect(!r.out.contains("installing org.videolan.VLC"))
+        #expect(PackageCatalog.command(forFlatpak: "org.mozilla.firefox") == "firefox")
+        #expect(PackageCatalog.command(forFlatpak: "com.obsproject.Studio") == "obs")
+    }
+
+    @Test func linuxChecklistSaysHowToGetWhatAptLacks() {
+        var m = Self.manifest()
+        m.packages += [
+            PackageItem(id: "uv", kind: .formula, resolvers: ["brew": "uv"]),
+            PackageItem(id: "ollama", kind: .formula, resolvers: ["brew": "ollama"]),
+            PackageItem(id: "python-tk@3.13", kind: .formula, resolvers: ["brew": "python-tk@3.13"]),
+        ]
+        let e = PlatformExport.make(m, for: .linux)
+        #expect(e.apt.map(\.id).contains("python3-tk"))
+        let text = e.files()["CHECKLIST.md"]!
+        #expect(text.contains("- [ ] uv: not in apt (Debian, Ubuntu). Try `pipx install uv`"))
+        #expect(text.contains("- [ ] ollama: try the installer at ollama.com/download"))
+        #expect(PlatformExport.make(m, for: .windows).hints.isEmpty)
     }
 }

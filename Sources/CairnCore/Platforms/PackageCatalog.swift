@@ -6,12 +6,16 @@ public struct PackageNames: Equatable, Sendable {
     public var apt: String?
     public var dnf: String?
     public var flatpak: String?
+    /// How to get it on Linux when apt or dnf doesn't have it, e.g. `pipx install uv`.
+    public var linuxHint: String?
 
-    public init(winget: String? = nil, apt: String? = nil, dnf: String? = nil, flatpak: String? = nil) {
+    public init(winget: String? = nil, apt: String? = nil, dnf: String? = nil, flatpak: String? = nil,
+                linuxHint: String? = nil) {
         self.winget = winget
         self.apt = apt
         self.dnf = dnf
         self.flatpak = flatpak
+        self.linuxHint = linuxHint
     }
 
     public var isEmpty: Bool { winget == nil && apt == nil && dnf == nil && flatpak == nil }
@@ -54,6 +58,25 @@ public enum PackageCatalog {
         id.split(separator: "@").first.map(String.init) ?? id
     }
 
+    /// The command a Flathub app usually has when installed another way (Ubuntu's
+    /// Firefox snap, a distro LibreOffice), so `setup.sh` doesn't add a second copy.
+    /// Mostly the id's last part, lowercased.
+    public static func command(forFlatpak id: String) -> String {
+        if let c = flatpakCommands[id] { return c }
+        return id.split(separator: ".").last.map { $0.lowercased() } ?? id
+    }
+
+    static let flatpakCommands: [String: String] = [
+        "com.bambulab.BambuStudio": "bambu-studio", "com.bitwarden.desktop": "bitwarden",
+        "com.brave.Browser": "brave-browser", "com.google.AndroidStudio": "android-studio",
+        "com.google.Chrome": "google-chrome", "com.jgraph.drawio.desktop": "drawio",
+        "com.mojang.Minecraft": "minecraft-launcher", "com.obsproject.Studio": "obs",
+        "com.prusa3d.PrusaSlicer": "prusa-slicer", "com.spotify.Client": "spotify",
+        "com.sublimetext.three": "subl", "com.transmissionbt.Transmission": "transmission-gtk",
+        "com.visualstudio.code": "code", "fr.handbrake.ghb": "ghb", "org.signal.Signal": "signal-desktop",
+        "org.telegram.desktop": "telegram-desktop", "com.github.qarmin.czkawka": "czkawka_gui",
+    ]
+
     static let macOnly: Set<String> = [
         // Formulae
         "mas", "displayplacer", "sleepwatcher", "media-control", "dockutil", "duti", "blueutil",
@@ -71,7 +94,7 @@ public enum PackageCatalog {
     /// Command-line tools, by Homebrew formula name.
     static let formulae: [String: PackageNames] = [
         "7zip": .init(winget: "7zip.7zip", apt: "7zip", dnf: "7zip"),
-        "p7zip": .init(winget: "7zip.7zip", apt: "p7zip-full", dnf: "7zip"),
+        "p7zip": .init(winget: "7zip.7zip", apt: "7zip", dnf: "7zip"),
         "android-platform-tools": .init(winget: "Google.PlatformTools", apt: "android-sdk-platform-tools", dnf: "android-tools"),
         "awscli": .init(winget: "Amazon.AWSCLI", apt: "awscli", dnf: "awscli2"),
         "bat": .init(winget: "sharkdp.bat", apt: "bat", dnf: "bat"),
@@ -89,23 +112,31 @@ public enum PackageCatalog {
         "git-lfs": .init(winget: "GitHub.GitLFS", apt: "git-lfs", dnf: "git-lfs"),
         "gnupg": .init(winget: "GnuPG.GnuPG", apt: "gnupg", dnf: "gnupg2"),
         "go": .init(winget: "GoLang.Go", apt: "golang-go", dnf: "golang"),
-        "helm": .init(winget: "Helm.Helm", dnf: "helm"),
+        "helm": .init(winget: "Helm.Helm", dnf: "helm", linuxHint: "sudo snap install helm --classic"),
         "htop": .init(apt: "htop", dnf: "htop"),
+        "hugo": .init(apt: "hugo", dnf: "hugo"),
+        "ideviceinstaller": .init(apt: "ideviceinstaller", dnf: "ideviceinstaller"),
         "imagemagick": .init(winget: "ImageMagick.ImageMagick", apt: "imagemagick", dnf: "ImageMagick"),
         "iperf3": .init(apt: "iperf3", dnf: "iperf3"),
         "jq": .init(winget: "jqlang.jq", apt: "jq", dnf: "jq"),
-        "kubernetes-cli": .init(winget: "Kubernetes.kubectl"),
+        "kubernetes-cli": .init(winget: "Kubernetes.kubectl", linuxHint: "sudo snap install kubectl --classic"),
         "lazygit": .init(winget: "JesseDuffield.lazygit"),
+        "libaacs": .init(apt: "libaacs0"),
+        "libavif": .init(apt: "libavif-bin", dnf: "libavif-tools"),
+        "libraw": .init(apt: "libraw-bin", dnf: "LibRaw"),
         "mkvtoolnix": .init(winget: "MoritzBunkus.MKVToolNix", apt: "mkvtoolnix", dnf: "mkvtoolnix"),
         "neovim": .init(winget: "Neovim.Neovim", apt: "neovim", dnf: "neovim"),
         "nmap": .init(winget: "Insecure.Nmap", apt: "nmap", dnf: "nmap"),
+        "nut": .init(apt: "nut", dnf: "nut"),
         "node": .init(winget: "OpenJS.NodeJS.LTS", apt: "nodejs", dnf: "nodejs"),
-        "ollama": .init(winget: "Ollama.Ollama"),
+        "ollama": .init(winget: "Ollama.Ollama", linuxHint: "the installer at ollama.com/download"),
         "pandoc": .init(winget: "JohnMacFarlane.Pandoc", apt: "pandoc", dnf: "pandoc"),
         "pipx": .init(apt: "pipx", dnf: "pipx"),
+        "pyenv": .init(apt: "pyenv"),
         "python": .init(winget: "Python.Python.3.13", apt: "python3", dnf: "python3"),
         "python@3.12": .init(winget: "Python.Python.3.12", apt: "python3", dnf: "python3"),
         "python@3.13": .init(winget: "Python.Python.3.13", apt: "python3", dnf: "python3"),
+        "python-tk": .init(apt: "python3-tk", dnf: "python3-tkinter"),
         "redis": .init(apt: "redis-server", dnf: "valkey"),
         "ripgrep": .init(winget: "BurntSushi.ripgrep.MSVC", apt: "ripgrep", dnf: "ripgrep"),
         "rustup": .init(winget: "Rustlang.Rustup", apt: "rustup", dnf: "rustup"),
@@ -114,7 +145,7 @@ public enum PackageCatalog {
         "terraform": .init(winget: "Hashicorp.Terraform"),
         "tmux": .init(apt: "tmux", dnf: "tmux"),
         "tree": .init(apt: "tree", dnf: "tree"),
-        "uv": .init(winget: "astral-sh.uv", dnf: "uv"),
+        "uv": .init(winget: "astral-sh.uv", dnf: "uv", linuxHint: "pipx install uv"),
         "vim": .init(winget: "vim.vim", apt: "vim", dnf: "vim-enhanced"),
         "wget": .init(winget: "JernejSimoncic.Wget", apt: "wget", dnf: "wget2-wget"),
         "wireguard-tools": .init(winget: "WireGuard.WireGuard", apt: "wireguard-tools", dnf: "wireguard-tools"),
@@ -135,6 +166,7 @@ public enum PackageCatalog {
         "blender": .init(winget: "BlenderFoundation.Blender", flatpak: "org.blender.Blender"),
         "brave-browser": .init(winget: "Brave.Brave", flatpak: "com.brave.Browser"),
         "cursor": .init(winget: "Anysphere.Cursor"),
+        "czkawka": .init(flatpak: "com.github.qarmin.czkawka"),
         "db-browser-for-sqlite": .init(winget: "DBBrowserForSQLite.DBBrowserForSQLite", flatpak: "org.sqlitebrowser.sqlitebrowser"),
         "discord": .init(winget: "Discord.Discord", flatpak: "com.discordapp.Discord"),
         "docker": .init(winget: "Docker.DockerDesktop"),
@@ -174,6 +206,7 @@ public enum PackageCatalog {
         "thunderbird": .init(winget: "Mozilla.Thunderbird", flatpak: "org.mozilla.Thunderbird"),
         "transmission": .init(winget: "Transmission.Transmission", flatpak: "com.transmissionbt.Transmission"),
         "ultimaker-cura": .init(winget: "Ultimaker.Cura", flatpak: "com.ultimaker.cura"),
+        "upscayl": .init(flatpak: "org.upscayl.Upscayl"),
         "veracrypt": .init(winget: "IDRIX.VeraCrypt"),
         "virtualbox": .init(winget: "Oracle.VirtualBox"),
         "visual-studio-code": .init(winget: "Microsoft.VisualStudioCode", flatpak: "com.visualstudio.code"),

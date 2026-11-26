@@ -51,6 +51,8 @@ public struct PlatformExport: Equatable, Sendable {
 
     /// No known package for this platform.
     public var unmapped: [String] = []
+    /// Linux: how to get a package apt or dnf doesn't have, by Homebrew name.
+    public var hints: [String: String] = [:]
     public var macOnly: [String] = []
     public var appStore: [String] = []
     public var shares: [ShareItem] = []
@@ -73,6 +75,7 @@ public struct PlatformExport: Equatable, Sendable {
             let label = p.resolvers["brew"] ?? p.id
             if PackageCatalog.isMacOnly(p) { e.macOnly.append(label); continue }
             let n = PackageCatalog.names(for: p)
+            if target == .linux, let h = n.linuxHint, n.apt == nil || n.dnf == nil { e.hints[label] = h }
             switch target {
             case .windows:
                 if let id = valid(n.winget) { e.winget.append(Install(id: id, label: label)) } else { e.unmapped.append(label) }
@@ -284,6 +287,8 @@ public struct PlatformExport: Equatable, Sendable {
         APT=(\(apt.map { sh($0.id) }.joined(separator: " ")))
         DNF=(\(dnf.map { sh($0.id) }.joined(separator: " ")))
         FLATPAK=(\(flatpak.map { sh($0.id) }.joined(separator: " ")))
+        # The command each app has when it came another way (a snap, the distro).
+        FLATPAK_CMD=(\(flatpak.map { sh(PackageCatalog.command(forFlatpak: $0.id)) }.joined(separator: " ")))
 
         missing=()
         # Already there, or can the package manager get it?
@@ -316,10 +321,10 @@ public struct PlatformExport: Equatable, Sendable {
 
         if command -v apt-get >/dev/null 2>&1; then
           install_with apt "${APT[@]}"
-        \(onlyDNF.isEmpty ? "" : "  missing+=(\(onlyDNF.map(sh).joined(separator: " ")))\n")\
+        \(notIn("apt", onlyDNF))\
         elif command -v dnf >/dev/null 2>&1; then
           install_with dnf "${DNF[@]}"
-        \(onlyAPT.isEmpty ? "" : "  missing+=(\(onlyAPT.map(sh).joined(separator: " ")))\n")\
+        \(notIn("dnf", onlyAPT))\
         else
           echo "Neither apt-get nor dnf found: install these with your package manager: ${APT[*]}"
         fi
@@ -341,8 +346,11 @@ public struct PlatformExport: Equatable, Sendable {
             fi
           fi
           [ $APPLY = 1 ] && [ ${#FLATPAK[@]} -gt 0 ] && flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          for a in "${FLATPAK[@]}"; do
+          for i in "${!FLATPAK[@]}"; do
+            a=${FLATPAK[$i]} c=${FLATPAK_CMD[$i]}
             if command -v flatpak >/dev/null 2>&1 && flatpak info "$a" >/dev/null 2>&1; then echo "  $a is already installed"
+            elif command -v "$c" >/dev/null 2>&1 || { command -v snap >/dev/null 2>&1 && snap list "$c" >/dev/null 2>&1; }; then
+              echo "  $c is already installed (not from Flathub), so skipping $a"
             elif [ $APPLY = 1 ]; then echo "  installing $a"; flatpak install --user -y --noninteractive flathub "$a" || failed+=("$a")
             else echo "  would install $a"; fi
           done
@@ -376,6 +384,14 @@ public struct PlatformExport: Equatable, Sendable {
 
         """
         return s
+    }
+
+    /// Script lines for packages the other package manager has but this one doesn't.
+    func notIn(_ manager: String, _ labels: [String]) -> String {
+        labels.map { label in
+            let how = hints[label].map { " (try: \($0))" } ?? ""
+            return "  echo \(sh("  \(label) isn't in \(manager) here\(how)"))\n  missing+=(\(sh(label)))\n"
+        }.joined()
     }
 
     // MARK: Config files
@@ -459,7 +475,21 @@ public struct PlatformExport: Equatable, Sendable {
         if !unmapped.isEmpty {
             let how = target == .windows ? "`winget search <name>`" : "your package manager or flathub.org"
             byHand += "### Find these yourself (\(unmapped.count))\n\nCairn doesn't know their \(target.title) name. Try \(how).\n\n"
-            byHand += unmapped.sorted().map { "- [ ] \(Self.oneLine($0))" }.joined(separator: "\n") + "\n\n"
+            byHand += unmapped.sorted().map { label in
+                "- [ ] \(Self.oneLine(label))" + (hints[label].map { ": try \(Self.oneLine($0))" } ?? "")
+            }.joined(separator: "\n") + "\n\n"
+        }
+        if target == .linux {
+            let onlyDNF = Set(dnf.map(\.label)).subtracting(apt.map(\.label)).sorted()
+            let onlyAPT = Set(apt.map(\.label)).subtracting(dnf.map(\.label)).sorted()
+            if !onlyDNF.isEmpty || !onlyAPT.isEmpty {
+                byHand += "### Not in every distro (\(onlyDNF.count + onlyAPT.count))\n\nThe script installs these only where the package manager has them.\n\n"
+                func line(_ label: String, _ missingFrom: String) -> String {
+                    "- [ ] \(Self.oneLine(label)): not in \(missingFrom)" + (hints[label].map { ". Try `\(Self.oneLine($0))`" } ?? "")
+                }
+                byHand += (onlyDNF.map { line($0, "apt (Debian, Ubuntu)") } + onlyAPT.map { line($0, "dnf (Fedora)") })
+                    .joined(separator: "\n") + "\n\n"
+            }
         }
         if !appStore.isEmpty {
             byHand += "### Mac App Store apps (\(appStore.count))\n\nSome have \(target.title) versions on their makers' sites.\n\n"
