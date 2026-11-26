@@ -431,6 +431,8 @@ public struct MacRestorer: Sendable {
         case .tap: return Command("brew", ["tap", name])
         case .formula: return Command("brew", ["install", "--formula", name])
         case .cask: return Command("brew", ["install", "--cask", name])
+        // Never planned on a Mac (`RestorePlan.make` drops them); a harmless lookup if it were.
+        case .apt, .flatpak, .snap: return Command("brew", ["info", name])
         }
     }
 

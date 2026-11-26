@@ -67,7 +67,8 @@ public struct RestorePlan: Equatable, Sendable {
         // Dependency order: Command Line Tools, Homebrew, packages, App Store apps.
         let installed = Set(current.packages.map(\.uid))
         let order: [PackageItem.Kind: Int] = [.tap: 0, .formula: 1, .cask: 2]
-        let packages = backup.packages.filter { $0.include && !installed.contains($0.uid) }
+        // Homebrew only: apt, Flatpak and Snap packages from a Linux backup aren't installable on a Mac.
+        let packages = backup.packages.filter { order[$0.kind] != nil && $0.include && !installed.contains($0.uid) }
             .sorted { (order[$0.kind]!, $0.id) < (order[$1.kind]!, $1.id) }
         let haveApps = Set(current.apps.map(\.id))
         let apps = backup.apps.filter { $0.include && !haveApps.contains($0.id) }

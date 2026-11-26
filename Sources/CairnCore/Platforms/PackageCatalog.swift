@@ -71,7 +71,20 @@ public enum PackageCatalog {
         case .formula: return formulae[p.id] ?? formulae[unversioned(p.id)]
         case .cask: return casks[p.id]
         case .tap: return nil
+        // From a Linux backup: find the entry with this name, for the other platforms' names.
+        case .apt: return byName(formulae, casks) { $0.apt == p.id }
+        case .flatpak: return byName(casks, formulae) { $0.flatpak == p.id }
+        case .snap: return nil
         }
+    }
+
+    /// The first entry (in name order, so always the same one) that matches.
+    static func byName(_ a: [String: PackageNames], _ b: [String: PackageNames],
+                       _ match: (PackageNames) -> Bool) -> PackageNames? {
+        for table in [a, b] {
+            if let k = table.keys.sorted().first(where: { match(table[$0]!) }) { return table[k] }
+        }
+        return nil
     }
 
     /// `node@22` → `node`, `python@3.13` stays (it has its own entry or none).

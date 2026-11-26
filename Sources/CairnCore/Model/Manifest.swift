@@ -94,17 +94,27 @@ public enum ManifestError: Error, Equatable, CustomStringConvertible {
 
 public struct Device: Codable, Equatable, Sendable {
     public var name: String
+    /// `macos` or `linux`.
     public var os: String
     public var osVersion: String
+    /// Linux only: the distribution's name, like `Ubuntu`. Nil on macOS.
+    public var distro: String?
 
-    public init(name: String, os: String, osVersion: String) {
+    public init(name: String, os: String, osVersion: String, distro: String? = nil) {
         self.name = name
         self.os = os
         self.osVersion = osVersion
+        self.distro = distro
+    }
+
+    /// For people: `macOS 15.1`, `Ubuntu 26.04`.
+    public var osTitle: String {
+        if os == "macos" { return "macOS \(osVersion)" }
+        return "\(distro ?? (os == "linux" ? "Linux" : os)) \(osVersion)"
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, os
+        case name, os, distro
         case osVersion = "os_version"
     }
 }
@@ -112,7 +122,10 @@ public struct Device: Codable, Equatable, Sendable {
 /// A command-line or GUI package from a package manager.
 public struct PackageItem: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable, CaseIterable {
+        /// Homebrew (macOS).
         case formula, cask, tap
+        /// Linux: a distro package (apt), a Flathub app, a Snap.
+        case apt, flatpak, snap
     }
 
     /// Canonical id (e.g. `vlc`). Unique together with `kind`.
@@ -169,12 +182,26 @@ public struct SettingItem: Codable, Equatable, Sendable {
     public var id: String { key }
 }
 
-/// Where each platform stores a setting. Only macOS exists so far.
+/// Where each platform stores a setting.
 public struct SettingAdapters: Codable, Equatable, Sendable {
     public var macos: PreferenceRef?
+    /// GNOME (Linux). Optional: manifests from Macs have none.
+    public var gnome: GSettingsRef?
 
-    public init(macos: PreferenceRef? = nil) {
+    public init(macos: PreferenceRef? = nil, gnome: GSettingsRef? = nil) {
         self.macos = macos
+        self.gnome = gnome
+    }
+}
+
+/// A GNOME setting: a gsettings schema and key.
+public struct GSettingsRef: Codable, Equatable, Sendable {
+    public var schema: String
+    public var key: String
+
+    public init(schema: String, key: String) {
+        self.schema = schema
+        self.key = key
     }
 }
 

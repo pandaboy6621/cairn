@@ -598,7 +598,7 @@ public struct PlatformExport: Equatable, Sendable {
     func checklist() -> String {
         let name = Self.oneLine(device.name)
         var s = "# Set up \(target.title) like \(name)\n\n"
-        s += "Made by Cairn from a backup of \(name) (macOS \(Self.oneLine(device.osVersion))) taken \(Self.day(backedUp)).\n\n"
+        s += "Made by Cairn from a backup of \(name) (\(Self.oneLine(device.osTitle))) taken \(Self.day(backedUp)).\n\n"
         s += "## Run the setup script\n\n"
         switch target {
         case .windows:
