@@ -68,6 +68,8 @@ public struct PlatformExport: Equatable, Sendable {
     public static func make(_ m: Manifest, for target: TargetPlatform) -> PlatformExport {
         var e = PlatformExport(target: target, device: m.device, backedUp: m.created)
         for p in m.packages where p.include {
+            // A tap is only where Homebrew finds packages; its packages are listed on their own.
+            if p.kind == .tap { continue }
             let label = p.resolvers["brew"] ?? p.id
             if PackageCatalog.isMacOnly(p) { e.macOnly.append(label); continue }
             let n = PackageCatalog.names(for: p)
@@ -283,12 +285,25 @@ public struct PlatformExport: Equatable, Sendable {
         DNF=(\(dnf.map { sh($0.id) }.joined(separator: " ")))
         FLATPAK=(\(flatpak.map { sh($0.id) }.joined(separator: " ")))
 
+        missing=()
+        # Already there, or can the package manager get it?
+        installed() { # manager, package
+          if [ "$1" = apt ]; then dpkg-query -W -f='${Status}' "$2" 2>/dev/null | grep -q 'ok installed'
+          else rpm -q "$2" >/dev/null 2>&1; fi
+        }
+        available() { # manager, package
+          if [ "$1" = apt ]; then apt-cache policy "$2" 2>/dev/null | grep -q 'Candidate: [^(]'
+          else dnf -q info "$2" >/dev/null 2>&1; fi
+        }
+
         install_with() { # manager, packages...
           local manager=$1; shift
           [ $# -gt 0 ] || return 0
           echo "Packages from $manager ($#)"
           [ $APPLY = 1 ] && [ "$manager" = apt ] && sudo apt-get update
           for p in "$@"; do
+            if installed "$manager" "$p"; then echo "  $p is already installed"; continue; fi
+            if ! available "$manager" "$p"; then echo "  $p isn't in $manager here"; missing+=("$p"); continue; fi
             if [ $APPLY = 1 ]; then
               echo "  installing $p"
               if [ "$manager" = apt ]; then sudo apt-get install -y "$p" || failed+=("$p")
@@ -301,31 +316,45 @@ public struct PlatformExport: Equatable, Sendable {
 
         if command -v apt-get >/dev/null 2>&1; then
           install_with apt "${APT[@]}"
-        \(onlyDNF.isEmpty ? "" : "  echo \(sh("  not in apt, install another way: " + onlyDNF.joined(separator: ", ")))\n")\
+        \(onlyDNF.isEmpty ? "" : "  missing+=(\(onlyDNF.map(sh).joined(separator: " ")))\n")\
         elif command -v dnf >/dev/null 2>&1; then
           install_with dnf "${DNF[@]}"
-        \(onlyAPT.isEmpty ? "" : "  echo \(sh("  not in dnf, install another way: " + onlyAPT.joined(separator: ", ")))\n")\
+        \(onlyAPT.isEmpty ? "" : "  missing+=(\(onlyAPT.map(sh).joined(separator: " ")))\n")\
         else
           echo "Neither apt-get nor dnf found: install these with your package manager: ${APT[*]}"
         fi
 
+        newflatpak=0
         if [ ${#FLATPAK[@]} -gt 0 ]; then
           echo "Apps from Flathub (${#FLATPAK[@]})"
           if ! command -v flatpak >/dev/null 2>&1; then
-            echo "  flatpak isn't installed: see https://flathub.org/setup, then run this again."
-          else
-            [ $APPLY = 1 ] && flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-            for a in "${FLATPAK[@]}"; do
-              if [ $APPLY = 1 ]; then echo "  installing $a"; flatpak install --user -y flathub "$a" || failed+=("$a")
-              else echo "  would install $a"; fi
-            done
+            if ! command -v apt-get >/dev/null 2>&1 && ! command -v dnf >/dev/null 2>&1; then
+              echo "  flatpak isn't installed: see https://flathub.org/setup, then run this again."
+              FLATPAK=()
+            elif [ $APPLY = 1 ]; then
+              echo "  installing flatpak first"
+              if command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y flatpak; else sudo dnf install -y flatpak; fi
+              command -v flatpak >/dev/null 2>&1 || { failed+=(flatpak); FLATPAK=(); }
+              newflatpak=1
+            else
+              echo "  would install flatpak first (this system doesn't have it yet)"
+            fi
           fi
+          [ $APPLY = 1 ] && [ ${#FLATPAK[@]} -gt 0 ] && flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          for a in "${FLATPAK[@]}"; do
+            if command -v flatpak >/dev/null 2>&1 && flatpak info "$a" >/dev/null 2>&1; then echo "  $a is already installed"
+            elif [ $APPLY = 1 ]; then echo "  installing $a"; flatpak install --user -y --noninteractive flathub "$a" || failed+=("$a")
+            else echo "  would install $a"; fi
+          done
         fi
 
         set_setting() { # schema, key, value
-          if ! gsettings writable "$1" "$2" >/dev/null 2>&1; then echo "  skipped $2 (not on this desktop)"; return; fi
-          if [ $APPLY = 1 ]; then echo "  setting $2 to $3"; gsettings set "$1" "$2" "$3" || failed+=("$2")
-          else echo "  would set $2 to $3"; fi
+          local now
+          if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $2 (not on this desktop)"; return; fi
+          if [ "$now" = "$3" ]; then echo "  $2 is already $3"; return; fi
+          if [ "$(gsettings writable "$1" "$2" 2>/dev/null)" != true ]; then echo "  skipped $2 (locked on this system)"; return; fi
+          if [ $APPLY = 1 ]; then echo "  changing $2 from $now to $3"; gsettings set "$1" "$2" "$3" || failed+=("$2")
+          else echo "  would change $2 from $now to $3"; fi
         }
 
         """
@@ -339,8 +368,10 @@ public struct PlatformExport: Equatable, Sendable {
         s += """
 
         echo
+        [ ${#missing[@]} -gt 0 ] && echo "Not available here, install another way: ${missing[*]}"
         if [ $APPLY = 0 ]; then echo "Dry run: nothing changed. Run again with --apply to make these changes."
-        elif [ ${#failed[@]} -gt 0 ]; then echo "Didn't install: ${failed[*]}"; fi
+        elif [ ${#failed[@]} -gt 0 ]; then echo "Didn't work: ${failed[*]}"; fi
+        [ $newflatpak = 1 ] && echo "Log out and back in so the new Flathub apps show up in your app list."
         echo "See CHECKLIST.md for what to do by hand."
 
         """

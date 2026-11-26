@@ -33,7 +33,7 @@ import Testing
     @Test func windowsMapsPackagesAndSettings() {
         let e = PlatformExport.make(Self.manifest(), for: .windows)
         #expect(e.winget.map(\.id) == ["Git.Git", "OpenJS.NodeJS.LTS", "VideoLAN.VLC"])
-        #expect(e.macOnly.sorted() == ["mas", "someone/tap"])
+        #expect(e.macOnly.sorted() == ["mas"]) // taps are sources, not packages
         #expect(e.unmapped == ["obscure-tool"])
         #expect(e.registry.map(\.name) == ["AppsUseLightTheme", "SystemUsesLightTheme", "HideFileExt"])
         #expect(e.registry.last?.dword == 0)
@@ -120,5 +120,75 @@ import Testing
         #expect(p.terminationStatus == 0)
         let mode = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions] as? Int
         #expect(mode == 0o755)
+    }
+
+    /// Runs the Linux kit's `setup.sh` with stand-in Ubuntu tools on PATH and a
+    /// throwaway home folder. Returns what it printed and what `sudo` was asked to do.
+    static func runLinuxKit(_ args: [String]) throws -> (out: String, sudo: String, home: URL) {
+        var m = manifest()
+        m.packages.append(PackageItem(id: "ghost", kind: .formula, resolvers: ["brew": "ghost", "apt": "ghost"]))
+        m.dotfiles = [DotfileItem(path: "~/.gitconfig", kind: .git, content: "[user]\n\tname = Test\n")]
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bin = dir.appendingPathComponent("bin"), home = dir.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let log = dir.appendingPathComponent("sudo.log").path
+        let tools = [
+            "apt-get": "exit 0",
+            "sudo": "echo \"$*\" >> '\(log)'",
+            // git is installed; nodejs can be installed; ghost doesn't exist.
+            "dpkg-query": #"[ "$3" = git ] && echo 'install ok installed' || exit 1"#,
+            "apt-cache": #"[ "$2" = ghost ] && echo '  Candidate: (none)' || echo '  Candidate: 1.0'"#,
+            "gsettings": #"""
+            case "$1 $3" in
+              "get color-scheme") echo "'default'";;
+              "get natural-scroll") echo false;;
+              "writable "*) echo true;;
+              *) exit 1;;
+            esac
+            """#,
+        ]
+        for (name, body) in tools {
+            let url = bin.appendingPathComponent(name)
+            try ("#!/bin/bash\n" + body + "\n").write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let folder = try PlatformExport.make(m, for: .linux).write(into: dir)
+        let p = Process(), pipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = [folder.appendingPathComponent("setup.sh").path] + args
+        p.environment = ["PATH": bin.path + ":/usr/bin:/bin", "HOME": home.path]
+        p.standardOutput = pipe; p.standardError = pipe
+        try p.run(); p.waitUntilExit()
+        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return (out, (try? String(contentsOfFile: log, encoding: .utf8)) ?? "", home)
+    }
+
+    @Test func linuxDryRunChecksWhatIsAlreadyThere() throws {
+        let r = try Self.runLinuxKit([])
+        #expect(r.out.contains("git is already installed"))
+        #expect(r.out.contains("would install nodejs"))
+        #expect(r.out.contains("ghost isn't in apt here"))
+        #expect(r.out.contains("Not available here, install another way: ghost"))
+        #expect(r.out.contains("would install flatpak first"))
+        #expect(r.out.contains("would install org.videolan.VLC"))
+        #expect(r.out.contains("would change color-scheme from 'default' to 'prefer-dark'"))
+        #expect(r.out.contains("natural-scroll is already false"))
+        #expect(r.out.contains("skipped dock-fixed (not on this desktop)"))
+        #expect(r.out.contains("would write .gitconfig"))
+        #expect(r.out.contains("Dry run: nothing changed"))
+        #expect(r.sudo.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: r.home.appendingPathComponent(".gitconfig").path))
+    }
+
+    @Test func linuxApplyInstallsOnlyWhatIsMissing() throws {
+        let r = try Self.runLinuxKit(["--apply"])
+        #expect(r.sudo.contains("apt-get install -y nodejs"))
+        #expect(r.sudo.contains("apt-get install -y flatpak"))
+        #expect(!r.sudo.contains("install -y git") && !r.sudo.contains("ghost"))
+        #expect(r.out.contains("Didn't work: flatpak")) // the stand-in apt can't really install it
+        #expect(r.out.contains("wrote .gitconfig"))
+        let written = try String(contentsOf: r.home.appendingPathComponent(".gitconfig"), encoding: .utf8)
+        #expect(written.contains("name = Test"))
     }
 }
