@@ -1,0 +1,61 @@
+# Builds and tests Cairn for Windows (windows/) on a GitHub Windows runner, and
+# uploads the app as a zip: Actions → this run → Artifacts → Cairn-Windows-x64.
+# Unzip it anywhere and run Cairn.exe; nothing else to install.
+#
+# The app isn't code-signed yet, so Windows SmartScreen warns on first run
+# ("More info" → "Run anyway").
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "windows/**"
+      - "Tests/CairnCoreTests/Fixtures/*-manifest.yaml"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Test the core
+        run: dotnet test windows/Cairn.Core.Tests --configuration Release
+
+      - name: Build the app
+        run: >
+          dotnet publish windows/Cairn.App/Cairn.App.csproj
+          --configuration Release --runtime win-x64 -p:Platform=x64
+          --output publish/Cairn
+
+      - name: Check the app starts
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath publish/Cairn/Cairn.exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "Cairn.exe exited with code $($p.ExitCode) right after starting" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Cairn.exe stayed up for 10 seconds."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cairn-Windows-x64
+          path: publish/Cairn
+          if-no-files-found: error
