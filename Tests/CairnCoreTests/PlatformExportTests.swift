@@ -121,7 +121,10 @@ import Testing
     @Test func windowsScriptChecksBeforeChanging() {
         let ps = PlatformExport.make(Self.manifest(), for: .windows).files()["setup.ps1"]!
         // Dry run: skips what's installed, and checks winget knows the rest.
-        #expect(ps.contains("winget list --id $p.Key --exact"))
+        #expect(ps.contains("winget list --id $id --exact"))
+        // Installed another way (the Microsoft Store): found by its winget name.
+        #expect(ps.contains(#"if ($shown -match 'Found (.+?) \[')"#))
+        #expect(ps.contains("winget list --name $name --exact"))
         #expect(ps.contains("winget show --id $p.Key --exact --source winget"))
         #expect(ps.contains("--accept-package-agreements --accept-source-agreements"))
         // Settings in plain words, skipped when already set; Explorer restarts only on a change.
@@ -150,7 +153,7 @@ import Testing
         #expect(ps.contains("Target = '.gitconfig'; KeepHosts = $false"))
         #expect(ps.contains("function Get-OnlyHereHosts"))
         // Case matters when deciding a file already matches; written without a BOM.
-        #expect(ps.contains("$old -ceq $text"))
+        #expect(ps.contains(#"if (($old -replace "`r`n", "`n").TrimEnd() -ceq ($text -replace "`r`n", "`n").TrimEnd())"#))
         #expect(ps.contains("New-Object System.Text.UTF8Encoding $false"))
         #expect(ps.contains("[IO.File]::WriteAllText($dst, $text, $utf8)"))
     }

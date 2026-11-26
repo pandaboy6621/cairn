@@ -234,11 +234,24 @@ public struct PlatformExport: Equatable, Sendable {
             if ($code -eq -1978334967 -or $code -eq -1978334966) { $script:reboot = $true; return $true }
             $code -eq 0 -or $code -eq -1978335189 -or $code -eq -1978335135
         }
+        # $true when installed under this id; the name when installed some other way (say,
+        # from the Microsoft Store, which lists Minecraft Launcher under its own id); else $null.
+        function Find-Installed($id) {
+            winget list --id $id --exact --accept-source-agreements *> $null
+            if ($LASTEXITCODE -eq 0) { return $true }
+            $shown = winget show --id $id --exact --source winget --accept-source-agreements 2>$null | Out-String
+            if ($shown -match 'Found (.+?) \\[') {
+                $name = $Matches[1]
+                winget list --name $name --exact --accept-source-agreements *> $null
+                if ($LASTEXITCODE -eq 0) { return $name }
+            }
+            $null
+        }
         $retry = @()
         foreach ($p in $packages.GetEnumerator()) {
             if ($haveWinget) {
-                winget list --id $p.Key --exact --accept-source-agreements *> $null
-                if ($LASTEXITCODE -eq 0) { Write-Host "  $($p.Value) is already installed"; continue }
+                $have = Find-Installed $p.Key
+                if ($have) { Write-Host "  $($p.Value) is already installed$(if ($have -ne $true) { " (as $have)" })"; continue }
             }
             if ($Apply) {
                 Write-Host "  installing $($p.Value) ($($p.Key))"
@@ -501,7 +514,8 @@ public struct PlatformExport: Equatable, Sendable {
                     $extra = Get-OnlyHereHosts ($old -split "`r?`n") ($text -split "`r?`n")
                     if ($extra.Count -gt 0) { $text = $text.TrimEnd() + "`n" + ($extra -join "`n") + "`n" }
                 }
-                if ($old -ceq $text) { Write-Host "  $($d.Target) already matches"; continue }
+                # Line endings and trailing blank lines don't count as a change.
+                if (($old -replace "`r`n", "`n").TrimEnd() -ceq ($text -replace "`r`n", "`n").TrimEnd()) { Write-Host "  $($d.Target) already matches"; continue }
             }
             $hosts = @($extra | Where-Object { $_ -match '^\\s*Host\\s' }).Count
             $kept = if ($hosts -gt 0) { " and keep $hosts server entr$(if ($hosts -eq 1) { 'y' } else { 'ies' }) only on this PC" } else { '' }
