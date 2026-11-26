@@ -168,7 +168,7 @@ import Testing
 @Suite struct SetupScannerTests {
     @Test func fullScanAssemblesANormalizedManifest() throws {
         let fixed = Samples.date
-        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan()
+        let report = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home, os: "macos").scan()
         let m = report.manifest
         #expect(m.device == Device(name: "test-mac", os: "macos", osVersion: "14.5"))
         #expect(m.created == fixed)
@@ -190,14 +190,14 @@ import Testing
 
     @Test func scanIsDeterministic() throws {
         let fixed = Samples.date
-        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan().manifest)
-        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan().manifest)
+        let a = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home, os: "macos").scan().manifest)
+        let b = try ManifestCoder.encode(SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home, os: "macos").scan().manifest)
         #expect(a == b)
     }
 
     @Test func missingToolBecomesAWarningNotAFailure() {
         let empty = FixtureRunner() // nothing stubbed: brew/mas "not installed"
-        let report = SetupScanner(runner: empty, displays: Fixtures.displays).scan([.brew, .mas])
+        let report = SetupScanner(runner: empty, displays: Fixtures.displays, os: "macos").scan([.brew, .mas])
         #expect(report.manifest.packages.isEmpty && report.manifest.apps.isEmpty)
         #expect(report.manifest.device.name == "unknown")
         #expect(report.warnings.count == 2)

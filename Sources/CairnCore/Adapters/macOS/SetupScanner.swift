@@ -9,6 +9,22 @@ public struct ScanReport: Sendable {
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
         case brew, mas, dock, displays, defaults, shares, dotfiles, wifi, ssh, tokens, vpn
+        // Linux
+        case apt, flatpak, snap, gnome
+
+        public static let mac: [Source] = allCases.filter { !$0.isLinux }
+        public static let linux: [Source] = [.apt, .flatpak, .snap, .gnome, .dotfiles]
+
+        /// The scanners for the system Cairn is running on.
+        public static var here: [Source] {
+            #if os(Linux)
+            return linux
+            #else
+            return mac
+            #endif
+        }
+
+        public var isLinux: Bool { [.apt, .flatpak, .snap, .gnome].contains(self) }
 
         /// Human-readable name for progress messages.
         public var title: String {
@@ -24,6 +40,10 @@ public struct SetupScanner: Sendable {
             case .ssh: return "SSH keys"
             case .tokens: return "credential files"
             case .vpn: return "VPN configurations"
+            case .apt: return "apt packages"
+            case .flatpak: return "Flatpak apps"
+            case .snap: return "Snaps"
+            case .gnome: return "GNOME settings"
             }
         }
     }
@@ -36,11 +56,19 @@ public struct SetupScanner: Sendable {
     public var isSandboxed: @Sendable (String) -> Bool
     /// Home folder for `~/.ssh`. Injected for tests.
     public var home: String
+    /// `macos` or `linux`: which system's scanners run by default and how the
+    /// device is described. The running system unless a test says otherwise.
+    public var os: String
 
     public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = DefaultDisplays(),
                 now: @escaping @Sendable () -> Date = { Date() },
                 isSandboxed: @escaping @Sendable (String) -> Bool = DefaultsScanner.hasContainer,
-                home: String = NSHomeDirectory()) {
+                home: String = NSHomeDirectory(), os: String? = nil) {
+        #if os(Linux)
+        self.os = os ?? "linux"
+        #else
+        self.os = os ?? "macos"
+        #endif
         self.home = home
         self.runner = runner
         self.extraDomains = extraDomains
@@ -66,11 +94,12 @@ public struct SetupScanner: Sendable {
     }
 
     public func scan(
-        _ sources: Set<Source> = Set(Source.allCases),
+        _ sources: Set<Source>? = nil,
         progress: (@Sendable (Progress) -> Void)? = nil
     ) -> ScanReport {
         var manifest = Manifest(device: device(), created: now())
         var warnings: [String] = []
+        let sources = sources ?? Set(os == "linux" ? Source.linux : Source.mac)
         let ordered = Source.allCases.filter(sources.contains)
 
         for (index, source) in ordered.enumerated() {
@@ -111,10 +140,15 @@ public struct SetupScanner: Sendable {
         case .ssh: return SSHKeyScanner(home: home)
         case .tokens: return CredentialFilesScanner(home: home)
         case .vpn: return VPNScanner()
+        case .apt: return AptScanner()
+        case .flatpak: return FlatpakScanner()
+        case .snap: return SnapScanner()
+        case .gnome: return GnomeSettingsScanner()
         }
     }
 
     public func device() -> Device {
+        if os == "linux" { return LinuxSystem.device() }
         let name = (try? runner.output(Command("scutil", ["--get", "LocalHostName"])))?
             .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let version = (try? runner.output(Command("sw_vers", ["-productVersion"])))?

@@ -19,7 +19,7 @@ struct Export: ParsableCommand {
     @Argument(help: "windows or linux.")
     var target: String
 
-    @Option(name: .long, help: "A backup manifest or snapshot id. Default: this Mac's newest snapshot, or a fresh scan.")
+    @Option(name: .long, help: "A backup manifest or snapshot id. Default: this computer's newest snapshot, or a fresh scan.")
     var from: String?
 
     @Option(name: .long, help: "Folder to create the kit in. Default: the current folder.")
@@ -51,8 +51,8 @@ struct Export: ParsableCommand {
             stderr("Using snapshot \(newest.id).")
             return try store.manifest(of: newest)
         }
-        stderr("No snapshots yet: scanning this Mac.")
-        // No secret scanners: an export never carries secrets, so don't prompt for them.
-        return SetupScanner().scan([.brew, .mas, .dock, .displays, .defaults, .shares, .dotfiles]).manifest
+        stderr("No snapshots yet: scanning this computer.")
+        // Everything but the secret sources (Wi-Fi, keys, tokens, VPN): a kit never holds secrets.
+        return SetupScanner().scan(Set(SetupScanner.Source.here).subtracting([.wifi, .ssh, .tokens, .vpn])).manifest
     }
 }

@@ -6,7 +6,7 @@ import Testing
     /// Fixture scan plus one sensitive ref, so locking can be tested.
     func makeChecklist() -> Checklist {
         let fixed = Samples.date
-        var m = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home).scan().manifest
+        var m = SetupScanner(runner: Fixtures.fullRunner(), displays: Fixtures.displays, now: { fixed }, isSandboxed: { _ in false }, home: Fixtures.home, os: "macos").scan().manifest
         m.sensitive = [SensitiveRef(type: "wifi", ref: "vault://wifi/ExampleNet")]
         return Checklist(manifest: m)
     }

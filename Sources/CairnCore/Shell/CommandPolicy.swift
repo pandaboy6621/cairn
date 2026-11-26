@@ -43,6 +43,19 @@ public struct CommandPolicy: Sendable {
             // Listing ports and saved Wi-Fi network names; never passwords.
             return args == ["-listallhardwareports"]
                 || (args.count == 2 && args[0] == "-listpreferredwirelessnetworks")
+        // Linux: listing packages and reading settings; nothing that installs or sets.
+        case "apt-mark":
+            return args == ["showmanual"]
+        case "dpkg-query":
+            return args == ["-W", "-f=${Package}\t${Priority}\n"]
+        case "gzip":
+            return args == ["-dc", AptScanner.installerList]
+        case "flatpak":
+            return args == ["list", "--app", "--columns=application"]
+        case "snap":
+            return args == ["list"]
+        case "gsettings":
+            return args.count == 3 && args[0] == "get"
         case "plutil":
             // Converting Finder's shared file lists to stdout; never in place.
             return args.count == 5 && args[0...3] == ["-convert", "xml1", "-o", "-"]

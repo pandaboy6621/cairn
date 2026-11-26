@@ -5,8 +5,14 @@ import Foundation
 /// skipped entirely (keys belong in the Sensitive tier).
 public struct DotfilesScanner: SetupScanning {
     public var home: String
+    /// Linux copies these into every new home folder; a file still the same as its
+    /// copy here wasn't set up by the user, so it isn't worth backing up.
+    public var skeleton: String
 
-    public init(home: String = NSHomeDirectory()) { self.home = home }
+    public init(home: String = NSHomeDirectory(), skeleton: String = "/etc/skel") {
+        self.home = home
+        self.skeleton = skeleton
+    }
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
         var c = ScanContribution()
@@ -28,6 +34,7 @@ public struct DotfilesScanner: SetupScanning {
                 continue
             }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if let stock = FileManager.default.contents(atPath: skeleton + "/" + path.dropFirst(2)), stock == data { continue }
             guard let safe = Dotfiles.redact(text) else {
                 c.warnings.append("\(path): skipped, it holds a private key")
                 continue

@@ -14,7 +14,7 @@ private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.sel
 struct CairnCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cairn",
-        abstract: "Back up, restore, and sync a Mac's setup.",
+        abstract: "Back up, restore, and sync a computer's setup (macOS, or Linux for backups).",
         version: Cairn.version,
         subcommands: commands
     )
@@ -219,9 +219,9 @@ func appBackupFolder() -> URL {
 
 struct Backup: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Scan this Mac and save a snapshot, if anything changed since the last one.",
+        abstract: "Scan this computer and save a snapshot, if anything changed since the last one.",
         discussion: """
-            Read-only on this Mac: it only writes the snapshot. Items you unchecked in the
+            Read-only on this computer: it only writes the snapshot. Items you unchecked in the
             last snapshot stay unchecked. If the backup folder is offline (an unmounted NAS
             share), the snapshot is queued locally and copied over on a later run.
             """
@@ -282,7 +282,7 @@ struct Snapshots: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "List snapshots, or show what changed between two.",
         discussion: """
-            With no arguments, lists this Mac's snapshots, newest first.
+            With no arguments, lists this computer's snapshots, newest first.
             With --diff, compares a snapshot with the one before it (default: the newest),
             or two snapshots with each other. To roll back, run
             `cairn restore --from <snapshot id>` (a dry run until you add --apply).
@@ -292,7 +292,7 @@ struct Snapshots: ParsableCommand {
     @Option(name: .customLong("in"), help: "The backup folder. Default: the one set in the app.")
     var folder: String?
 
-    @Flag(name: .long, help: "List every device's snapshots, not just this Mac's.")
+    @Flag(name: .long, help: "List every device's snapshots, not just this computer's.")
     var all = false
 
     @Flag(name: .long, help: "Show changes instead of listing.")
@@ -399,7 +399,7 @@ struct AutoBackup: ParsableCommand {
 
 struct Scan: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Scan this Mac's setup into a manifest. Read-only: changes nothing."
+        abstract: "Scan this computer's setup into a manifest. Read-only: changes nothing."
     )
 
     @Option(name: .shortAndLong, help: "Write the manifest here instead of stdout.")
@@ -419,12 +419,12 @@ struct Scan: ParsableCommand {
     }
 
     func sources() throws -> Set<SetupScanner.Source> {
-        guard let only else { return Set(SetupScanner.Source.allCases) }
+        guard let only else { return Set(SetupScanner.Source.here) }
         return Set(try only.split(separator: ",").map { name in
             let trimmed = name.trimmingCharacters(in: .whitespaces)
             guard let s = SetupScanner.Source(rawValue: trimmed) else {
                 throw ValidationError("Unknown scanner '\(trimmed)'. Choose from: "
-                    + SetupScanner.Source.allCases.map(\.rawValue).joined(separator: ", ") + ".")
+                    + SetupScanner.Source.here.map(\.rawValue).joined(separator: ", ") + ".")
             }
             return s
         })
@@ -443,10 +443,13 @@ struct Scan: ParsableCommand {
         guard !quiet else { return }
         for w in report.warnings { stderr("warning: \(w)") }
         let m = report.manifest
-        stderr("Scanned \(m.packages.count) packages, \(m.apps.count) App Store apps, "
-            + "\(m.settings.count) settings, \(m.layout.dock?.apps.count ?? 0) Dock tiles, "
-            + "\(m.layout.displays?.displays.count ?? 0) displays"
-            + (output.map { " → \($0)" } ?? ""))
+        var counts = ["\(m.packages.count) packages"]
+        if !m.apps.isEmpty { counts.append("\(m.apps.count) App Store apps") }
+        counts.append("\(m.settings.count) settings")
+        if let dock = m.layout.dock { counts.append("\(dock.apps.count) Dock tiles") }
+        if let displays = m.layout.displays { counts.append("\(displays.displays.count) displays") }
+        if !m.dotfiles.isEmpty { counts.append("\(m.dotfiles.count) config files") }
+        stderr("Scanned " + counts.joined(separator: ", ") + (output.map { " → \($0)" } ?? ""))
     }
 }
 

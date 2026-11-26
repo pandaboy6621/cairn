@@ -181,7 +181,7 @@ final class AppModel {
         guard !isScanning else { return }
         isScanning = true
         statusMessage = nil
-        scanProgress = SetupScanner.Progress(completed: 0, total: SetupScanner.Source.allCases.count, current: nil)
+        scanProgress = SetupScanner.Progress(completed: 0, total: SetupScanner.Source.here.count, current: nil)
         Task {
             let folder = backupFolder
             let (report, excluded) = await Task.detached(priority: .userInitiated) {
