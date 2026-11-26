@@ -134,6 +134,21 @@ import Testing
         #expect(ps.contains("-1978334967"))
     }
 
+    @Test func windowsKeepsServersOnlyOnThePC() {
+        var m = Self.manifest()
+        m.dotfiles = [DotfileItem(path: "~/.ssh/config", kind: .ssh, content: "Host box\n  User me\n"),
+                      DotfileItem(path: "~/.gitconfig", kind: .git, content: "[user]\n\tname = Me\n")]
+        let ps = PlatformExport.make(m, for: .windows).files()["setup.ps1"]!
+        // SSH config keeps the PC's own Host blocks; git config is replaced as is.
+        #expect(ps.contains("Target = '.ssh\\config'; KeepHosts = $true"))
+        #expect(ps.contains("Target = '.gitconfig'; KeepHosts = $false"))
+        #expect(ps.contains("function Get-OnlyHereHosts"))
+        // Case matters when deciding a file already matches; written without a BOM.
+        #expect(ps.contains("$old -ceq $text"))
+        #expect(ps.contains("New-Object System.Text.UTF8Encoding $false"))
+        #expect(ps.contains("[IO.File]::WriteAllText($dst, $text, $utf8)"))
+    }
+
     @Test func checklistListsWhatToDoByHandAndNeverSecrets() {
         let text = PlatformExport.make(Self.manifest(), for: .windows).files()["CHECKLIST.md"]!
         #expect(text.contains("- [ ] obscure-tool"))

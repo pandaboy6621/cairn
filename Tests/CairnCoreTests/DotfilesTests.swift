@@ -258,7 +258,7 @@ import Testing
         let windows = PlatformExport.make(m, for: .windows).files()
         #expect(windows["dotfiles/gitconfig"]?.contains("\thelper = manager") == true)
         let ps = try #require(windows["setup.ps1"])
-        #expect(ps.contains(#"@{ File = 'ssh-config'; Target = '.ssh\config' }"#))
+        #expect(ps.contains(#"@{ File = 'ssh-config'; Target = '.ssh\config'; KeepHosts = $true }"#))
         #expect(ps.contains("Join-Path $HOME $d.Target"))
 
         let parent = URL(fileURLWithPath: try Self.tempHome())

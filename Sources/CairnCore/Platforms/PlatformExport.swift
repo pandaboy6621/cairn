@@ -439,22 +439,51 @@ public struct PlatformExport: Equatable, Sendable {
         let files = installedDotfiles
         guard !files.isEmpty else { return "" }
         var s = "$dotfiles = @(\n"
-        s += files.map { "    @{ File = \(ps($0.name)); Target = \(ps($0.target.replacingOccurrences(of: "/", with: "\\"))) }" }
-            .joined(separator: ",\n")
+        s += files.map {
+            "    @{ File = \(ps($0.name)); Target = \(ps($0.target.replacingOccurrences(of: "/", with: "\\"))); "
+                + "KeepHosts = $\($0.kind == .ssh ? "true" : "false") }"
+        }.joined(separator: ",\n")
         s += "\n)\n"
         s += """
+        # Host blocks in the PC's SSH config that the kit's copy doesn't have: kept, added at the end.
+        function Get-OnlyHereHosts([string[]]$old, [string[]]$new) {
+            $have = @{}
+            foreach ($l in $new) { if ($l -match '^\\s*Host\\s+(.+?)\\s*$') { $have[$Matches[1]] = $true } }
+            $out = @(); $keep = $false
+            foreach ($l in $old) {
+                if ($l -match '^\\s*(Host|Match)\\s+(.+?)\\s*$') {
+                    $keep = $Matches[1] -eq 'Host' -and -not $have.ContainsKey($Matches[2])
+                    if ($keep) { $out += '' }
+                }
+                if ($keep) { $out += $l }
+            }
+            ,$out
+        }
+        # No byte order mark: OpenSSH and git read it as part of the first line.
+        $utf8 = New-Object System.Text.UTF8Encoding $false
         Write-Host "Config files ($($dotfiles.Count))"
         foreach ($d in $dotfiles) {
             $src = Join-Path (Join-Path $PSScriptRoot 'dotfiles') $d.File
             $dst = Join-Path $HOME $d.Target
-            if ((Test-Path $dst) -and (Get-FileHash $src).Hash -eq (Get-FileHash $dst).Hash) { Write-Host "  $($d.Target) already matches"; continue }
+            $text = [IO.File]::ReadAllText($src)
+            $extra = @()
+            if (Test-Path $dst) {
+                $old = [IO.File]::ReadAllText($dst)
+                if ($d.KeepHosts) {
+                    $extra = Get-OnlyHereHosts ($old -split "`r?`n") ($text -split "`r?`n")
+                    if ($extra.Count -gt 0) { $text = $text.TrimEnd() + "`n" + ($extra -join "`n") + "`n" }
+                }
+                if ($old -ceq $text) { Write-Host "  $($d.Target) already matches"; continue }
+            }
+            $hosts = @($extra | Where-Object { $_ -match '^\\s*Host\\s' }).Count
+            $kept = if ($hosts -gt 0) { " and keep $hosts server entr$(if ($hosts -eq 1) { 'y' } else { 'ies' }) only on this PC" } else { '' }
             if ($Apply) {
                 New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
                 if (Test-Path $dst) { Copy-Item $dst "$dst.before-cairn" -Force; Write-Host "  kept your old $($d.Target) as $($d.Target).before-cairn" }
-                Copy-Item $src $dst -Force
-                if ($?) { Write-Host "  wrote $($d.Target)" } else { $failed += $d.Target }
+                try { [IO.File]::WriteAllText($dst, $text, $utf8); Write-Host "  wrote $($d.Target)$kept" }
+                catch { $failed += $d.Target }
             } elseif (Test-Path $dst) {
-                Write-Host "  would replace $($d.Target) (keeping the old one as $($d.Target).before-cairn)"
+                Write-Host "  would replace $($d.Target)$kept (keeping the old one as $($d.Target).before-cairn)"
             } else {
                 Write-Host "  would write $($d.Target)"
             }
