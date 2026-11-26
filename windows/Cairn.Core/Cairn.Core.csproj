@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Generated from the Mac app's catalog: see Tests/CairnCoreTests/WindowsCatalogTests.swift. -->
+    <EmbeddedResource Include="catalog.json" LogicalName="Cairn.Core.catalog.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
