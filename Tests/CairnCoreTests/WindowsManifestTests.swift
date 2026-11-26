@@ -20,6 +20,13 @@ import Testing
         #expect(Device(name: "x", os: "windows", osVersion: "10.0.19045").osTitle == "Windows 10.0.19045")
     }
 
+    @Test func sharedMacFixtureIsAValidBackup() throws {
+        // windows/Cairn.Core.Tests reads this one too.
+        let m = try ManifestCoder.decode(Fixtures.text("mac-manifest.yaml"))
+        #expect(m.device.osTitle == "macOS 15.1" && m.layout.displays?.displays.count == 1)
+        #expect(m.settings.first { $0.key == "macos.com.example.app.version" }?.value == .string("1"))
+    }
+
     @Test func taskbarChangesShowInComparisons() throws {
         let old = try Self.backup()
         var new = old

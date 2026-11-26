@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cairn.Core", "Cairn.Core\Cairn.Core.csproj", "{DB19FA6E-B588-476C-9DD3-DA1CA63BC9D1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cairn.Core.Tests", "Cairn.Core.Tests\Cairn.Core.Tests.csproj", "{D8E2774D-D923-41A8-BF9D-8197588FF0F7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DB19FA6E-B588-476C-9DD3-DA1CA63BC9D1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DB19FA6E-B588-476C-9DD3-DA1CA63BC9D1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DB19FA6E-B588-476C-9DD3-DA1CA63BC9D1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DB19FA6E-B588-476C-9DD3-DA1CA63BC9D1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D8E2774D-D923-41A8-BF9D-8197588FF0F7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D8E2774D-D923-41A8-BF9D-8197588FF0F7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D8E2774D-D923-41A8-BF9D-8197588FF0F7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D8E2774D-D923-41A8-BF9D-8197588FF0F7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

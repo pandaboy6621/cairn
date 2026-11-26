@@ -1,0 +1,129 @@
+apps:
+- id: '462054704'
+  include: true
+  name: Microsoft Word
+  source: mas
+created: 2026-11-20T09:30:00Z
+device:
+  name: test-mac
+  os: macos
+  os_version: '15.1'
+dotfiles:
+- content: |
+    [user]
+        name = Test User
+    [credential]
+        helper = osxkeychain
+  include: true
+  kind: git
+  path: ~/.gitconfig
+  redacted: 0
+- content: |
+    Host box
+      HostName box.example.test
+      User test
+  include: true
+  kind: ssh
+  path: ~/.ssh/config
+  redacted: 0
+- content: |
+    export PATH="/opt/homebrew/bin:$PATH"
+  include: true
+  kind: shell
+  path: ~/.zshrc
+  redacted: 0
+layout:
+  displays:
+    displays:
+    - builtin: true
+      height: 1117
+      id: builtin
+      main: true
+      name: Built-in Display
+      pixel_height: 2234
+      pixel_width: 3456
+      refresh_hz: 120
+      rotation: 0
+      width: 1728
+      x: 0
+      y: 0
+    include: true
+  dock:
+    apps:
+    - /Applications/Firefox.app
+    - /System/Applications/Mail.app
+    - spacer
+    - /System/Applications/Utilities/Terminal.app
+    include: true
+  wallpaper:
+    include: true
+    pictures:
+    - display: builtin
+      path: /System/Library/Desktop Pictures/Example.heic
+packages:
+- id: firefox
+  include: true
+  kind: cask
+  resolvers:
+    brew: firefox
+- id: libreoffice
+  include: true
+  kind: cask
+  resolvers:
+    brew: libreoffice
+- id: git
+  include: true
+  kind: formula
+  resolvers:
+    brew: git
+- id: mas
+  include: true
+  kind: formula
+  resolvers:
+    brew: mas
+- id: obscure-tool
+  include: false
+  kind: formula
+  resolvers:
+    brew: obscure-tool
+schema: 1
+sensitive:
+- include: true
+  ref: vault://wifi/Example
+  type: wifi
+settings:
+- adapter:
+    macos:
+      domain: NSGlobalDomain
+      key: AppleInterfaceStyle
+      type: string
+  include: true
+  key: appearance.style
+  platforms:
+  - macos
+  value: Dark
+- adapter:
+    macos:
+      domain: com.apple.finder
+      key: AppleShowAllExtensions
+      type: bool
+  include: true
+  key: finder.show_all_extensions
+  platforms:
+  - macos
+  value: true
+- adapter:
+    macos:
+      domain: com.example.app
+      key: version
+      type: string
+  include: true
+  key: macos.com.example.app.version
+  platforms:
+  - macos
+  value: '1'
+shares:
+- favorite: true
+  include: true
+  url: smb://nas.example.test/media
+  username: test
