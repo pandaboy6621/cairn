@@ -142,7 +142,9 @@ public struct PlatformExport: Equatable, Sendable {
         var out: [String: String]
         switch target {
         case .windows:
-            out = ["setup.ps1": powershell(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
+            // Windows PowerShell 5.1 reads a script without a byte order mark as the
+            // local code page, which garbles anything that isn't plain ASCII.
+            out = ["setup.ps1": "\u{FEFF}" + powershell(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
         case .linux:
             out = ["setup.sh": bash(), "CHECKLIST.md": checklist()]
         }
@@ -192,6 +194,8 @@ public struct PlatformExport: Equatable, Sendable {
         param([switch]$Apply)
         $ErrorActionPreference = 'Continue'
         $failed = @()
+        $notFound = @()
+        $reboot = $false
 
         """
         s += "$packages = [ordered]@{\n"
@@ -199,17 +203,28 @@ public struct PlatformExport: Equatable, Sendable {
         s += "}\n"
         s += """
 
-        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        $haveWinget = [bool](Get-Command winget -ErrorAction SilentlyContinue)
+        if (-not $haveWinget) {
             Write-Host 'winget is missing: install App Installer from the Microsoft Store, then run this again.'
             if ($Apply) { exit 1 }
         }
         Write-Host "Packages ($($packages.Count))"
         foreach ($p in $packages.GetEnumerator()) {
+            if ($haveWinget) {
+                winget list --id $p.Key --exact --accept-source-agreements *> $null
+                if ($LASTEXITCODE -eq 0) { Write-Host "  $($p.Value) is already installed"; continue }
+            }
             if ($Apply) {
                 Write-Host "  installing $($p.Value) ($($p.Key))"
-                winget install --id $p.Key --exact --source winget
-                # Already installed (or nothing newer) counts as done.
-                if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189 -and $LASTEXITCODE -ne -1978335135) { $failed += $p.Value }
+                winget install --id $p.Key --exact --source winget --accept-package-agreements --accept-source-agreements
+                $code = $LASTEXITCODE
+                # Already installed, or nothing newer: done. Needs a restart to finish: done, say so at the end.
+                if ($code -eq -1978334967 -or $code -eq -1978334966) { $reboot = $true }
+                elseif ($code -ne 0 -and $code -ne -1978335189 -and $code -ne -1978335135) { $failed += $p.Value }
+            } elseif ($haveWinget) {
+                winget show --id $p.Key --exact --source winget --accept-source-agreements *> $null
+                if ($LASTEXITCODE -eq 0) { Write-Host "  would install $($p.Value) ($($p.Key))" }
+                else { Write-Host "  can't find $($p.Value) ($($p.Key)) in winget"; $notFound += $p.Value }
             } else {
                 Write-Host "  would install $($p.Value) ($($p.Key))"
             }
@@ -217,27 +232,41 @@ public struct PlatformExport: Equatable, Sendable {
 
         """
         s += "$settings = @(\n"
-        s += registry.map { "    @{ Path = \(ps("HKCU:\\" + $0.path)); Name = \(ps($0.name)); Value = \($0.dword) }" }
-            .joined(separator: ",\n")
+        s += registry.map {
+            "    @{ Path = \(ps("HKCU:\\" + $0.path)); Name = \(ps($0.name)); Value = \($0.dword); "
+                + "Label = \(ps($0.label.isEmpty ? $0.name : $0.label)); Explorer = $\($0.restartsExplorer ? "true" : "false") }"
+        }.joined(separator: ",\n")
         s += (registry.isEmpty ? "" : "\n") + ")\n"
-        s += "$restartExplorer = $\(registry.contains(where: \.restartsExplorer) ? "true" : "false")\n"
         s += """
+        $restartExplorer = $false
         if ($settings.Count -gt 0) { Write-Host "Settings ($($settings.Count))" }
         foreach ($s in $settings) {
+            $now = (Get-ItemProperty -Path $s.Path -Name $s.Name -ErrorAction SilentlyContinue).($s.Name)
+            if ($null -ne $now -and $now -eq $s.Value) { Write-Host "  $($s.Label): already set"; continue }
             if ($Apply) {
-                Write-Host "  setting $($s.Name) to $($s.Value)"
-                if (-not (Test-Path $s.Path)) { New-Item -Path $s.Path | Out-Null }
+                if (-not (Test-Path $s.Path)) { New-Item -Path $s.Path -Force | Out-Null }
                 Set-ItemProperty -Path $s.Path -Name $s.Name -Value $s.Value -Type DWord
+                if ($?) { Write-Host "  set: $($s.Label)"; if ($s.Explorer) { $restartExplorer = $true } }
+                else { $failed += $s.Label }
             } else {
-                Write-Host "  would set $($s.Name) to $($s.Value)"
+                Write-Host "  would set: $($s.Label)"
             }
         }
-        if ($Apply -and $restartExplorer -and $settings.Count -gt 0) { Stop-Process -Name explorer -Force }
+        if ($restartExplorer) {
+            Write-Host '  restarting File Explorer so the change shows'
+            Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+        }
 
         \(powershellDotfiles())
         Write-Host ''
+        if ($notFound.Count -gt 0) { Write-Host "winget doesn't know: $($notFound -join ', '). Look for them with: winget search <name>" }
         if (-not $Apply) { Write-Host 'Dry run: nothing changed. Run again with -Apply to make these changes.' }
-        elseif ($failed.Count -gt 0) { Write-Host "Didn't install: $($failed -join ', ')" }
+        else {
+            if ($failed.Count -gt 0) { Write-Host "Didn't finish: $($failed -join ', ')" }
+            if ($reboot) { Write-Host 'Restart Windows to finish installing.' }
+        }
         Write-Host 'See CHECKLIST.md for what to do by hand.'
 
         """
@@ -464,7 +493,7 @@ public struct PlatformExport: Equatable, Sendable {
             s += "Installs \(winget.count) package\(winget.count == 1 ? "" : "s") with winget"
             s += registry.isEmpty ? ".\n\n" : " and sets \(registry.count) setting\(registry.count == 1 ? "" : "s").\n\n"
             s += "In PowerShell, in this folder:\n\n```\npowershell -ExecutionPolicy Bypass -File .\\setup.ps1\n```\n\n"
-            s += "That only lists what it would do. Add `-Apply` to do it. Or install just the packages with `winget import -i winget.json`.\n\n"
+            s += "That only lists what it would do. Add `-Apply` to do it (this also accepts the packages' license terms for you). Or install just the packages with `winget import -i winget.json`.\n\n"
         case .linux:
             s += "Installs packages with apt (Debian, Ubuntu) or dnf (Fedora), apps from Flathub"
             s += gsettings.isEmpty ? ".\n\n" : ", and sets \(gsettings.count) GNOME setting\(gsettings.count == 1 ? "" : "s").\n\n"
@@ -511,7 +540,7 @@ public struct PlatformExport: Equatable, Sendable {
         if !shells.isEmpty {
             byHand += "### Shell config (\(shells.count))\n\n"
             byHand += target == .windows
-                ? "These are for zsh or bash on the Mac. In the `dotfiles` folder to read; carry over aliases and settings to your PowerShell profile (or WSL) by hand.\n\n"
+                ? "These were written for zsh or bash on the Mac, so the script doesn't install them. They're in the `dotfiles` folder: copy any aliases or settings you want into your PowerShell profile (or into WSL).\n\n"
                 : "These were written for the Mac (Homebrew paths, macOS commands), so the script doesn't install them. They're in the `dotfiles` folder: merge what you want into yours.\n\n"
             byHand += shells.map { "- [ ] `\($0.name)` → `~/\(Self.oneLine($0.target))`" }.joined(separator: "\n") + "\n\n"
         }
@@ -540,8 +569,16 @@ public struct PlatformExport: Equatable, Sendable {
 
     // MARK: - Helpers
 
-    /// PowerShell single-quoted string.
-    func ps(_ s: String) -> String { "'" + Self.oneLine(s).replacingOccurrences(of: "'", with: "''") + "'" }
+    /// PowerShell single-quoted string. PowerShell also ends a single-quoted string at
+    /// curly single quotes (as in a Mac name like `Sam’s Mac`), so those are doubled too.
+    func ps(_ s: String) -> String {
+        var out = "'"
+        for c in Self.oneLine(s) {
+            if "'\u{2018}\u{2019}\u{201A}\u{201B}".contains(c) { out.append(c) }
+            out.append(c)
+        }
+        return out + "'"
+    }
     /// POSIX shell single-quoted string.
     func sh(_ s: String) -> String { "'" + Self.oneLine(s).replacingOccurrences(of: "'", with: #"'\''"#) + "'" }
 

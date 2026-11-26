@@ -93,10 +93,31 @@ import Testing
         #expect(sh.contains(#"set_setting 'org.gnome.desktop.interface' 'color-scheme' ''\''prefer-dark'\'''"#))
         #expect(!sh.contains("it's\nmine"))
         let win = PlatformExport.make(m, for: .windows).files()
-        #expect(win["setup.ps1"]!.hasPrefix("# Cairn"))
+        #expect(win["setup.ps1"]!.hasPrefix("\u{FEFF}# Cairn")) // BOM, so Windows PowerShell 5.1 reads UTF-8
         #expect(win["setup.ps1"]!.contains("param([switch]$Apply)"))
         #expect(win["setup.ps1"]!.contains("'Git.Git' = 'git'"))
         #expect(win["winget.json"]!.contains(#""PackageIdentifier": "VideoLAN.VLC""#))
+    }
+
+    @Test func powershellQuotesCurlyApostrophes() {
+        let e = PlatformExport.make(Self.manifest(), for: .windows)
+        #expect(e.ps("Sam\u{2019}s 'Mac'") == "'Sam\u{2019}\u{2019}s ''Mac'''")
+    }
+
+    @Test func windowsScriptChecksBeforeChanging() {
+        let ps = PlatformExport.make(Self.manifest(), for: .windows).files()["setup.ps1"]!
+        // Dry run: skips what's installed, and checks winget knows the rest.
+        #expect(ps.contains("winget list --id $p.Key --exact"))
+        #expect(ps.contains("winget show --id $p.Key --exact --source winget"))
+        #expect(ps.contains("--accept-package-agreements --accept-source-agreements"))
+        // Settings in plain words, skipped when already set; Explorer restarts only on a change.
+        #expect(ps.contains("Label = 'Dark mode for apps'; Explorer = $false"))
+        #expect(ps.contains("Label = 'Show file name extensions'; Explorer = $true"))
+        #expect(ps.contains("already set"))
+        #expect(ps.contains("$restartExplorer = $false"))
+        #expect(ps.contains("Start-Process explorer.exe"))
+        // A restart-needed install is not a failure.
+        #expect(ps.contains("-1978334967"))
     }
 
     @Test func checklistListsWhatToDoByHandAndNeverSecrets() {

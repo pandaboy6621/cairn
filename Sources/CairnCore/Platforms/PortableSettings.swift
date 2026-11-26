@@ -8,6 +8,8 @@ public struct RegistryWrite: Equatable, Sendable {
     public var dword: Int
     /// Explorer must restart for this to show.
     public var restartsExplorer: Bool
+    /// What it does, in plain words, for the script's output: "Show file extensions".
+    public var label: String = ""
 }
 
 /// A GNOME setting, written with `gsettings set`.
@@ -33,22 +35,28 @@ public enum PortableSettings {
         switch s.key {
         case "appearance.style":
             guard isDark(s.value) else { return [] }
-            return [RegistryWrite(path: personalize, name: "AppsUseLightTheme", dword: 0, restartsExplorer: false),
-                    RegistryWrite(path: personalize, name: "SystemUsesLightTheme", dword: 0, restartsExplorer: false)]
+            return [RegistryWrite(path: personalize, name: "AppsUseLightTheme", dword: 0, restartsExplorer: false,
+                                  label: "Dark mode for apps"),
+                    RegistryWrite(path: personalize, name: "SystemUsesLightTheme", dword: 0, restartsExplorer: false,
+                                  label: "Dark mode for the taskbar and Start menu")]
         case "finder.show_all_extensions":
             guard let b = bool(s.value) else { return [] }
-            return [RegistryWrite(path: explorer, name: "HideFileExt", dword: b ? 0 : 1, restartsExplorer: true)]
+            return [RegistryWrite(path: explorer, name: "HideFileExt", dword: b ? 0 : 1, restartsExplorer: true,
+                                  label: b ? "Show file name extensions" : "Hide file name extensions")]
         case "finder.show_hidden_files":
             guard let b = bool(s.value) else { return [] }
-            return [RegistryWrite(path: explorer, name: "Hidden", dword: b ? 1 : 2, restartsExplorer: true)]
+            return [RegistryWrite(path: explorer, name: "Hidden", dword: b ? 1 : 2, restartsExplorer: true,
+                                  label: b ? "Show hidden files" : "Don't show hidden files")]
         case "menubar.clock_show_seconds":
             guard let b = bool(s.value) else { return [] }
-            return [RegistryWrite(path: explorer, name: "ShowSecondsInSystemClock", dword: b ? 1 : 0, restartsExplorer: true)]
+            return [RegistryWrite(path: explorer, name: "ShowSecondsInSystemClock", dword: b ? 1 : 0, restartsExplorer: true,
+                                  label: b ? "Show seconds in the taskbar clock" : "Don't show seconds in the taskbar clock")]
         case "appearance.show_scroll_bars":
             // Windows can only choose between always and hiding them when not in use.
             guard case .string(let v) = s.value, v == "Always" || v == "WhenScrolling" else { return [] }
             return [RegistryWrite(path: #"Control Panel\Accessibility"#, name: "DynamicScrollbars",
-                                  dword: v == "Always" ? 0 : 1, restartsExplorer: false)]
+                                  dword: v == "Always" ? 0 : 1, restartsExplorer: false,
+                                  label: v == "Always" ? "Always show scroll bars" : "Hide scroll bars when not in use")]
         default:
             return []
         }
