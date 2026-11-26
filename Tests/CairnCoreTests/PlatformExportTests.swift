@@ -132,6 +132,12 @@ import Testing
         #expect(ps.contains("Start-Process explorer.exe"))
         // A restart-needed install is not a failure.
         #expect(ps.contains("-1978334967"))
+        // Failed installs get a second try after a pause (Windows Installer can still be busy),
+        // and winget's output can't leak into Install-Package's answer.
+        #expect(ps.contains("if (-not (Install-Package $p.Key)) { $retry += $p }"))
+        #expect(ps.contains("Start-Sleep -Seconds 20"))
+        #expect(ps.contains("if (-not (Install-Package $p.Key)) { $failed += $p.Value }"))
+        #expect(ps.contains("--accept-source-agreements | Out-Host"))
     }
 
     @Test func windowsKeepsServersOnlyOnThePC() {

@@ -226,6 +226,15 @@ public struct PlatformExport: Equatable, Sendable {
             if ($Apply) { exit 1 }
         }
         if ($packages.Count -gt 0) { Write-Host "Packages ($($packages.Count))" }
+        # True when installed (or already there). Needs a restart to finish: done, say so at the end.
+        # winget's own output goes straight to the screen: anything else a function prints is returned.
+        function Install-Package($id) {
+            winget install --id $id --exact --source winget --accept-package-agreements --accept-source-agreements | Out-Host
+            $code = $LASTEXITCODE
+            if ($code -eq -1978334967 -or $code -eq -1978334966) { $script:reboot = $true; return $true }
+            $code -eq 0 -or $code -eq -1978335189 -or $code -eq -1978335135
+        }
+        $retry = @()
         foreach ($p in $packages.GetEnumerator()) {
             if ($haveWinget) {
                 winget list --id $p.Key --exact --accept-source-agreements *> $null
@@ -233,17 +242,23 @@ public struct PlatformExport: Equatable, Sendable {
             }
             if ($Apply) {
                 Write-Host "  installing $($p.Value) ($($p.Key))"
-                winget install --id $p.Key --exact --source winget --accept-package-agreements --accept-source-agreements
-                $code = $LASTEXITCODE
-                # Already installed, or nothing newer: done. Needs a restart to finish: done, say so at the end.
-                if ($code -eq -1978334967 -or $code -eq -1978334966) { $reboot = $true }
-                elseif ($code -ne 0 -and $code -ne -1978335189 -and $code -ne -1978335135) { $failed += $p.Value }
+                if (-not (Install-Package $p.Key)) { $retry += $p }
             } elseif ($haveWinget) {
                 winget show --id $p.Key --exact --source winget --accept-source-agreements *> $null
                 if ($LASTEXITCODE -eq 0) { Write-Host "  would install $($p.Value) ($($p.Key))" }
                 else { Write-Host "  can't find $($p.Value) ($($p.Key)) in winget"; $notFound += $p.Value }
             } else {
                 Write-Host "  would install $($p.Value) ($($p.Key))"
+            }
+        }
+        # Windows Installer handles one .msi at a time and can stay busy after a big one
+        # ("Install server not responding"), so failures get a second try at the end.
+        if ($retry.Count -gt 0) {
+            Write-Host "  trying again: $(($retry | ForEach-Object { $_.Value }) -join ', ')"
+            Start-Sleep -Seconds 20
+            foreach ($p in $retry) {
+                Write-Host "  installing $($p.Value) ($($p.Key)), second try"
+                if (-not (Install-Package $p.Key)) { $failed += $p.Value }
             }
         }
 
