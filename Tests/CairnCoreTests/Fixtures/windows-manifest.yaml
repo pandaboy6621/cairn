@@ -1,0 +1,55 @@
+apps:
+- id: 9WZDNCRFJ3TJ
+  include: true
+  name: Netflix
+  source: msstore
+created: 2026-11-26T12:00:00Z
+device:
+  name: test-pc
+  os: windows
+  os_version: 10.0.26100
+dotfiles:
+- content: |
+    [user]
+    	name = Test User
+  include: true
+  kind: git
+  path: ~/.gitconfig
+  redacted: 0
+layout:
+  taskbar:
+    apps:
+    - File Explorer
+    - Firefox
+    - Terminal
+    include: true
+packages:
+- id: 9NKSQGP7F2NH
+  include: true
+  kind: msstore
+  resolvers:
+    msstore: 9NKSQGP7F2NH
+- id: Git.Git
+  include: true
+  kind: winget
+  resolvers:
+    winget: Git.Git
+- id: Mozilla.Firefox
+  include: false
+  kind: winget
+  resolvers:
+    winget: Mozilla.Firefox
+schema: 1
+sensitive: []
+settings:
+- adapter:
+    windows:
+      name: HideFileExt
+      path: Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+      type: dword
+  include: true
+  key: finder.show_all_extensions
+  platforms:
+  - windows
+  value: 1
+shares: []

@@ -67,7 +67,7 @@ public enum BackupFolder {
     static func includedCount(_ m: Manifest) -> Int {
         m.packages.filter(\.include).count + m.apps.filter(\.include).count + m.settings.filter(\.include).count
             + m.shares.filter(\.include).count + m.dotfiles.filter(\.include).count + (m.layout.dock?.include == true ? 1 : 0) + (m.layout.displays?.include == true ? 1 : 0)
-            + (m.layout.wallpaper?.include == true ? 1 : 0)
+            + (m.layout.wallpaper?.include == true ? 1 : 0) + (m.layout.taskbar?.include == true ? 1 : 0)
     }
 
     /// `/Users/x/Library/...` → `~/Library/...` for display.

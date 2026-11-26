@@ -45,6 +45,7 @@ public struct ManifestDiff: Equatable, Sendable {
             dock(old.layout.dock, new.layout.dock),
             displays(old.layout.displays, new.layout.displays),
             wallpaper(old.layout.wallpaper, new.layout.wallpaper),
+            ordered("layout.taskbar", old.layout.taskbar.map { ($0.apps, $0.include) }, new.layout.taskbar.map { ($0.apps, $0.include) }),
             keyed("shares", old.shares, new.shares, id: \.url) { a, b in
                 var parts: [Change] = []
                 if a.username != b.username { parts.append(Change(id: "\(a.url) user", from: a.username ?? "none", to: b.username ?? "none")) }
@@ -100,8 +101,13 @@ public struct ManifestDiff: Equatable, Sendable {
     }
 
     private static func dock(_ old: DockLayout?, _ new: DockLayout?) -> Section {
-        var section = Section(name: "layout.dock")
-        let a = old?.apps ?? [], b = new?.apps ?? []
+        ordered("layout.dock", old.map { ($0.apps, $0.include) }, new.map { ($0.apps, $0.include) })
+    }
+
+    /// A list whose order matters (the Dock, the taskbar): what came and went, and reordering.
+    private static func ordered(_ name: String, _ old: ([String], Bool)?, _ new: ([String], Bool)?) -> Section {
+        var section = Section(name: name)
+        let a = old?.0 ?? [], b = new?.0 ?? []
         section.added = b.filter { !a.contains($0) }
         section.removed = a.filter { !b.contains($0) }
         let common = Set(a).intersection(b)
@@ -109,8 +115,8 @@ public struct ManifestDiff: Equatable, Sendable {
         if orderA != orderB {
             section.changed.append(Change(id: "order", from: orderA.map(shortName).joined(separator: ", "), to: orderB.map(shortName).joined(separator: ", ")))
         }
-        if let o = old, let n = new, o.include != n.include {
-            section.changed.append(Change(id: "include", from: "\(o.include)", to: "\(n.include)"))
+        if let o = old, let n = new, o.1 != n.1 {
+            section.changed.append(Change(id: "include", from: "\(o.1)", to: "\(n.1)"))
         }
         return section
     }
@@ -153,7 +159,9 @@ public struct ManifestDiff: Equatable, Sendable {
     }
 
     private static func describe(_ a: SettingAdapters) -> String {
-        guard let m = a.macos else { return "none" }
-        return "macos \(m.domain) \(m.key) (\(m.type))"
+        if let m = a.macos { return "macos \(m.domain) \(m.key) (\(m.type))" }
+        if let w = a.windows { return "windows \(w.path) \(w.name) (\(w.type))" }
+        if let g = a.gnome { return "gnome \(g.schema) \(g.key)" }
+        return "none"
     }
 }

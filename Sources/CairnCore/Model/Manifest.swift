@@ -94,7 +94,7 @@ public enum ManifestError: Error, Equatable, CustomStringConvertible {
 
 public struct Device: Codable, Equatable, Sendable {
     public var name: String
-    /// `macos` or `linux`.
+    /// `macos`, `linux` or `windows`.
     public var os: String
     public var osVersion: String
     /// Linux only: the distribution's name, like `Ubuntu`. Nil on macOS.
@@ -110,6 +110,11 @@ public struct Device: Codable, Equatable, Sendable {
     /// For people: `macOS 15.1`, `Ubuntu 26.04`.
     public var osTitle: String {
         if os == "macos" { return "macOS \(osVersion)" }
+        // Windows 11 still reports 10.0; builds from 22000 on are 11.
+        if os == "windows" {
+            let build = osVersion.split(separator: ".").dropFirst(2).first.flatMap { Int($0) } ?? 0
+            return build >= 22000 ? "Windows 11" : "Windows \(osVersion)"
+        }
         return "\(distro ?? (os == "linux" ? "Linux" : os)) \(osVersion)"
     }
 
@@ -126,6 +131,9 @@ public struct PackageItem: Codable, Equatable, Sendable {
         case formula, cask, tap
         /// Linux: a distro package (apt), a Flathub app, a Snap.
         case apt, flatpak, snap
+        /// Windows: a winget package (`Git.Git`), or a Microsoft Store app by its
+        /// Store id (`9NKSQGP7F2NH`).
+        case winget, msstore
     }
 
     /// Canonical id (e.g. `vlc`). Unique together with `kind`.
@@ -187,10 +195,28 @@ public struct SettingAdapters: Codable, Equatable, Sendable {
     public var macos: PreferenceRef?
     /// GNOME (Linux). Optional: manifests from Macs have none.
     public var gnome: GSettingsRef?
+    /// Windows: a per-user registry value. Optional, like `gnome`.
+    public var windows: RegistryRef?
 
-    public init(macos: PreferenceRef? = nil, gnome: GSettingsRef? = nil) {
+    public init(macos: PreferenceRef? = nil, gnome: GSettingsRef? = nil, windows: RegistryRef? = nil) {
         self.macos = macos
         self.gnome = gnome
+        self.windows = windows
+    }
+}
+
+/// A Windows registry value below `HKEY_CURRENT_USER` (Cairn never writes machine-wide).
+public struct RegistryRef: Codable, Equatable, Sendable {
+    /// e.g. `Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced`.
+    public var path: String
+    public var name: String
+    /// `dword`, `qword` or `string`.
+    public var type: String
+
+    public init(path: String, name: String, type: String) {
+        self.path = path
+        self.name = name
+        self.type = type
     }
 }
 
@@ -224,11 +250,27 @@ public struct Layout: Codable, Equatable, Sendable {
     public var displays: DisplayLayout?
     /// Desktop pictures. Optional: older manifests have none.
     public var wallpaper: WallpaperLayout?
+    /// Windows taskbar pins. Optional: Mac and Linux manifests have none.
+    public var taskbar: TaskbarLayout?
 
-    public init(dock: DockLayout? = nil, displays: DisplayLayout? = nil, wallpaper: WallpaperLayout? = nil) {
+    public init(dock: DockLayout? = nil, displays: DisplayLayout? = nil, wallpaper: WallpaperLayout? = nil,
+                taskbar: TaskbarLayout? = nil) {
         self.dock = dock
         self.displays = displays
         self.wallpaper = wallpaper
+        self.taskbar = taskbar
+    }
+}
+
+/// Apps pinned to the Windows taskbar, left to right, by their Start menu name.
+/// Order is meaningful, so it is never sorted.
+public struct TaskbarLayout: Codable, Equatable, Sendable {
+    public var apps: [String]
+    public var include: Bool
+
+    public init(apps: [String], include: Bool = true) {
+        self.apps = apps
+        self.include = include
     }
 }
 

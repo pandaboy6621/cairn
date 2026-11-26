@@ -74,7 +74,9 @@ public enum PackageCatalog {
         // From a Linux backup: find the entry with this name, for the other platforms' names.
         case .apt: return byName(formulae, casks) { $0.apt == p.id }
         case .flatpak: return byName(casks, formulae) { $0.flatpak == p.id }
-        case .snap: return nil
+        case .snap, .msstore: return nil
+        // From a Windows backup.
+        case .winget: return byName(casks, formulae) { $0.winget == p.id }
         }
     }
 

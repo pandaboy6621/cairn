@@ -217,7 +217,8 @@ public struct Checklist: Sendable {
     static func buildItems(_ m: Manifest) -> [ChecklistItem] {
         var out: [ChecklistItem] = []
         let kindTitles: [PackageItem.Kind: String] = [.formula: "Formulae", .cask: "Casks", .tap: "Taps",
-                                                       .apt: "apt packages", .flatpak: "Flatpak apps", .snap: "Snaps"]
+                                                       .apt: "apt packages", .flatpak: "Flatpak apps", .snap: "Snaps",
+                                                       .winget: "winget packages", .msstore: "Microsoft Store apps"]
         for kind in PackageItem.Kind.allCases {
             for p in m.packages where p.kind == kind {
                 let brew = p.resolvers["brew"] ?? p.id
