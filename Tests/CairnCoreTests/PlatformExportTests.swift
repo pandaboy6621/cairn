@@ -149,6 +149,30 @@ import Testing
         #expect(ps.contains("[IO.File]::WriteAllText($dst, $text, $utf8)"))
     }
 
+    @Test func taskbarFollowsTheDock() {
+        let dock = ["/System/Applications/Apps.app", "/System/Applications/Messages.app", "spacer",
+                    "/Applications/Firefox.app", "/System/Applications/Mail.app", "/Applications/Safari.app",
+                    "/System/Applications/iPhone Mirroring.app", "/System/Applications/Utilities/Terminal.app",
+                    "/System/Applications/Music.app", "/Applications/Brave Browser.app"]
+        #expect(TaskbarPins.windows(dock: dock, usesOffice: true)
+            == ["File Explorer", "Phone Link", "Firefox", "Outlook", "Terminal", "Apple Music", "Brave"])
+        // Without Office, Mail has no Windows counterpart to pin.
+        #expect(!TaskbarPins.windows(dock: dock, usesOffice: false).contains("Outlook"))
+
+        let e = PlatformExport.make(Self.manifest(), for: .windows) // Dock: Safari only
+        #expect(e.taskbar == ["File Explorer"])
+        let ps = e.files()["setup.ps1"]!
+        #expect(ps.contains("$taskbar = @('File Explorer')"))
+        #expect(ps.contains(#"PinListPlacement="Replace""#) && ps.contains(#"PinGeneration="1""#))
+        // Never empties an existing policy key; asks for permission only if needed.
+        #expect(ps.contains("if (-not (Test-Path '$key')) { New-Item -Path '$key' -Force | Out-Null }"))
+        #expect(ps.contains("Start-Process powershell -Verb RunAs"))
+        let list = e.files()["CHECKLIST.md"]!
+        #expect(list.contains("### Taskbar") && list.contains("- The display arrangement and wallpaper"))
+        // Linux kits don't touch it.
+        #expect(PlatformExport.make(Self.manifest(), for: .linux).taskbar.isEmpty)
+    }
+
     @Test func checklistListsWhatToDoByHandAndNeverSecrets() {
         let text = PlatformExport.make(Self.manifest(), for: .windows).files()["CHECKLIST.md"]!
         #expect(text.contains("- [ ] obscure-tool"))

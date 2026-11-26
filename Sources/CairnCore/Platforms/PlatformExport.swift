@@ -66,6 +66,8 @@ public struct PlatformExport: Equatable, Sendable {
     /// Included settings with no equivalent on the target.
     public var settingsLeft = 0
     public var hasLayout = false
+    /// Windows: Start menu names to pin to the taskbar, in the Dock's order.
+    public var taskbar: [String] = []
     public var secrets = 0
 
     public var packageCount: Int {
@@ -126,6 +128,9 @@ public struct PlatformExport: Equatable, Sendable {
         }
         e.hasLayout = m.layout.dock?.include == true || m.layout.displays?.include == true
             || m.layout.wallpaper?.include == true
+        if target == .windows, let dock = m.layout.dock, dock.include {
+            e.taskbar = TaskbarPins.windows(dock: dock.apps, usesOffice: PackageCatalog.usesMicrosoftOffice(m))
+        }
         e.secrets = m.sensitive.filter(\.include).count
         return e
     }
@@ -203,6 +208,7 @@ public struct PlatformExport: Equatable, Sendable {
         $failed = @()
         $notFound = @()
         $reboot = $false
+        $signOut = $false
 
         """
         s += "$packages = [ordered]@{\n"
@@ -266,13 +272,14 @@ public struct PlatformExport: Equatable, Sendable {
             if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
         }
 
-        \(powershellDotfiles())
+        \(powershellTaskbar())\(powershellDotfiles())
         Write-Host ''
         if ($notFound.Count -gt 0) { Write-Host "winget doesn't know: $($notFound -join ', '). Look for them with: winget search <name>" }
         if (-not $Apply) { Write-Host 'Dry run: nothing changed. Run again with -Apply to make these changes.' }
         else {
             if ($failed.Count -gt 0) { Write-Host "Didn't finish: $($failed -join ', ')" }
             if ($reboot) { Write-Host 'Restart Windows to finish installing.' }
+            elseif ($signOut) { Write-Host 'Sign out of Windows and back in to see your taskbar.' }
         }
         Write-Host 'See CHECKLIST.md for what to do by hand.'
 
@@ -493,6 +500,66 @@ public struct PlatformExport: Equatable, Sendable {
         return s
     }
 
+    /// Pins the Dock's apps to the taskbar through Windows' taskbar layout policy (the
+    /// supported way: there's no API to pin). PinGeneration lets the user unpin them.
+    func powershellTaskbar() -> String {
+        guard !taskbar.isEmpty else { return "" }
+        var s = "$taskbar = @(" + taskbar.map(ps).joined(separator: ", ") + ")\n"
+        s += """
+        Write-Host "Taskbar, in your Dock's order ($($taskbar.Count))"
+        $startApps = @(Get-StartApps)
+        $pins = @(); $absent = @()
+        foreach ($n in $taskbar) {
+            $a = $startApps | Where-Object { $_.Name -eq $n } | Select-Object -First 1
+            if ($a) { $pins += $a } else { $absent += $n }
+        }
+        if ($pins.Count -gt 0) { Write-Host "  $(if ($Apply) { 'pinning' } else { 'would pin' }): $(($pins | ForEach-Object { $_.Name }) -join ', ')" }
+        if ($absent.Count -gt 0) { Write-Host "  not on this PC$(if (-not $Apply) { ' (yet)' }): $($absent -join ', ')" }
+        if ($Apply -and $pins.Count -gt 0) {
+            $menus = @("$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs", "$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs")
+            $lines = foreach ($a in $pins) {
+                $id = $a.AppID
+                if ($id -like '*!*') { '<taskbar:UWA AppUserModelID="' + [Security.SecurityElement]::Escape($id) + '" PinGeneration="1"/>'; continue }
+                # Apps known by their file path pin more reliably through their Start menu shortcut.
+                $lnk = if ($id -like '*\\*') { Get-ChildItem $menus -Recurse -Filter "$($a.Name).lnk" -ErrorAction SilentlyContinue | Select-Object -First 1 }
+                if ($lnk) { '<taskbar:DesktopApp DesktopApplicationLinkPath="' + [Security.SecurityElement]::Escape($lnk.FullName) + '" PinGeneration="1"/>' }
+                else { '<taskbar:DesktopApp DesktopApplicationID="' + [Security.SecurityElement]::Escape($id) + '" PinGeneration="1"/>' }
+            }
+            $xml = @(
+                '<?xml version="1.0" encoding="utf-8"?>',
+                '<LayoutModificationTemplate xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification" xmlns:defaultlayout="http://schemas.microsoft.com/Start/2014/FullDefaultLayout" xmlns:start="http://schemas.microsoft.com/Start/2014/StartLayout" xmlns:taskbar="http://schemas.microsoft.com/Start/2014/TaskbarLayout" Version="1">',
+                '  <CustomTaskbarLayoutCollection PinListPlacement="Replace">',
+                '    <defaultlayout:TaskbarLayout>',
+                '      <taskbar:TaskbarPinList>'
+            ) + ($lines | ForEach-Object { '        ' + $_ }) + @(
+                '      </taskbar:TaskbarPinList>',
+                '    </defaultlayout:TaskbarLayout>',
+                '  </CustomTaskbarLayoutCollection>',
+                '</LayoutModificationTemplate>'
+            )
+            $layout = Join-Path $env:LOCALAPPDATA 'Cairn\\taskbar.xml'
+            New-Item -ItemType Directory -Force -Path (Split-Path $layout) | Out-Null
+            [IO.File]::WriteAllText($layout, ($xml -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
+            # The policy key needs administrator rights: Windows asks once.
+            $key = 'HKCU:\\Software\\Policies\\Microsoft\\Windows\\Explorer'
+            $q = $layout.Replace("'", "''")
+            # Only creates the key if it's missing: New-Item -Force on a key that exists empties it.
+            $cmd = "`$ErrorActionPreference = 'Stop'; if (-not (Test-Path '$key')) { New-Item -Path '$key' -Force | Out-Null }; " +
+                "New-ItemProperty -Path '$key' -Name StartLayoutFile -Value '$q' -PropertyType ExpandString -Force | Out-Null; " +
+                "New-ItemProperty -Path '$key' -Name LockedStartLayout -Value 1 -PropertyType DWord -Force | Out-Null"
+            try { & ([scriptblock]::Create($cmd)) } catch {
+                Write-Host '  Windows will ask for permission to set the taskbar layout'
+                $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+                Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -EncodedCommand $enc"
+            }
+            if ((Get-ItemProperty -Path $key -Name StartLayoutFile -ErrorAction SilentlyContinue).StartLayoutFile -eq $layout) { $signOut = $true }
+            else { $failed += 'taskbar' }
+        }
+
+        """
+        return s
+    }
+
     func bashDotfiles() -> String {
         let files = installedDotfiles
         guard !files.isEmpty else { return "" }
@@ -530,6 +597,13 @@ public struct PlatformExport: Equatable, Sendable {
             s += registry.isEmpty ? ".\n\n" : " and sets \(registry.count) setting\(registry.count == 1 ? "" : "s").\n\n"
             s += "In PowerShell, in this folder:\n\n```\npowershell -ExecutionPolicy Bypass -File .\\setup.ps1\n```\n\n"
             s += "That only lists what it would do. Add `-Apply` to do it (this also accepts the packages' license terms for you). Or install just the packages with `winget import -i winget.json`.\n\n"
+            if !taskbar.isEmpty {
+                s += "### Taskbar\n\n"
+                s += "The script pins your Dock's apps to the taskbar in the same order, File Explorer first, in place of what's pinned now. "
+                s += "Apps that aren't installed yet are skipped: run the script again once they are. Windows asks for permission once, and the new taskbar shows after you sign out and back in. "
+                s += "You can still unpin apps yourself. To hand the taskbar back to Windows, open Registry Editor, go to "
+                s += "`HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Explorer` and delete `StartLayoutFile` and `LockedStartLayout`.\n\n"
+            }
         case .linux:
             s += "Installs packages with apt (Debian, Ubuntu) or dnf (Fedora), apps from Flathub"
             s += gsettings.isEmpty ? ".\n\n" : ", and sets \(gsettings.count) GNOME setting\(gsettings.count == 1 ? "" : "s").\n\n"
@@ -598,7 +672,7 @@ public struct PlatformExport: Equatable, Sendable {
             left.append("\(Self.oneLine(r.label)): \(r.reason)")
         }
         if settingsLeft > 0 { left.append("\(settingsLeft) macOS setting\(settingsLeft == 1 ? "" : "s") with no \(target.title) equivalent") }
-        if hasLayout { left.append("The Dock, display arrangement and wallpaper") }
+        if hasLayout { left.append(taskbar.isEmpty ? "The Dock, display arrangement and wallpaper" : "The display arrangement and wallpaper") }
         if secrets > 0 { left.append("\(secrets) secret\(secrets == 1 ? "" : "s") (Wi-Fi, SSH keys, passwords): they stay encrypted in your backup and are never written to a plain file") }
         if !left.isEmpty {
             s += "## Not carried over\n\n" + left.map { "- \($0)" }.joined(separator: "\n") + "\n"
