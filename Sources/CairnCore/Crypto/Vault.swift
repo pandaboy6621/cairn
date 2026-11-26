@@ -1,6 +1,12 @@
+import Foundation
+#if canImport(CryptoKit)
 import CommonCrypto
 import CryptoKit
-import Foundation
+#else
+// Linux: Apple's swift-crypto, the same API as CryptoKit.
+import Crypto
+import CryptoExtras
+#endif
 
 /// The Sensitive tier's encryption.
 ///
@@ -70,10 +76,17 @@ public enum Vault {
         if password.count < 8 { throw VaultError.passwordTooShort }
     }
 
-    /// PBKDF2-HMAC-SHA256 via CommonCrypto, zeroing the password bytes after.
+    /// PBKDF2-HMAC-SHA256 via CommonCrypto (swift-crypto on Linux), zeroing the password bytes after.
     static func passwordKey(_ password: String, salt: Data, iterations: Int) throws -> SymmetricKey {
         guard iterations >= minimumIterations else { throw VaultError.unsupported("too few KDF iterations") }
         var passwordBytes = Array(password.utf8)
+        #if !canImport(CommonCrypto)
+        defer { zero(&passwordBytes) }
+        do {
+            return try KDF.Insecure.PBKDF2.deriveKey(from: passwordBytes, salt: salt, using: .sha256,
+                                                     outputByteCount: 32, unsafeUncheckedRounds: iterations)
+        } catch { throw VaultError.crypto("PBKDF2 failed") }
+        #else
         var derived = [UInt8](repeating: 0, count: 32)
         defer { zero(&passwordBytes); zero(&derived) }
         let status = salt.withUnsafeBytes { saltPtr in
@@ -88,6 +101,7 @@ public enum Vault {
         }
         guard status == kCCSuccess else { throw VaultError.crypto("PBKDF2 failed (\(status))") }
         return SymmetricKey(data: derived)
+        #endif
     }
 
     static func wrap(_ key: SymmetricKey, with wrapping: SymmetricKey) throws -> SealedData {
@@ -102,18 +116,34 @@ public enum Vault {
     }
 
     static func randomBytes(_ count: Int) -> Data {
+        #if canImport(Security)
         var bytes = [UInt8](repeating: 0, count: count)
         let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
         precondition(status == errSecSuccess, "no system randomness")
         return Data(bytes)
+        #else
+        // Linux: the system generator reads getrandom(2), a cryptographic source.
+        var rng = SystemRandomNumberGenerator()
+        return Data((0..<count).map { _ in UInt8.random(in: .min ... .max, using: &rng) })
+        #endif
     }
 
     static func zero(_ bytes: inout [UInt8]) {
-        bytes.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) }
+        bytes.withUnsafeMutableBytes { wipe($0) }
     }
 
     static func zero(_ data: inout Data) {
-        data.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) }
+        data.withUnsafeMutableBytes { wipe($0) }
+    }
+
+    /// Zeroes memory in a way the compiler can't optimize away.
+    static func wipe(_ p: UnsafeMutableRawBufferPointer) {
+        guard let base = p.baseAddress, p.count > 0 else { return }
+        #if canImport(Darwin)
+        _ = memset_s(base, p.count, 0, p.count)
+        #else
+        explicit_bzero(base, p.count)
+        #endif
     }
 }
 

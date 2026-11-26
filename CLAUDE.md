@@ -15,7 +15,7 @@ Name: Cairn (a stack of stones marking the trail). Icon: three stacked teal ston
   - `CairnCore`: manifest model, scanners, appliers, crypto, snapshot store. No UI imports.
   - `cairn` (CLI): swift-argument-parser. Everything the GUI does must be doable from the CLI.
   - `CairnApp`: SwiftUI app, thin layer over `CairnCore`.
-- Dependencies: only `Yams` (YAML) and `swift-argument-parser`. Ask before adding any other.
+- Dependencies: only `Yams` (YAML), `swift-argument-parser`, and for Linux `swift-crypto` (CryptoKit API; brings `swift-asn1`) and `adwaita-swift` (GNOME app). Ask before adding any other.
 - Keep `CairnCore` free of macOS-only types in the *model* layer (manifest structs, package IDs, setting keys) so a Windows/Linux port can reuse the schema. macOS-specific code lives in `Adapters/macOS`.
 
 ## Manifest (universal format)

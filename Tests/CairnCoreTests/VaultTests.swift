@@ -11,6 +11,15 @@ import Testing
         return (r.envelope, r.recoveryKey, r.key)
     }
 
+    /// The same password gives the same key on macOS (CommonCrypto) and Linux
+    /// (swift-crypto), so a vault made on one opens on the other. Known answer
+    /// from Python's hashlib.pbkdf2_hmac.
+    @Test func passwordKeyMatchesKnownPBKDF2Answer() throws {
+        let key = try Vault.passwordKey("correct horse", salt: Data("0123456789abcdef".utf8), iterations: 1000)
+        let hex = key.withUnsafeBytes { $0.map { String(format: "%02x", $0) }.joined() }
+        #expect(hex == "70183c0f60ee9e0441f64efab334e17f97a17f2073f7dd5acba3d3f12af09383")
+    }
+
     @Test func secretRoundTripsAfterUnlockingWithPassword() throws {
         let (env, _, key) = try make()
         let sealed = try key.seal(Data("hunter2".utf8), ref: "vault://wifi/Home")
