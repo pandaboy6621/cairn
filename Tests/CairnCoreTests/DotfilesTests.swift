@@ -191,6 +191,21 @@ import Testing
 
     // MARK: Other platforms
 
+    @Test func ghCredentialHelperLosesHomebrewPath() {
+        let git = DotfileItem(path: "~/.gitconfig", kind: .git, content: """
+        [credential "https://github.com"]
+        \thelper =
+        \thelper = !/opt/homebrew/bin/gh auth git-credential
+
+        """)
+        for windows in [true, false] {
+            let p = Dotfiles.portable(git, windows: windows)
+            #expect(p.text.contains("\thelper = !gh auth git-credential\n"))
+            #expect(!p.text.contains("/opt/homebrew"))
+            #expect(p.commented == 0)
+        }
+    }
+
     @Test func portableConfig() {
         let git = DotfileItem(path: "~/.gitconfig", kind: .git, content: """
         [core]
@@ -212,6 +227,8 @@ import Testing
 
         let ssh = DotfileItem(path: "~/.ssh/config", kind: .ssh, content: "Host *\n  UseKeychain yes\n  AddKeysToAgent yes\n")
         #expect(Dotfiles.portable(ssh, windows: false).text == "Host *\n  # cairn: macOS only: UseKeychain yes\n  AddKeysToAgent yes\n")
+        let orb = DotfileItem(path: "~/.ssh/config", kind: .ssh, content: "Include ~/.orbstack/ssh/config\nHost box\n")
+        #expect(Dotfiles.portable(orb, windows: true).text == "# cairn: macOS only: Include ~/.orbstack/ssh/config\nHost box\n")
         #expect(Dotfiles.kitName("~/.ssh/config") == "ssh-config")
         #expect(Dotfiles.kitName("~/.config/git/ignore") == "config-git-ignore")
         #expect(Dotfiles.kitName("~/.gitconfig") == "gitconfig")

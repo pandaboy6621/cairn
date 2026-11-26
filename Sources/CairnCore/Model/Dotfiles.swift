@@ -157,11 +157,15 @@ public enum Dotfiles {
 
     /// Markers of macOS-only paths and options in git and SSH config.
     static let macOnlyMarkers = ["/opt/homebrew/", "/usr/local/Cellar/", "/usr/local/Homebrew/", "/Applications/",
-                                 "/Library/", "/System/", "osxkeychain", "UseKeychain"]
+                                 "/Library/", "/System/", "osxkeychain", "UseKeychain",
+                                 // OrbStack (a Mac app) adds an Include of its own SSH config.
+                                 "/.orbstack/"]
+
+    static let ghHelper = #"^(\s*helper\s*=\s*!)\S*/gh(\s+auth\s+git-credential\b.*)$"#
 
     /// Git or SSH config made ready for Linux or Windows: `/Users/name/` becomes
     /// `~/`, the macOS Keychain credential helper becomes Git Credential Manager on
-    /// Windows, and other macOS-only lines are commented out with a note.
+    /// Windows, the GitHub CLI's helper loses its Homebrew path, and other macOS-only lines are commented out with a note.
     /// Returns the text and how many lines were commented out.
     public static func portable(_ item: DotfileItem, windows: Bool) -> (text: String, commented: Int) {
         var commented = 0
@@ -172,6 +176,11 @@ public enum Dotfiles {
             if trimmed.hasPrefix("#") || trimmed.hasPrefix(";") { out.append(line); continue }
             if windows, item.kind == .git, line.range(of: #"^\s*helper\s*=\s*osxkeychain\s*$"#, options: .regularExpression) != nil {
                 out.append(line.replacingOccurrences(of: "osxkeychain", with: "manager"))
+                continue
+            }
+            // `gh auth setup-git` writes the full Homebrew path to gh; gh is on the PATH elsewhere.
+            if item.kind == .git, line.range(of: ghHelper, options: .regularExpression) != nil {
+                out.append(line.replacingOccurrences(of: ghHelper, with: "$1gh$2", options: .regularExpression))
                 continue
             }
             if macOnlyMarkers.contains(where: line.contains) {
