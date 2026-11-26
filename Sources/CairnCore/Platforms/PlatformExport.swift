@@ -305,14 +305,15 @@ public struct PlatformExport: Equatable, Sendable {
           local manager=$1; shift
           [ $# -gt 0 ] || return 0
           echo "Packages from $manager ($#)"
-          [ $APPLY = 1 ] && [ "$manager" = apt ] && sudo apt-get update
+          # Quiet: one line per package. Errors still show (they go to stderr).
+          [ $APPLY = 1 ] && [ "$manager" = apt ] && sudo apt-get update -qq >/dev/null
           for p in "$@"; do
             if installed "$manager" "$p"; then echo "  $p is already installed"; continue; fi
             if ! available "$manager" "$p"; then echo "  $p isn't in $manager here"; missing+=("$p"); continue; fi
             if [ $APPLY = 1 ]; then
               echo "  installing $p"
-              if [ "$manager" = apt ]; then sudo apt-get install -y "$p" || failed+=("$p")
-              else sudo dnf install -y "$p" || failed+=("$p"); fi
+              if [ "$manager" = apt ]; then sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null || failed+=("$p")
+              else sudo dnf install -y -q "$p" >/dev/null || failed+=("$p"); fi
             else
               echo "  would install $p"
             fi

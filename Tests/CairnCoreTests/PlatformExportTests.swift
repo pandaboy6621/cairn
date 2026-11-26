@@ -185,7 +185,8 @@ import Testing
 
     @Test func linuxApplyInstallsOnlyWhatIsMissing() throws {
         let r = try Self.runLinuxKit(["--apply"])
-        #expect(r.sudo.contains("apt-get install -y nodejs"))
+        #expect(r.sudo.contains("apt-get install -y -qq nodejs"))
+        #expect(r.sudo.contains("apt-get update -qq")) // quiet: one line per package
         #expect(r.sudo.contains("apt-get install -y flatpak"))
         #expect(!r.sudo.contains("install -y git") && !r.sudo.contains("ghost"))
         #expect(r.out.contains("Didn't work: flatpak")) // the stand-in apt can't really install it
