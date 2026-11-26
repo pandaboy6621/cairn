@@ -42,6 +42,20 @@ import Testing
         #expect(e.secrets == 1 && e.hasLayout)
     }
 
+    @Test func noSecondOfficeSuiteWhereMicrosoftOfficeRuns() {
+        var m = Self.manifest()
+        m.packages.append(PackageItem(id: "libreoffice", kind: .cask, resolvers: ["brew": "libreoffice"]))
+        // Without Office in the backup, LibreOffice goes everywhere.
+        #expect(PlatformExport.make(m, for: .windows).winget.map(\.id).contains("TheDocumentFoundation.LibreOffice"))
+        m.apps.append(AppItem(id: "462054704", name: "Microsoft Word", source: "mas", include: false))
+        let win = PlatformExport.make(m, for: .windows)
+        #expect(!win.winget.map(\.id).contains("TheDocumentFoundation.LibreOffice"))
+        #expect(win.redundant.map(\.label) == ["libreoffice"])
+        #expect(win.files()["CHECKLIST.md"]!.contains("- libreoffice: you use Microsoft Office"))
+        // No Office on Linux, so LibreOffice stays.
+        #expect(PlatformExport.make(m, for: .linux).flatpak.map(\.id).contains("org.libreoffice.LibreOffice"))
+    }
+
     @Test func linuxPrefersFlathubForAppsAndDistroForTools() {
         let e = PlatformExport.make(Self.manifest(), for: .linux)
         #expect(e.apt.map(\.id) == ["git", "nodejs"])

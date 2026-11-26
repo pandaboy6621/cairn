@@ -45,6 +45,27 @@ public enum PackageCatalog {
         p.kind == .tap || macOnly.contains(p.id)
     }
 
+    /// Why a package isn't worth installing on `target`, given the rest of the backup:
+    /// it stands in for something the backup shows is used instead and that runs
+    /// there too. A second office suite next to Microsoft Office, say. Nil to install.
+    public static func redundant(_ p: PackageItem, in m: Manifest, for target: TargetPlatform) -> String? {
+        // Microsoft Office has no Linux version, so LibreOffice stays there.
+        if target == .windows, officeSuites.contains(p.id), usesMicrosoftOffice(m) {
+            return "you use Microsoft Office, which runs on Windows"
+        }
+        return nil
+    }
+
+    static let officeSuites: Set<String> = ["libreoffice", "libreoffice-still", "openoffice", "onlyoffice"]
+    static let officeCasks: Set<String> = ["microsoft-office", "microsoft-word", "microsoft-excel", "microsoft-powerpoint", "microsoft-outlook"]
+    static let officeApps: Set<String> = ["Microsoft Word", "Microsoft Excel", "Microsoft PowerPoint", "Microsoft Outlook"]
+
+    /// On the Mac at backup time, whether or not it's ticked for this kit.
+    static func usesMicrosoftOffice(_ m: Manifest) -> Bool {
+        m.packages.contains { $0.kind == .cask && officeCasks.contains($0.id) }
+            || m.apps.contains { officeApps.contains($0.name) }
+    }
+
     static func lookup(_ p: PackageItem) -> PackageNames? {
         switch p.kind {
         case .formula: return formulae[p.id] ?? formulae[unversioned(p.id)]

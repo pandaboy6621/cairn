@@ -54,6 +54,12 @@ public struct PlatformExport: Equatable, Sendable {
     /// Linux: how to get a package apt or dnf doesn't have, by Homebrew name.
     public var hints: [String: String] = [:]
     public var macOnly: [String] = []
+    /// Left out on purpose, with why: `libreoffice` → "you use Microsoft Office, ...".
+    public struct Skipped: Equatable, Sendable {
+        public var label: String
+        public var reason: String
+    }
+    public var redundant: [Skipped] = []
     public var appStore: [String] = []
     public var shares: [ShareItem] = []
     public var dotfiles: [KitDotfile] = []
@@ -74,6 +80,7 @@ public struct PlatformExport: Equatable, Sendable {
             if p.kind == .tap { continue }
             let label = p.resolvers["brew"] ?? p.id
             if PackageCatalog.isMacOnly(p) { e.macOnly.append(label); continue }
+            if let why = PackageCatalog.redundant(p, in: m, for: target) { e.redundant.append(Skipped(label: label, reason: why)); continue }
             let n = PackageCatalog.names(for: p)
             if target == .linux, let h = n.linuxHint, n.apt == nil || n.dnf == nil { e.hints[label] = h }
             switch target {
@@ -558,6 +565,9 @@ public struct PlatformExport: Equatable, Sendable {
 
         var left: [String] = []
         if !macOnly.isEmpty { left.append("\(macOnly.count) Mac-only package\(macOnly.count == 1 ? "" : "s"): \(macOnly.sorted().map(Self.oneLine).joined(separator: ", "))") }
+        for r in redundant.sorted(by: { $0.label < $1.label }) {
+            left.append("\(Self.oneLine(r.label)): \(r.reason)")
+        }
         if settingsLeft > 0 { left.append("\(settingsLeft) macOS setting\(settingsLeft == 1 ? "" : "s") with no \(target.title) equivalent") }
         if hasLayout { left.append("The Dock, display arrangement and wallpaper") }
         if secrets > 0 { left.append("\(secrets) secret\(secrets == 1 ? "" : "s") (Wi-Fi, SSH keys, passwords): they stay encrypted in your backup and are never written to a plain file") }
