@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -118,3 +119,4 @@ import Testing
         #expect(!CommandPolicy.readOnly.allows(Command("defaults", ["write", "d", "k", "<true/>"])))
     }
 }
+#endif

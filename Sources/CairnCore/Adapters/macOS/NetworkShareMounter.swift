@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NetFS
 
@@ -84,3 +85,4 @@ public enum NetworkShareMounter {
         return key(a) != nil && key(a) == key(b)
     }
 }
+#endif

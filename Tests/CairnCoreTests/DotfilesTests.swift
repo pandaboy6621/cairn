@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -249,3 +250,4 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("dotfiles/ssh-config").path))
     }
 }
+#endif

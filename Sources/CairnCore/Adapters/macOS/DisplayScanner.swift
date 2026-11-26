@@ -1,4 +1,8 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 /// One display as the OS reports it, before Cairn turns it into a `DisplayItem`.
@@ -61,11 +65,23 @@ extension DisplaySystem {
     }
 }
 
+/// Reports no displays: Linux, which has no display reader yet.
+public struct NoDisplays: DisplaySystem {
+    public init() {}
+    public func onlineDisplays() -> [RawDisplay] { [] }
+}
+
+#if os(macOS)
+public typealias DefaultDisplays = CoreGraphicsDisplays
+#else
+public typealias DefaultDisplays = NoDisplays
+#endif
+
 /// Records how monitors are arranged. Read-only.
 public struct DisplayScanner: SetupScanning {
     public var system: DisplaySystem
 
-    public init(system: DisplaySystem = CoreGraphicsDisplays()) {
+    public init(system: DisplaySystem = DefaultDisplays()) {
         self.system = system
     }
 

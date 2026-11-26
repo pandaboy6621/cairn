@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Network
 import Testing
@@ -78,3 +79,4 @@ final class Box<T>: @unchecked Sendable {
     var value: T
     init(_ v: T) { value = v }
 }
+#endif

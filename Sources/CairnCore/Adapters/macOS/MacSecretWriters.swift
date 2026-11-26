@@ -1,3 +1,4 @@
+#if os(macOS)
 import Darwin
 import Foundation
 import Security
@@ -137,3 +138,4 @@ public struct HomeCredentialFiles: CredentialFileSystem {
         }
     }
 }
+#endif

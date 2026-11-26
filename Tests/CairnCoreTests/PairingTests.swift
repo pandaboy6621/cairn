@@ -1,3 +1,4 @@
+#if os(macOS)
 import CryptoKit
 import Foundation
 import Testing
@@ -109,3 +110,4 @@ private final class ClaimingResponder {
         return Handshake.encode(Handshake.M4(box: box, mac: Handshake.mac(Handshake.derive(ikm, salt: th, label: "K"), "R", th)))
     }
 }
+#endif

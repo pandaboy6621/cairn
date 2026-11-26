@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -199,3 +200,4 @@ private func m(_ settings: [SettingItem] = [], wallpaper: WallpaperLayout? = nil
         #expect(!CommandPolicy.readOnly.allows(Command("osascript", ["-e", MacRestorer.darkModeScript(true)])))
     }
 }
+#endif

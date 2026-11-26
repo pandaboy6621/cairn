@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -290,3 +291,4 @@ import Yams
         #expect(SettingValue.double(0.000012).summary == "1.2e-05")
     }
 }
+#endif

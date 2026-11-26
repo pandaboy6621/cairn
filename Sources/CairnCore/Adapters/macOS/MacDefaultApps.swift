@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreServices
 import Foundation
 
@@ -76,3 +77,4 @@ private struct DeprecatedLaunchServices: LaunchServicesCalls {
         LSSetDefaultRoleHandlerForContentType(type, role, bundle)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -221,3 +222,4 @@ final class FakeSharePasswords: SharePasswordSystem, @unchecked Sendable {
             .write(to: folder.appendingPathComponent(VaultStore.secretsFileName))
     }
 }
+#endif

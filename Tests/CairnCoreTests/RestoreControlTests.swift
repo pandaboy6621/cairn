@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -54,3 +55,4 @@ import Testing
         #expect(try runner.run(Command("/usr/bin/true")).succeeded)
     }
 }
+#endif

@@ -40,8 +40,15 @@ import Testing
     }
 
     @Test func defaultFolderIsInApplicationSupport() {
+        #if os(macOS)
         #expect(BackupFolder.defaultURL.path.hasSuffix("Library/Application Support/Cairn/Backups"))
         #expect(BackupFolder.displayPath(BackupFolder.defaultURL) == "~/Library/Application Support/Cairn/Backups")
+        #else
+        // Linux: the XDG data folder.
+        if ProcessInfo.processInfo.environment["XDG_DATA_HOME"] == nil {
+            #expect(BackupFolder.displayPath(BackupFolder.defaultURL) == "~/.local/share/Cairn/Backups")
+        }
+        #endif
     }
 
     @Test func recognisesBackupExtensions() {

@@ -83,8 +83,12 @@ public struct CommandPolicy: Sendable {
                 && args[4].contains("/.ssh/") && !args[4].hasSuffix(".pub")
         case "osascript":
             // Only switching Dark Mode on or off.
+            #if os(macOS)
             return args.count == 2 && args[0] == "-e"
                 && [MacRestorer.darkModeScript(true), MacRestorer.darkModeScript(false)].contains(args[1])
+            #else
+            return false
+            #endif
         default:
             return false
         }

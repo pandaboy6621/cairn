@@ -1,3 +1,4 @@
+#if os(macOS)
 import ArgumentParser
 import CairnCore
 import Darwin
@@ -241,3 +242,4 @@ func readPassword(_ prompt: String, stdin useStdin: Bool) throws -> String {
     }
     return String(cString: buffer)
 }
+#endif

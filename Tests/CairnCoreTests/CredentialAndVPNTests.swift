@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -94,3 +95,4 @@ final class FakeCredentialFiles: CredentialFileSystem, @unchecked Sendable {
         #expect(text.contains("System Settings > VPN"))
     }
 }
+#endif

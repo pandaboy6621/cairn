@@ -1,3 +1,4 @@
+#if os(macOS)
 import Testing
 @testable import CairnCore
 
@@ -18,3 +19,4 @@ import Testing
         #expect(MacRestorer.needsPassword(CommandResult(stderr: "sudo: a terminal is required to read the password", exitCode: 1)))
     }
 }
+#endif

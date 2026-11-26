@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreWLAN
 import Foundation
 
@@ -36,3 +37,4 @@ public struct CoreWLANWiFi: WiFiSystem {
         return false
     }
 }
+#endif

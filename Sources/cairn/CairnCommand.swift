@@ -2,13 +2,21 @@ import ArgumentParser
 import CairnCore
 import Foundation
 
+#if os(macOS)
+private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self,
+                                                Dock.self, Displays.self, VaultCommand.self, SyncCommand.self, Export.self]
+#else
+// Linux: backing up and exporting. Restore, sync, the vault and the Mac layout commands are macOS-only for now.
+private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, Export.self]
+#endif
+
 @main
 struct CairnCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cairn",
         abstract: "Back up, restore, and sync a Mac's setup.",
         version: Cairn.version,
-        subcommands: [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self, Dock.self, Displays.self, VaultCommand.self, SyncCommand.self, Export.self]
+        subcommands: commands
     )
 
     static func main() async {
@@ -19,6 +27,7 @@ struct CairnCommand: AsyncParsableCommand {
     }
 }
 
+#if os(macOS)
 struct Restore: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Make this Mac match a backup. Dry run unless you pass --apply.",
@@ -120,7 +129,9 @@ extension Restore {
     /// What's left after a restore, printed last so it isn't lost in the scroll.
     static func finishingSteps(_ result: RestoreReport) -> String { result.finishingText }
 }
+#endif
 
+#if os(macOS)
 struct Dock: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Add Dock tiles a restore left out, once their apps are installed.",
@@ -191,6 +202,7 @@ struct Dock: ParsableCommand {
         try agent.install(cairn: cairn)
     }
 }
+#endif
 
 /// The app's settings. The `cairn` inside Cairn.app shares the app's bundle id,
 /// so there they're the standard defaults (macOS refuses a suite named after
@@ -333,6 +345,7 @@ struct Snapshots: ParsableCommand {
     }
 }
 
+#if os(macOS)
 struct AutoBackup: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "auto-backup",
@@ -382,6 +395,7 @@ struct AutoBackup: ParsableCommand {
         }
     }
 }
+#endif
 
 struct Scan: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -456,6 +470,7 @@ struct Diff: ParsableCommand {
     }
 }
 
+#if os(macOS)
 struct Displays: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Show the display arrangement, or restore a saved one.",
@@ -481,7 +496,7 @@ struct Displays: ParsableCommand {
     }
 
     func run() throws {
-        let system = CoreGraphicsDisplays()
+        let system = DefaultDisplays()
         let found = try DisplayScanner(system: system).scan(using: ProcessRunner())
         for w in found.warnings { stderr("warning: \(w)") }
         let current = found.displays?.displays ?? []
@@ -519,6 +534,7 @@ struct Displays: ParsableCommand {
         }.joined()
     }
 }
+#endif
 
 func stderr(_ line: String) {
     FileHandle.standardError.write(Data((line + "\n").utf8))

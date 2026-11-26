@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -86,3 +87,4 @@ import Testing
         #expect(r[0].status == .mismatch && r[0].detail.contains("cask:vlc"))
     }
 }
+#endif

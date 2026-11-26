@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreGraphics
 import Foundation
 
@@ -96,3 +97,4 @@ public struct CoreGraphicsDisplays: DisplaySystem {
         return sized.min { abs($0.refreshRate - hz) < abs($1.refreshRate - hz) }
     }
 }
+#endif

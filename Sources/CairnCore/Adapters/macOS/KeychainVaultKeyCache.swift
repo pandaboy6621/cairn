@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Security
 
@@ -40,3 +41,4 @@ public struct KeychainVaultKeyCache: VaultKeyCache {
         SecItemDelete(query(vaultID) as CFDictionary)
     }
 }
+#endif

@@ -15,8 +15,14 @@ enum PlistConverter {
     static func convert(_ value: Any) -> (value: SettingValue, type: String)? {
         switch value {
         case let n as NSNumber:
+            #if canImport(Darwin)
             if CFGetTypeID(n) == CFBooleanGetTypeID() { return (.bool(n.boolValue), "bool") }
             if CFNumberIsFloatType(n) { return (.double(n.doubleValue), "float") }
+            #else
+            let t = String(cString: n.objCType)
+            if t == "B" || t == "c" { return (.bool(n.boolValue), "bool") }
+            if t == "f" || t == "d" { return (.double(n.doubleValue), "float") }
+            #endif
             return (.int(n.intValue), "int")
         case let s as String:
             return (.string(s), "string")

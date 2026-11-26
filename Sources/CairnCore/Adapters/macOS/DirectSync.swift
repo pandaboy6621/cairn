@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Network
 
@@ -356,3 +357,4 @@ public enum DirectSyncClient {
         return try await withTimeout(60) { try await session.exchange(context, first: true) }
     }
 }
+#endif

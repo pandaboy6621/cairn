@@ -1,3 +1,4 @@
+#if os(macOS)
 import ArgumentParser
 import CairnCore
 import Foundation
@@ -587,3 +588,4 @@ final class FoundPeers: @unchecked Sendable {
 
 extension SyncPreset: ExpressibleByArgument {}
 extension SyncMode: ExpressibleByArgument {}
+#endif

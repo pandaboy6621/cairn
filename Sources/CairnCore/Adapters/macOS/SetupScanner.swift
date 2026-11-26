@@ -37,7 +37,7 @@ public struct SetupScanner: Sendable {
     /// Home folder for `~/.ssh`. Injected for tests.
     public var home: String
 
-    public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = CoreGraphicsDisplays(),
+    public init(runner: CommandRunner = ProcessRunner(), extraDomains: [String] = [], displays: DisplaySystem = DefaultDisplays(),
                 now: @escaping @Sendable () -> Date = { Date() },
                 isSandboxed: @escaping @Sendable (String) -> Bool = DefaultsScanner.hasContainer,
                 home: String = NSHomeDirectory()) {

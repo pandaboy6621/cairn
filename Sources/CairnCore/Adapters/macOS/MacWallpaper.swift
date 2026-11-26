@@ -1,3 +1,4 @@
+#if os(macOS)
 // AppKit is imported only for NSWorkspace's desktop-picture API, the one public
 // way to read and set wallpaper. No views or windows are used here.
 import AppKit
@@ -39,3 +40,4 @@ extension CoreGraphicsDisplays {
         return try DispatchQueue.main.sync(execute: body)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -140,3 +141,4 @@ import Testing
         #expect(!second) // nothing more to change
     }
 }
+#endif

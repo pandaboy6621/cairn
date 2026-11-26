@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import CairnCore
@@ -37,3 +38,4 @@ import Testing
         #expect(!NetworkShareMounter.same("smb://nas.local/Backups", "afp://nas.local/Backups"))
     }
 }
+#endif

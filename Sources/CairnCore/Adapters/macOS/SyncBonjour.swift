@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Network
 import dnssd
@@ -133,3 +134,4 @@ public final class SyncBonjour: @unchecked Sendable {
         registration = nil
     }
 }
+#endif

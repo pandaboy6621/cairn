@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Applies a `RestorePlan` on macOS. Writes system state: only ever run it
@@ -20,7 +21,7 @@ public struct MacRestorer: Sendable {
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout),
         appExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-        displays: DisplaySystem = CoreGraphicsDisplays(),
+        displays: DisplaySystem = DefaultDisplays(),
         defaultApps: DefaultAppsSystem = LaunchServicesDefaultApps(),
         wifi: WiFiSystem = CoreWLANWiFi(),
         sshKeys: SSHKeySystem = FileSSHKeys(),
@@ -625,3 +626,4 @@ enum PlistXML {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 }
+#endif
