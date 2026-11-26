@@ -98,8 +98,11 @@ set up a Windows or Linux PC.
 Cairn's manifest describes what you want, not how one OS stores it. **File → Export for Windows…**
 (or Linux, or `cairn export windows|linux`) turns a backup into a setup kit for a PC:
 
-- **Windows:** `setup.ps1` installs packages with `winget` and sets a few matching settings (dark
-  mode, file extensions, hidden files, clock seconds, always-visible scroll bars). `winget.json` works with `winget import` too.
+- **Windows:** double-click `Cairn Setup.cmd` for a window: tick what you want, preview it, then set
+  it up. Behind it, `setup.ps1` installs packages with `winget` (skipping what's there, and leaving
+  out a second office suite if you use Microsoft Office), sets a few matching settings (dark mode,
+  file extensions, hidden files, clock seconds, always-visible scroll bars), and pins your Dock's
+  apps to the taskbar in the same order. `winget.json` works with `winget import` too.
 - **Linux:** `setup.sh` installs tools with `apt` or `dnf`, apps from Flathub, and the GNOME
   settings that match yours: dark style, hidden files, touchpad scrolling and tapping, key repeat
   speed and delay, clock, scroll bars, interface sounds, and (on Ubuntu) Dock position and auto-hide.

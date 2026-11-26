@@ -108,7 +108,7 @@ import Testing
         #expect(!sh.contains("it's\nmine"))
         let win = PlatformExport.make(m, for: .windows).files()
         #expect(win["setup.ps1"]!.hasPrefix("\u{FEFF}# Cairn")) // BOM, so Windows PowerShell 5.1 reads UTF-8
-        #expect(win["setup.ps1"]!.contains("param([switch]$Apply)"))
+        #expect(win["setup.ps1"]!.contains("param([switch]$Apply, [string]$Skip)"))
         #expect(win["setup.ps1"]!.contains("'Git.Git' = 'git'"))
         #expect(win["winget.json"]!.contains(#""PackageIdentifier": "VideoLAN.VLC""#))
     }
@@ -171,6 +171,38 @@ import Testing
         #expect(list.contains("### Taskbar") && list.contains("- The display arrangement and wallpaper"))
         // Linux kits don't touch it.
         #expect(PlatformExport.make(Self.manifest(), for: .linux).taskbar.isEmpty)
+    }
+
+    @Test func windowsKitHasASetupWindow() {
+        var m = Self.manifest()
+        m.device.name = "Sam\u{2019}s Mac"
+        m.dotfiles = [DotfileItem(path: "~/.ssh/config", kind: .ssh, content: "Host box\n")]
+        let e = PlatformExport.make(m, for: .windows)
+        let files = e.files()
+        // Double-click the .cmd; it opens the window with no console.
+        let cmd = try! #require(files["Cairn Setup.cmd"])
+        #expect(cmd.contains(#"-WindowStyle Hidden -File "%~dp0Cairn Setup.ps1""#) && cmd.contains("\r\n"))
+        let window = try! #require(files["Cairn Setup.ps1"])
+        #expect(window.hasPrefix("\u{FEFF}# Cairn"))
+        #expect(e.windowGroups.map(\.title) == ["Programs", "Settings", "Taskbar", "Config files"])
+        #expect(window.contains("@{ Key = 'VideoLAN.VLC'; Text = 'vlc' }"))
+        #expect(window.contains("@{ Key = 'HideFileExt'; Text = 'Show file name extensions' }"))
+        #expect(window.contains(#"@{ Key = '.ssh\config'; Text = 'SSH settings (.ssh\config)' }"#))
+        #expect(window.contains("$heading = 'Set up Windows like Sam\u{2019}\u{2019}s Mac'"))
+        // Set up stays off until a preview, and asks first.
+        #expect(window.contains(#"Name="Apply" DockPanel.Dock="Right" Content="Set up" Padding="18,6" Margin="8,0,0,0" IsEnabled="False""#))
+        #expect(window.contains("[System.Windows.MessageBox]::Show("))
+        #expect(window.contains("if ($really) { $line += ' -Apply' }"))
+        // setup.ps1 leaves out what was unticked.
+        let ps = files["setup.ps1"]!
+        #expect(ps.contains("param([switch]$Apply, [string]$Skip)"))
+        #expect(ps.contains("if ($skipped -contains $k) { $packages.Remove($k) }"))
+        #expect(ps.contains("$settings = @($settings | Where-Object { $skipped -notcontains $_.Name })"))
+        #expect(ps.contains("$dotfiles = @($dotfiles | Where-Object { $skipped -notcontains $_.Target })"))
+        #expect(ps.contains("if ($skipped -contains 'taskbar') { $taskbar = @() }"))
+        #expect(files["CHECKLIST.md"]!.contains("Double-click `Cairn Setup.cmd`"))
+        // Linux kits have no window.
+        #expect(PlatformExport.make(m, for: .linux).files()["Cairn Setup.ps1"] == nil)
     }
 
     @Test func checklistListsWhatToDoByHandAndNeverSecrets() {

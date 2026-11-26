@@ -156,7 +156,8 @@ public struct PlatformExport: Equatable, Sendable {
         case .windows:
             // Windows PowerShell 5.1 reads a script without a byte order mark as the
             // local code page, which garbles anything that isn't plain ASCII.
-            out = ["setup.ps1": "\u{FEFF}" + powershell(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
+            out = ["setup.ps1": "\u{FEFF}" + powershell(), "Cairn Setup.ps1": "\u{FEFF}" + powershellWindow(),
+                   "Cairn Setup.cmd": windowLauncher(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
         case .linux:
             out = ["setup.sh": bash(), "CHECKLIST.md": checklist()]
         }
@@ -203,8 +204,10 @@ public struct PlatformExport: Equatable, Sendable {
         # \(header)
         # Dry run by default: lists what it would do. To make the changes, run in PowerShell:
         #   powershell -ExecutionPolicy Bypass -File .\\setup.ps1 -Apply
-        param([switch]$Apply)
+        # -Skip names a file listing what to leave out, one per line (Cairn Setup.ps1 writes it).
+        param([switch]$Apply, [string]$Skip)
         $ErrorActionPreference = 'Continue'
+        $skipped = @(if ($Skip -and (Test-Path -LiteralPath $Skip)) { Get-Content -LiteralPath $Skip })
         $failed = @()
         $notFound = @()
         $reboot = $false
@@ -216,12 +219,13 @@ public struct PlatformExport: Equatable, Sendable {
         s += "}\n"
         s += """
 
+        foreach ($k in @($packages.Keys)) { if ($skipped -contains $k) { $packages.Remove($k) } }
         $haveWinget = [bool](Get-Command winget -ErrorAction SilentlyContinue)
         if (-not $haveWinget) {
             Write-Host 'winget is missing: install App Installer from the Microsoft Store, then run this again.'
             if ($Apply) { exit 1 }
         }
-        Write-Host "Packages ($($packages.Count))"
+        if ($packages.Count -gt 0) { Write-Host "Packages ($($packages.Count))" }
         foreach ($p in $packages.GetEnumerator()) {
             if ($haveWinget) {
                 winget list --id $p.Key --exact --accept-source-agreements *> $null
@@ -251,6 +255,7 @@ public struct PlatformExport: Equatable, Sendable {
         }.joined(separator: ",\n")
         s += (registry.isEmpty ? "" : "\n") + ")\n"
         s += """
+        $settings = @($settings | Where-Object { $skipped -notcontains $_.Name })
         $restartExplorer = $false
         if ($settings.Count -gt 0) { Write-Host "Settings ($($settings.Count))" }
         foreach ($s in $settings) {
@@ -468,7 +473,8 @@ public struct PlatformExport: Equatable, Sendable {
         }
         # No byte order mark: OpenSSH and git read it as part of the first line.
         $utf8 = New-Object System.Text.UTF8Encoding $false
-        Write-Host "Config files ($($dotfiles.Count))"
+        $dotfiles = @($dotfiles | Where-Object { $skipped -notcontains $_.Target })
+        if ($dotfiles.Count -gt 0) { Write-Host "Config files ($($dotfiles.Count))" }
         foreach ($d in $dotfiles) {
             $src = Join-Path (Join-Path $PSScriptRoot 'dotfiles') $d.File
             $dst = Join-Path $HOME $d.Target
@@ -506,6 +512,8 @@ public struct PlatformExport: Equatable, Sendable {
         guard !taskbar.isEmpty else { return "" }
         var s = "$taskbar = @(" + taskbar.map(ps).joined(separator: ", ") + ")\n"
         s += """
+        if ($skipped -contains 'taskbar') { $taskbar = @() }
+        if ($taskbar.Count -gt 0) {
         Write-Host "Taskbar, in your Dock's order ($($taskbar.Count))"
         $startApps = @(Get-StartApps)
         $pins = @(); $absent = @()
@@ -555,6 +563,7 @@ public struct PlatformExport: Equatable, Sendable {
             if ((Get-ItemProperty -Path $key -Name StartLayoutFile -ErrorAction SilentlyContinue).StartLayoutFile -eq $layout) { $signOut = $true }
             else { $failed += 'taskbar' }
         }
+        }
 
         """
         return s
@@ -595,7 +604,9 @@ public struct PlatformExport: Equatable, Sendable {
         case .windows:
             s += "Installs \(winget.count) package\(winget.count == 1 ? "" : "s") with winget"
             s += registry.isEmpty ? ".\n\n" : " and sets \(registry.count) setting\(registry.count == 1 ? "" : "s").\n\n"
-            s += "In PowerShell, in this folder:\n\n```\npowershell -ExecutionPolicy Bypass -File .\\setup.ps1\n```\n\n"
+            s += "Double-click `Cairn Setup.cmd` in this folder for a window: tick what you want, click Preview to see what would change, then Set up. "
+            s += "If Windows warns about opening a file from the internet, choose Run.\n\n"
+            s += "Or in PowerShell, in this folder:\n\n```\npowershell -ExecutionPolicy Bypass -File .\\setup.ps1\n```\n\n"
             s += "That only lists what it would do. Add `-Apply` to do it (this also accepts the packages' license terms for you). Or install just the packages with `winget import -i winget.json`.\n\n"
             if !taskbar.isEmpty {
                 s += "### Taskbar\n\n"

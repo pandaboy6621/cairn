@@ -7,7 +7,8 @@ struct Export: ParsableCommand {
         abstract: "Make a setup kit for a Windows or Linux PC from a backup. Changes nothing here.",
         discussion: """
             Writes a folder with a setup script and a checklist. Windows gets setup.ps1
-            (winget packages and a few registry settings) and winget.json; Linux gets
+            (winget packages, a few registry settings, and taskbar pins in the Dock's
+            order), a window for it (double-click Cairn Setup.cmd) and winget.json; Linux gets
             setup.sh (apt or dnf, Flathub apps, and a few GNOME settings). The scripts only
             list what they'd do until run with -Apply / --apply on the PC.
             CHECKLIST.md lists what has to be done by hand: packages with no known
@@ -38,6 +39,7 @@ struct Export: ParsableCommand {
         let folder = try kit.write(into: parent)
         print(kit.summary)
         print("Wrote \(BackupFolder.displayPath(folder))")
+        if platform == .windows { print("On the PC, double-click Cairn Setup.cmd in that folder for a window, or:") }
         let run = platform == .windows ? "powershell -ExecutionPolicy Bypass -File .\\setup.ps1" : "bash setup.sh"
         print("On the \(platform.title) PC, run `\(run)` in that folder to see what it would do, then add \(platform == .windows ? "-Apply" : "--apply").")
     }
