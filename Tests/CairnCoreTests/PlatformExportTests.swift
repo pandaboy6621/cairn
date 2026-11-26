@@ -213,6 +213,9 @@ import Testing
         ]
         let e = PlatformExport.make(m, for: .linux)
         #expect(e.apt.map(\.id).contains("python3-tk"))
+        // A Homebrew formula with no distro package still comes from Flathub.
+        var cz = Self.manifest(); cz.packages = [PackageItem(id: "czkawka", kind: .formula, resolvers: ["brew": "czkawka"])]
+        #expect(PlatformExport.make(cz, for: .linux).flatpak.map(\.id) == ["com.github.qarmin.czkawka"])
         let text = e.files()["CHECKLIST.md"]!
         #expect(text.contains("- [ ] uv: not in apt (Debian, Ubuntu). Try `pipx install uv`"))
         #expect(text.contains("- [ ] ollama: try the installer at ollama.com/download"))

@@ -101,6 +101,7 @@ public enum PackageCatalog {
         "btop": .init(apt: "btop", dnf: "btop"),
         "cmake": .init(winget: "Kitware.CMake", apt: "cmake", dnf: "cmake"),
         "curl": .init(winget: "cURL.cURL", apt: "curl", dnf: "curl"),
+        "czkawka": .init(flatpak: "com.github.qarmin.czkawka"),
         "deno": .init(winget: "DenoLand.Deno"),
         "exiftool": .init(winget: "OliverBetz.ExifTool", apt: "libimage-exiftool-perl", dnf: "perl-Image-ExifTool"),
         "fastfetch": .init(winget: "Fastfetch-cli.Fastfetch", apt: "fastfetch", dnf: "fastfetch"),
