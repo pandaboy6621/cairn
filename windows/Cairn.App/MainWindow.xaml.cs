@@ -193,7 +193,7 @@ public sealed partial class MainWindow : Window
     }
 
     void Select(Category c) =>
-        Sidebar.SelectedItem = Sidebar.Items.OfType<ListViewItem>().FirstOrDefault(i => i.Tag == c);
+        Sidebar.SelectedItem = Sidebar.Items.OfType<ListViewItem>().FirstOrDefault(i => Equals(i.Tag, c));
 
     Category current = Home;
 
@@ -556,12 +556,12 @@ public sealed partial class MainWindow : Window
         UpdateCategoryHeader(c);
     }
 
-    List<Entry> Visible(Category c) =>
+    List<Entry> ShownEntries(Category c) =>
         pages.TryGetValue(c.Key, out var page) ? page.Entries.Where(e => e.Row.Visibility == Visibility.Visible).ToList() : new();
 
     void UpdateCategoryHeader(Category c)
     {
-        var visible = Visible(c);
+        var visible = ShownEntries(c);
         var on = visible.Count(e => e.Box.IsChecked == true);
         var searching = SearchBox.Text.Trim().Length > 0;
         CategorySubtitle.Text = scanned is null ? "Not scanned yet"
@@ -582,7 +582,7 @@ public sealed partial class MainWindow : Window
 
     void SelectAll_Click(object sender, RoutedEventArgs e)
     {
-        var visible = Visible(current);
+        var visible = ShownEntries(current);
         var on = !visible.All(x => x.Box.IsChecked == true);
         foreach (var x in visible) x.Box.IsChecked = on;
         if (pages.TryGetValue(current.Key, out var page)) foreach (var g in page.Groups) RefreshGroup(g);

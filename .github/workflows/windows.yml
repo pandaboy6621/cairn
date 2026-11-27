@@ -33,9 +33,9 @@ jobs:
       run:
         working-directory: windows # picks up windows/global.json (.NET 8)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -57,7 +57,7 @@ jobs:
           Stop-Process -Id $p.Id -Force
           Write-Host "Cairn.exe stayed up for 10 seconds."
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Cairn-Windows-x64
           path: publish/Cairn
