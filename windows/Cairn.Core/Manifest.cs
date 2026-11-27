@@ -152,6 +152,8 @@ public sealed class OrderedApps
 
 public sealed class ShareItem
 {
+    /// Windows only: the drive letter it was mapped to, like `Z:`.
+    [YamlMember(Alias = "drive", DefaultValuesHandling = DefaultValuesHandling.OmitNull)] public string? Drive { get; set; }
     [YamlMember(Alias = "favorite")] public bool Favorite { get; set; }
     [YamlMember(Alias = "include")] public bool Include { get; set; } = true;
     [YamlMember(Alias = "url")] public string Url { get; set; } = "";

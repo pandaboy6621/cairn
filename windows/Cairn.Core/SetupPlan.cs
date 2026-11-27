@@ -6,6 +6,8 @@ public abstract record SetupStep(string Id, string Group, string Text)
     public sealed record Install(string WingetId, string Source, string Label) : SetupStep($"package:{WingetId}", "Programs", Label);
     public sealed record Setting(List<RegistryWrite> Writes) : SetupStep($"setting:{Writes[0].Name}", "Settings", Writes[0].Label);
     public sealed record Taskbar(List<string> Apps) : SetupStep("taskbar", "Taskbar", "Pin " + string.Join(", ", Apps));
+    public sealed record Share(string Url, string Unc, string? Drive, string? User)
+        : SetupStep($"share:{Url}", "Network drives", Drive is null ? Unc : $"{Unc} ({Drive})");
     public sealed record Config(string Target, string Content, bool KeepHosts, int Commented, string Label)
         : SetupStep($"config:{Target}", "Config files", Label);
 }
@@ -70,7 +72,14 @@ public sealed class SetupPlan
         }
 
         foreach (var share in backup.Shares.Where(s => s.Include))
-            plan.ByHand.Add($"Map network drive {Unc(share.Url)}{(share.Username is { } u ? $" (as {u})" : "")}");
+        {
+            if (!share.Url.StartsWith("smb://", StringComparison.OrdinalIgnoreCase))
+            {
+                plan.NotCarried.Add($"{share.Url}: Windows maps SMB shares only");
+                continue;
+            }
+            plan.Steps.Add(new SetupStep.Share(share.Url, Unc(share.Url), share.Drive, share.Username));
+        }
         if (backup.Sensitive.Any(s => s.Include))
             plan.NotCarried.Add("Secrets (Wi-Fi, SSH keys, passwords): they stay encrypted in the backup");
         return plan;

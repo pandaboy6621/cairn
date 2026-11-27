@@ -20,6 +20,9 @@ sealed class FakeRegistry : IUserRegistry
     public Dictionary<(string, string), object> Values { get; } = new();
     public object? Get(string path, string name) => Values.GetValueOrDefault((path, name));
     public void SetDword(string path, string name, int value) => Values[(path, name)] = value;
+    public IEnumerable<string> SubKeys(string path) => Values.Keys
+        .Where(k => k.Item1.StartsWith(path + "\\", StringComparison.OrdinalIgnoreCase))
+        .Select(k => k.Item1[(path.Length + 1)..].Split('\\')[0]).Distinct().ToList();
 }
 
 public sealed class ScannerTests : IDisposable
@@ -126,6 +129,22 @@ public sealed class ScannerTests : IDisposable
     [InlineData("Microsoft.VisualStudioCode", "Visual Studio Code")]
     [InlineData("Git.Git", "Git")]
     public void MakesNamesFromIds(string id, string name) => Assert.Equal(name, ProgramNames.FromId(id));
+
+    [Fact]
+    public void ReadsMappedDrivesWithoutPasswords()
+    {
+        var registry = new FakeRegistry();
+        registry.Values[(@"Network\Z", "RemotePath")] = @"\\NAS.example.test\Media\Films\";
+        registry.Values[(@"Network\Z", "UserName")] = @"EXAMPLE\test";
+        registry.Values[(@"Network\P", "RemotePath")] = @"\\nas.example.test\photos";
+        registry.Values[(@"Network\P", "UserName")] = "";
+        registry.Values[(@"Network\W", "RemotePath")] = @"\\dav.example.test@SSL\DavWWWRoot"; // WebDAV: left out
+        var shares = NetworkDrives.Scan(registry);
+        Assert.Equal(new[] { "smb://nas.example.test/photos P: -", @"smb://nas.example.test/Media/Films Z: EXAMPLE\test" },
+            shares.Select(s => $"{s.Url} {s.Drive} {s.Username ?? "-"}"));
+        Assert.Null(NetworkDrives.ToUrl(@"C:\Users"));
+        Assert.Equal(@"\\nas.example.test\Media\Films", SetupPlan.Unc(shares[1].Url));
+    }
 
     [Fact]
     public void MissingWingetIsAWarningNotACrash()

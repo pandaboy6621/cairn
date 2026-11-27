@@ -420,12 +420,15 @@ public struct ShareItem: Codable, Equatable, Sendable {
     public var username: String?
     /// In Finder's Connect to Server favorites.
     public var favorite: Bool
+    /// Windows only: the drive letter it's mapped to (`Z:`). Older backups don't have it.
+    public var drive: String?
     public var include: Bool
 
-    public init(url: String, username: String? = nil, favorite: Bool = false, include: Bool = true) {
+    public init(url: String, username: String? = nil, favorite: Bool = false, drive: String? = nil, include: Bool = true) {
         self.url = url
         self.username = username
         self.favorite = favorite
+        self.drive = drive
         self.include = include
     }
 

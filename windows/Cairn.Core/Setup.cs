@@ -11,6 +11,10 @@ public interface ISystemActions
     /// Runs a PowerShell command as administrator (Windows asks the user). True if it ran.
     bool RunElevatedPowerShell(string command);
     void RestartExplorer();
+    /// Maps a network drive that Windows reconnects at sign-in, asking for the password
+    /// in its own window if it needs one. Uses `drive` if it's free, else a free letter.
+    /// Returns the letter used, or an error.
+    (string? Drive, string? Error) MapDrive(string unc, string? drive, string? user);
 }
 
 public sealed class WindowsActions : ISystemActions
@@ -27,6 +31,30 @@ public sealed class WindowsActions : ISystemActions
         }
         catch (System.ComponentModel.Win32Exception) { return false; } // the user said no
     }
+
+    public (string? Drive, string? Error) MapDrive(string unc, string? drive, string? user)
+    {
+        if (!OperatingSystem.IsWindows()) return (null, "Mapping drives needs Windows.");
+        var free = drive is { Length: 2 } && !DriveInfo.GetDrives().Any(d => d.Name.StartsWith(drive, StringComparison.OrdinalIgnoreCase));
+        var resource = new NetResource { Type = 1 /* disk */, LocalName = free ? drive : null, RemoteName = unc };
+        const int UpdateProfile = 0x1, Interactive = 0x8, Redirect = 0x80;
+        var used = new StringBuilder(16);
+        var size = used.Capacity;
+        var code = WNetUseConnection(IntPtr.Zero, ref resource, null, user, UpdateProfile | Interactive | (free ? 0 : Redirect), used, ref size, out _);
+        if (code == 0) return (free ? drive : used.ToString(), null);
+        return (null, code == 1223 ? "cancelled" : new System.ComponentModel.Win32Exception(code).Message);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    struct NetResource
+    {
+        public int Scope, Type, DisplayType, Usage;
+        public string? LocalName, RemoteName, Comment, Provider;
+    }
+
+    [System.Runtime.InteropServices.DllImport("mpr.dll", EntryPoint = "WNetUseConnectionW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int WNetUseConnection(IntPtr owner, ref NetResource resource, string? password, string? user, int flags,
+        StringBuilder accessName, ref int bufferSize, out int result);
 
     public void RestartExplorer()
     {
@@ -69,6 +97,9 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
             ? new(step, StepState.Done, "already set") : new(step, StepState.ToDo, "would set"),
         SetupStep.Taskbar t => CheckTaskbar(t),
         SetupStep.Config c => CheckConfig(c),
+        SetupStep.Share s => NetworkDrives.Mapped(registry).TryGetValue(s.Unc, out var d)
+            ? new(step, StepState.Done, $"already mapped as {d}")
+            : new(step, StepState.ToDo, s.Drive is null ? "would map" : $"would map as {s.Drive}"),
         _ => new(step, StepState.ToDo, ""),
     };
 
@@ -103,20 +134,54 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
 
     // MARK: Apply
 
-    /// Makes the changes for the ticked steps, telling `log` as it goes. Returns what didn't finish.
-    public List<string> Apply(IReadOnlyList<SetupStep> steps, Action<string> log)
+    /// Progress for the ring: steps finished of all, and what's happening now.
+    public sealed record Progress(int Done, int Total, string Now);
+
+    /// What was skipped (Skip) or never started (Stop).
+    public List<string> Skipped { get; } = new();
+
+    volatile bool skipCurrent;
+
+    /// Gives up on the install that's running now and moves on.
+    public void SkipCurrent()
+    {
+        skipCurrent = true;
+        (runner as ProcessRunner)?.StopRunning();
+    }
+
+    /// Makes the changes for the ticked steps, telling `log` as it goes. Returns what didn't
+    /// finish. `stop` ends it after the current step (Stop also skips the current install).
+    public List<string> Apply(IReadOnlyList<SetupStep> steps, Action<string> log, Action<Progress>? progress = null, CancellationToken stop = default)
     {
         var failed = new List<string>();
         var retry = new List<SetupStep.Install>();
         var restartExplorer = false;
+        var done = 0;
+        void Report(string now) => progress?.Invoke(new Progress(done, steps.Count, now));
+        using var onStop = stop.Register(SkipCurrent);
+        Skipped.Clear();
         foreach (var step in steps)
         {
+            if (step is SetupStep.Taskbar) continue; // last, below
+            if (stop.IsCancellationRequested) { Skipped.Add(step.Text); continue; }
+            skipCurrent = false;
+            Report(step.Text);
             switch (step)
             {
                 case SetupStep.Install i:
                     if (CheckInstall(i).State == StepState.Done) { log($"{i.Text}: already installed"); break; }
                     log($"Installing {i.Text}");
-                    if (!Install(i)) retry.Add(i);
+                    if (Install(i)) break;
+                    if (skipCurrent) { log($"Skipped {i.Text}"); Skipped.Add(i.Text); }
+                    else retry.Add(i);
+                    break;
+                case SetupStep.Share sh:
+                    if (Check(sh).State == StepState.Done) { log($"{sh.Unc}: already mapped"); break; }
+                    log($"Connecting {sh.Unc}. Windows asks for its password if it needs one.");
+                    var (letter, error) = system.MapDrive(sh.Unc, sh.Drive, sh.User);
+                    if (error is null) log($"Mapped {sh.Unc} as {letter}");
+                    else if (error == "cancelled") { log($"Skipped {sh.Unc}"); Skipped.Add(sh.Text); }
+                    else { log($"Couldn't map {sh.Unc}: {error}"); failed.Add(sh.Text); }
                     break;
                 case SetupStep.Setting s:
                     if (Check(s).State == StepState.Done) { log($"{s.Text}: already set"); break; }
@@ -128,17 +193,35 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
                     if (!WriteConfig(c, log)) failed.Add(c.Text);
                     break;
             }
+            done++;
         }
         // Windows Installer can stay busy after a big install ("Install server not responding"):
         // failures get one more try after a pause.
-        if (retry.Count > 0)
+        if (retry.Count > 0 && !stop.IsCancellationRequested)
         {
             log($"Trying again: {string.Join(", ", retry.Select(r => r.Text))}");
-            Thread.Sleep(RetryPause);
-            foreach (var i in retry) { log($"Installing {i.Text}, second try"); if (!Install(i)) failed.Add(i.Text); }
+            Report("Waiting for Windows Installer");
+            stop.WaitHandle.WaitOne(RetryPause);
+            foreach (var i in retry)
+            {
+                if (stop.IsCancellationRequested) { Skipped.Add(i.Text); continue; }
+                skipCurrent = false;
+                Report(i.Text);
+                log($"Installing {i.Text}, second try");
+                if (Install(i)) continue;
+                if (skipCurrent) { log($"Skipped {i.Text}"); Skipped.Add(i.Text); } else failed.Add(i.Text);
+            }
         }
+        else failed.AddRange(retry.Select(r => r.Text));
         // The taskbar last: its apps may have just been installed.
-        foreach (var t in steps.OfType<SetupStep.Taskbar>()) if (!PinTaskbar(t, log)) failed.Add("taskbar");
+        foreach (var t in steps.OfType<SetupStep.Taskbar>())
+        {
+            if (stop.IsCancellationRequested) { Skipped.Add("taskbar"); continue; }
+            Report("Taskbar");
+            if (!PinTaskbar(t, log)) failed.Add("taskbar");
+            done++;
+        }
+        Report("Done");
         if (restartExplorer) { log("Restarting File Explorer so the changes show"); system.RestartExplorer(); }
         return failed;
     }

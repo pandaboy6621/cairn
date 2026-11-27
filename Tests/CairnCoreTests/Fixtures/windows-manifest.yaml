@@ -52,4 +52,9 @@ settings:
   platforms:
   - windows
   value: 1
-shares: []
+shares:
+- drive: 'Z:'
+  favorite: false
+  include: true
+  url: smb://nas.example.test/media
+  username: test

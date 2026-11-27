@@ -14,6 +14,7 @@ import Testing
         #expect(m.settings[0].adapter.windows == RegistryRef(path: #"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"#,
                                                              name: "HideFileExt", type: "dword"))
         #expect(m.layout.taskbar?.apps == ["File Explorer", "Firefox", "Terminal"])
+        #expect(m.shares == [ShareItem(url: "smb://nas.example.test/media", username: "test", drive: "Z:")])
         // Round trips. (Byte-for-byte output is only promised per writer: Swift and C#
         // each write their own snapshots deterministically, and read each other's.)
         #expect(try ManifestCoder.decode(ManifestCoder.encode(m)) == m)

@@ -20,6 +20,12 @@ public class ManifestTests
         Assert.Equal(new[] { "File Explorer", "Firefox", "Terminal" }, m.Layout.Taskbar?.Apps);
         Assert.Equal("[user]\n\tname = Test User\n", m.Dotfiles[0].Content);
         Assert.Equal(new DateTimeOffset(2026, 11, 26, 12, 0, 0, TimeSpan.Zero), m.CreatedDate);
+        var share = Assert.Single(m.Shares);
+        Assert.Equal(("smb://nas.example.test/media", "Z:", "test"), (share.Url, share.Drive, share.Username));
+        // A drive letter is written quoted: a bare `Z:` isn't valid YAML for the Mac's reader.
+        var written = ManifestCoder.Encode(m);
+        Assert.Matches("drive: [\"']Z:[\"']", written);
+        Assert.Equal("Z:", ManifestCoder.Decode(written).Shares[0].Drive);
     }
 
     [Fact]

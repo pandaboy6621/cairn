@@ -13,6 +13,7 @@ public static class BackupChoices
         SettingItem s => $"setting:{s.Key}",
         OrderedApps => "taskbar",
         DotfileItem d => $"config:{d.Path}",
+        ShareItem s => $"share:{s.Url}",
         _ => "",
     };
 
@@ -23,6 +24,7 @@ public static class BackupChoices
         foreach (var p in m.Packages) p.Include = !set.Contains(ItemId(p));
         foreach (var s in m.Settings) s.Include = !set.Contains(ItemId(s));
         foreach (var d in m.Dotfiles) d.Include = !set.Contains(ItemId(d));
+        foreach (var s in m.Shares) s.Include = !set.Contains(ItemId(s));
         if (m.Layout.Taskbar is { } t) t.Include = !set.Contains("taskbar");
     }
 }
@@ -162,4 +164,22 @@ public sealed class ScheduledBackup(ICommandRunner runner)
           </Actions>
         </Task>
         """;
+}
+
+/// Quick choices of what to back up, like the Mac app's presets.
+public static class BackupPresets
+{
+    public static readonly (string Name, string Summary)[] All =
+    {
+        ("Minimal", "Settings, taskbar and network drives. No programs."),
+        ("Developer", "Programs from winget, settings, taskbar, drives, and Git and SSH config."),
+        ("Everything", "Everything that was scanned."),
+    };
+
+    public static bool Wants(string preset, object item) => preset switch
+    {
+        "Minimal" => item is SettingItem or OrderedApps or ShareItem,
+        "Developer" => item is not PackageItem { Kind: PackageKind.MsStore },
+        _ => true,
+    };
 }

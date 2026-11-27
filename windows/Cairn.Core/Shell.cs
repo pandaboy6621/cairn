@@ -15,6 +15,16 @@ public interface ICommandRunner
 
 public sealed class ProcessRunner : ICommandRunner
 {
+    readonly HashSet<Process> running = new();
+
+    /// Ends whatever this runner started that's still going (Skip, Stop).
+    public void StopRunning()
+    {
+        lock (running)
+            foreach (var p in running)
+                try { p.Kill(entireProcessTree: true); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
     public CommandResult Run(string exe, params string[] args)
     {
         var info = new ProcessStartInfo(exe)
@@ -26,10 +36,15 @@ public sealed class ProcessRunner : ICommandRunner
         try
         {
             using var p = Process.Start(info)!;
-            var err = p.StandardError.ReadToEndAsync();
-            var output = p.StandardOutput.ReadToEnd();
-            p.WaitForExit();
-            return new CommandResult(p.ExitCode, output, err.Result);
+            lock (running) running.Add(p);
+            try
+            {
+                var err = p.StandardError.ReadToEndAsync();
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit();
+                return new CommandResult(p.ExitCode, output, err.Result);
+            }
+            finally { lock (running) running.Remove(p); }
         }
         catch (System.ComponentModel.Win32Exception e) { return new CommandResult(-1, "", e.Message); } // not installed
     }
@@ -40,6 +55,8 @@ public interface IUserRegistry
 {
     object? Get(string path, string name);
     void SetDword(string path, string name, int value);
+    /// Names of the keys just below `path`; empty if it doesn't exist.
+    IEnumerable<string> SubKeys(string path);
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -49,6 +66,12 @@ public sealed class UserRegistry : IUserRegistry
     {
         using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(path);
         return key?.GetValue(name);
+    }
+
+    public IEnumerable<string> SubKeys(string path)
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(path);
+        return key?.GetSubKeyNames() ?? Array.Empty<string>();
     }
 
     public void SetDword(string path, string name, int value)

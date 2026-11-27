@@ -41,6 +41,20 @@ public sealed class AutoBackupTests : IDisposable
     }
 
     [Fact]
+    public void PresetsPickLikeTheMacApp()
+    {
+        var store = new PackageItem { Id = "9NKSQGP7F2NH", Kind = PackageKind.MsStore };
+        var git = new PackageItem { Id = "Git.Git", Kind = PackageKind.Winget };
+        var setting = new SettingItem { Key = "finder.show_all_extensions" };
+        var config = new DotfileItem { Path = "~/.gitconfig" };
+        var share = new ShareItem { Url = "smb://nas.example.test/media" };
+        bool[] Pick(string p) => new object[] { store, git, setting, config, share }.Select(i => BackupPresets.Wants(p, i)).ToArray();
+        Assert.Equal(new[] { false, false, true, false, true }, Pick("Minimal"));
+        Assert.Equal(new[] { false, true, true, true, true }, Pick("Developer"));
+        Assert.Equal(new[] { true, true, true, true, true }, Pick("Everything"));
+    }
+
+    [Fact]
     public void LogKeepsTheLastLines()
     {
         var log = Path.Combine(root, "auto-backup.log");

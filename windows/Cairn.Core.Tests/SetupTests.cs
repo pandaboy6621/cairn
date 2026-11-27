@@ -4,6 +4,13 @@ namespace Cairn.Core.Tests;
 
 sealed class FakeActions(FakeRegistry registry) : ISystemActions
 {
+    public List<string> Mapped { get; } = new();
+    public string? MapError { get; set; }
+    public (string? Drive, string? Error) MapDrive(string unc, string? drive, string? user)
+    {
+        Mapped.Add($"{unc} {drive} {user}");
+        return MapError is null ? (drive ?? "Y:", null) : (null, MapError);
+    }
     public List<string> Elevated { get; } = new();
     public bool Allow { get; set; } = true;
     public int ExplorerRestarts { get; private set; }
@@ -40,7 +47,8 @@ public sealed class SetupTests : IDisposable
         Assert.Equal(new[] { ".gitconfig", ".ssh/config" }, configs.Select(c => c.Target));
         Assert.Contains("helper = manager", configs[0].Content);
         Assert.Contains(plan.ByHand, b => b.StartsWith("~/.zshrc is shell config"));
-        Assert.Contains(plan.ByHand, b => b == @"Map network drive \\nas.example.test\media (as test)");
+        var share = Assert.Single(plan.Steps.OfType<SetupStep.Share>());
+        Assert.Equal((@"\\nas.example.test\media", (string?)null, "test"), (share.Unc, share.Drive, share.User));
         Assert.Contains(plan.ByHand, b => b.Contains("Microsoft Word"));
         Assert.Contains(plan.NotCarried, n => n.StartsWith("Secrets"));
         Assert.DoesNotContain(plan.Steps, s => s.Text.Contains("obscure-tool")); // unticked in the backup
@@ -126,6 +134,49 @@ public sealed class SetupTests : IDisposable
         Assert.Contains("if (-not (Test-Path 'HKCU:\\Software\\Policies\\Microsoft\\Windows\\Explorer')) { New-Item", command);
         Assert.True(setup.NeedsSignOut);
         Assert.Contains(log, l => l == "Not on this PC, so not pinned: Outlook, Terminal");
+        Assert.Equal(new[] { @"\\nas.example.test\media  test" }, actions.Mapped);
+    }
+
+    [Fact]
+    public void MappedDrivesArePreviewedAndSkippedWhenThere()
+    {
+        var (setup, _, registry, actions) = Make();
+        registry.Values[(@"Network\Z", "RemotePath")] = @"\\NAS.example.test\media";
+        var there = new SetupStep.Share("smb://nas.example.test/media", @"\\nas.example.test\media", "Z:", null);
+        var missing = new SetupStep.Share("smb://nas.example.test/photos", @"\\nas.example.test\photos", "P:", "test");
+        Assert.Equal("already mapped as Z:", setup.Check(there).Note);
+        Assert.Equal("would map as P:", setup.Check(missing).Note);
+
+        actions.MapError = "cancelled";
+        var failed = setup.Apply(new SetupStep[] { there, missing }, _ => { });
+        Assert.Empty(failed);
+        Assert.Equal(new[] { @"\\nas.example.test\photos P: test" }, actions.Mapped);
+        Assert.Equal(new[] { missing.Text }, setup.Skipped); // the user closed Windows' password box
+    }
+
+    [Fact]
+    public void ReportsProgressAndStops()
+    {
+        using var stop = new CancellationTokenSource();
+        var (setup, runner, _, _) = Make((exe, args) =>
+        {
+            if (args[0] == "install") stop.Cancel(); // Stop clicked during the first install
+            return new CommandResult(args[0] == "list" ? 1 : 0, "", "");
+        });
+        var steps = new SetupStep[]
+        {
+            new SetupStep.Install("Git.Git", "winget", "git"),
+            new SetupStep.Install("Mozilla.Firefox", "winget", "firefox"),
+            new SetupStep.Taskbar(new() { "Firefox" }),
+        };
+        var seen = new List<Setup.Progress>();
+        var failed = setup.Apply(steps, _ => { }, seen.Add, stop.Token);
+        Assert.Empty(failed);
+        Assert.Single(runner.Ran, r => r.StartsWith("winget install"));
+        Assert.Equal(new[] { "firefox", "taskbar" }, setup.Skipped);
+        Assert.Equal(new Setup.Progress(0, 3, "git"), seen[0]);
+        Assert.Equal("Done", seen[^1].Now);
+        Assert.Equal(1, seen[^1].Done);
     }
 
     [Fact]
