@@ -91,63 +91,13 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                             </Grid>
-                            <Grid ColumnSpacing="16">
+                            <!-- Back up, Set up, Sync: built in code (Dashboard.cs). -->
+                            <Grid x:Name="CardsRow" ColumnSpacing="16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-
-                                <Border Style="{StaticResource CairnCard}">
-                                    <StackPanel Spacing="14">
-                                        <StackPanel Orientation="Horizontal" Spacing="12">
-                                            <ContentPresenter x:Name="BackupCardTile" />
-                                            <TextBlock Text="Back up" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <StackPanel Spacing="2">
-                                            <TextBlock x:Name="BackupCardStatus" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Not scanned yet" />
-                                            <TextBlock x:Name="BackupCardDetail" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                        </StackPanel>
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Button x:Name="BackupNowButton" Content="Back up now" HorizontalAlignment="Stretch"
-                                                    Style="{StaticResource AccentButtonStyle}" IsEnabled="False" Click="Backup_Click" />
-                                            <Button Grid.Column="1" ToolTipService.ToolTip="Open the backup folder" Click="OpenFolder_Click">
-                                                <FontIcon Glyph="&#xE8B7;" FontSize="14" />
-                                            </Button>
-                                        </Grid>
-                                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="Saves to" Style="{StaticResource CaptionTextBlockStyle}"
-                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                <TextBlock x:Name="FolderText" TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" />
-                                            </StackPanel>
-                                            <Button Grid.Column="1" Content="Change…" VerticalAlignment="Center" Click="ChooseFolder_Click" />
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-
-                                <Border Grid.Column="1" Style="{StaticResource CairnCard}">
-                                    <StackPanel Spacing="14">
-                                        <StackPanel Orientation="Horizontal" Spacing="12">
-                                            <ContentPresenter x:Name="SetupCardTile" />
-                                            <TextBlock Text="Set up" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <StackPanel Spacing="2">
-                                            <TextBlock x:Name="SetupCardStatus" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Looking for backups…" />
-                                            <TextBlock x:Name="SetupCardDetail" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                       Text="Set this PC up from a Mac's or another PC's backup. You see every change before anything happens." />
-                                        </StackPanel>
-                                        <Button Content="Set up from a backup" HorizontalAlignment="Stretch" Click="GoToSetup_Click" />
-                                    </StackPanel>
-                                </Border>
                             </Grid>
                             <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -191,7 +141,9 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
+                            <ContentPresenter x:Name="SetupRingHost" Grid.Column="2" VerticalAlignment="Center" />
                             <ContentPresenter x:Name="SetupTile" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                 <TextBlock Text="Set up this PC" Style="{StaticResource SubtitleTextBlockStyle}" />
@@ -318,6 +270,10 @@
                                     Style="{StaticResource AccentButtonStyle}" Click="Backup_Click" />
                         </StackPanel>
                         <StackPanel x:Name="SetupActions" Grid.Column="1" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                            <Button x:Name="SkipButton" Content="Skip this one" Visibility="Collapsed" Click="Skip_Click"
+                                    ToolTipService.ToolTip="Give up on the program installing now and go on to the next" />
+                            <Button x:Name="StopButton" Content="Stop" Visibility="Collapsed" Click="Stop_Click"
+                                    ToolTipService.ToolTip="Stop after this step; nothing that's done is undone" />
                             <Button x:Name="PreviewButton" Content="Preview" IsEnabled="False" Click="Preview_Click" />
                             <Button x:Name="ApplyButton" Content="Set up" IsEnabled="False"
                                     Style="{StaticResource AccentButtonStyle}" Click="Apply_Click" />

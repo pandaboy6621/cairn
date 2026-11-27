@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
         new("settings", "System settings", "", Rgb(0x64748B), "settings"),
         new("taskbar", "Taskbar", "", Rgb(0xA855F7), "taskbar pins"),
         new("config", "Config files", "", Rgb(0x6366F1), "config files"),
+        new("shares", "Network drives", "", Rgb(0x06B6D4), "mapped network drives"),
     };
 
     static Color Rgb(uint hex, byte alpha = 255) => Color.FromArgb(alpha, (byte)(hex >> 16), (byte)(hex >> 8), (byte)hex);
@@ -108,15 +109,13 @@ public sealed partial class MainWindow : Window
         DeviceTile.Content = Tile("", Rgb(0x475569), 36);
         DeviceName.Text = Environment.MachineName;
         DeviceDetail.Text = WindowsTitle;
-        BackupCardTile.Content = Tile("", Home.Tint, 36);
-        SetupCardTile.Content = Tile(SetUp.Glyph, SetUp.Tint, 36);
         SetupTile.Content = Tile(SetUp.Glyph, SetUp.Tint, 44);
         SetupHeader.Background = Gradient(WithAlpha(SetUp.Tint, 30), WithAlpha(SetUp.Tint, 5));
         SelectionBar.Foreground = new SolidColorBrush(Home.Tint);
-        FolderText.Text = Folder;
 
         BuildSidebar();
         BuildStats();
+        BuildCards();
         ShowSettings();
         Sidebar.SelectedIndex = 0;
         Scan();
@@ -254,7 +253,7 @@ public sealed partial class MainWindow : Window
     {
         settings.BackupFolder = path;
         settings.Save();
-        FolderText.Text = SettingsFolderText.Text = path;
+        SettingsFolderText.Text = path;
         DefaultFolderButton.IsEnabled = path != AppSettings.DefaultBackupFolder;
     }
 
@@ -544,7 +543,7 @@ public sealed partial class MainWindow : Window
 
     async void Scan()
     {
-        ScanButton.IsEnabled = BackupButton.IsEnabled = BackupNowButton.IsEnabled = false;
+        ScanButton.IsEnabled = BackupButton.IsEnabled = backupNow.IsEnabled = false;
         Working(true, "Scanning…");
         SetStatus(false, "Scanning this PC. This reads only; nothing changes.");
         HomeSubtitle.Text = $"{Environment.MachineName} · scanning…";
@@ -561,7 +560,7 @@ public sealed partial class MainWindow : Window
             SetStatus(false, $"Found {m.Packages.Count} programs, {m.Settings.Count} settings and {m.Dotfiles.Count} config files."
                 + (warnings.Count > 0 ? " " + string.Join(" ", warnings) : ""));
             HomeSubtitle.Text = $"{Environment.MachineName} · scanned {DateTime.Now:t}";
-            BackupButton.IsEnabled = BackupNowButton.IsEnabled = true;
+            BackupButton.IsEnabled = backupNow.IsEnabled = true;
         }
         catch (Exception ex)
         {
@@ -592,6 +591,12 @@ public sealed partial class MainWindow : Window
             {
                 Category = "taskbar", Group = "Taskbar", Title = "Pinned apps, left to right", Detail = $"{t.Apps.Count} apps",
                 Item = t, Glyph = Categories[2].Glyph, Tint = Categories[2].Tint, Lines = t.Apps,
+            });
+        foreach (var sh in m.Shares)
+            backupEntries.Add(new Entry
+            {
+                Category = "shares", Group = "Mapped drives", Title = SetupPlan.Unc(sh.Url), Item = sh, Glyph = "", Tint = Categories[4].Tint,
+                Detail = string.Join(" · ", new[] { sh.Drive, sh.Username is { } u ? $"as {u}" : null }.OfType<string>()),
             });
         foreach (var d in m.Dotfiles)
             backupEntries.Add(new Entry
@@ -696,16 +701,6 @@ public sealed partial class MainWindow : Window
 
     Snapshot? latestBackup;
 
-    void UpdateBackupCard()
-    {
-        var on = backupEntries.Count(e => e.Box.IsChecked == true);
-        BackupCardStatus.Text = scanned is null ? "Scanning…" : $"{on} of {backupEntries.Count} items selected";
-        BackupCardDetail.Text = latestBackup is { } last
-            ? $"Last backup of this PC {Ago(last.Info.CreatedDate)} ({last.Info.Summary})."
-            : "No backup of this PC yet. A backup is a small file you can set up another PC or Mac from.";
-        if (settings.AutoBackupMinutes > 0) BackupCardDetail.Text += $" Backs up automatically {AutoBackup.Every(settings.AutoBackupMinutes)} when something changed.";
-    }
-
     static string Ago(DateTimeOffset when)
     {
         var span = DateTimeOffset.Now - when;
@@ -733,7 +728,7 @@ public sealed partial class MainWindow : Window
         var excluded = backupEntries.Where(r => r.Box.IsChecked != true).Select(r => ItemId(r.Item)).ToList();
         var folder = Folder;
         var m = scanned;
-        BackupButton.IsEnabled = BackupNowButton.IsEnabled = false;
+        BackupButton.IsEnabled = backupNow.IsEnabled = false;
         Working(true, "Backing up…");
         SetStatus(false, "Saving…");
         try
@@ -748,7 +743,7 @@ public sealed partial class MainWindow : Window
         {
             SetStatus(false, $"Couldn't save to {folder}: {ex.Message} If it's a NAS share, check it's connected.");
         }
-        finally { BackupButton.IsEnabled = BackupNowButton.IsEnabled = true; Working(false); }
+        finally { BackupButton.IsEnabled = backupNow.IsEnabled = true; Working(false); }
     }
 
     // MARK: Set up
@@ -776,19 +771,17 @@ public sealed partial class MainWindow : Window
                 BackupPicker.Items.Add(new BackupChoice($"{s.Info.Device}, {when} ({s.Info.Summary})", () => ManifestCoder.Read(snap.ManifestPath)));
             }
             latestBackup = snapshots.FirstOrDefault(s => s.Info.Device == Environment.MachineName);
-            var devices = snapshots.Select(s => s.Info.Device).Distinct().Count();
-            SetupCardStatus.Text = snapshots.Count == 0 ? "No backups yet"
-                : $"{snapshots.Count} backup{(snapshots.Count == 1 ? "" : "s")} from {devices} device{(devices == 1 ? "" : "s")}";
-            SetupCardDetail.Text = snapshots.Count == 0
-                ? "Back up a Mac or another PC into the same folder, or open a backup file on the Set up page."
-                : $"Newest: {snapshots[0].Info.Device}, {Ago(snapshots[0].Info.CreatedDate)}. You see every change before anything happens.";
+            foundBackups = snapshots;
+            UpdateSetupCard();
             SetStatus(true, snapshots.Count == 0 ? $"No backups in {folder} yet. Change the folder on Home, or open a file." : "Pick a backup.");
             UpdateBackupCard();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            SetupCardStatus.Text = "Can't read the backup folder";
-            SetupCardDetail.Text = ex.Message;
+            foundBackups = new();
+            UpdateSetupCard();
+            setupCard.Status.Text = "Can't read the backup folder";
+            setupCard.Detail.Text = ex.Message;
             SetStatus(true, $"Couldn't read {folder}: {ex.Message}");
         }
     }
@@ -827,6 +820,9 @@ public sealed partial class MainWindow : Window
             NotCarriedText.Text = plan.NotCarried.Count == 0 ? "Nothing." : string.Join("\n\n", plan.NotCarried.Select(b => "• " + b));
             SetupLog.Text = "";
             LogCard.Visibility = Visibility.Collapsed;
+            previewed = null;
+            setupResult = null;
+            UpdateSetupCard();
             PreviewButton.IsEnabled = true;
             NeedPreview();
             SetupSubtitle.Text = $"From {backup.Device.Name} ({backup.Device.OsTitle}). Preview shows what would change; nothing changes until you click Set up.";
@@ -850,6 +846,11 @@ public sealed partial class MainWindow : Window
             Category = "setup", Group = s.Group, Title = "Pin apps, left to right", Detail = $"{t.Apps.Count} apps", Item = s,
             Glyph = Categories[2].Glyph, Tint = Categories[2].Tint, Lines = t.Apps,
         },
+        SetupStep.Share sh => new Entry
+        {
+            Category = "setup", Group = s.Group, Title = sh.Unc, Item = s, Glyph = "", Tint = Categories[4].Tint,
+            Detail = string.Join(" · ", new[] { sh.Drive, sh.User is { } u ? $"as {u}" : null }.OfType<string>()),
+        },
         _ => new Entry { Category = "setup", Group = s.Group, Title = s.Text, Detail = "", Item = s, Glyph = "", Tint = Categories[3].Tint },
     };
 
@@ -868,12 +869,14 @@ public sealed partial class MainWindow : Window
         var rows = setupEntries.Where(r => r.Box.IsChecked == true).ToList();
         foreach (var r in rows) r.Note.Text = "checking…";
         var todo = 0;
+        var matching = 0;
         await Task.Run(() =>
         {
             foreach (var r in rows)
             {
                 var status = s.Check((SetupStep)r.Item);
                 if (status.State == StepState.ToDo) Interlocked.Increment(ref todo);
+                if (status.State == StepState.Done) Interlocked.Increment(ref matching);
                 OnUI(() =>
                 {
                     r.Note.Text = status.Note;
@@ -886,6 +889,8 @@ public sealed partial class MainWindow : Window
         Working(false);
         PreviewButton.IsEnabled = true;
         ApplyButton.IsEnabled = todo > 0;
+        previewed = (matching, matching + todo);
+        UpdateSetupCard();
         SetStatus(true, todo == 0 ? "Everything ticked is already done here." : $"{todo} change{(todo == 1 ? "" : "s")} to make. Nothing has changed yet.");
     }
 
@@ -910,23 +915,58 @@ public sealed partial class MainWindow : Window
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
 
-        PreviewButton.IsEnabled = ApplyButton.IsEnabled = false;
+        PreviewButton.IsEnabled = ApplyButton.IsEnabled = BackupPicker.IsEnabled = false;
+        SkipButton.Visibility = StopButton.Visibility = Visibility.Visible;
+        StopButton.IsEnabled = true;
         Working(true, "Setting up…");
         SetStatus(true, "Setting up. This can take a while.");
         SetupLog.Text = "";
         LogCard.Visibility = Visibility.Visible;
         var s = setup;
-        var failed = await Task.Run(() => s.Apply(steps, line => OnUI(() =>
-        {
-            SetupLog.Text += line + "\n";
-            SetupLog.SelectionStart = SetupLog.Text.Length;
-        })));
+        stopping = new CancellationTokenSource();
+        var token = stopping.Token;
+        applying = new Setup.Progress(0, steps.Count, "Starting");
+        UpdateSetupCard();
+        var failed = await Task.Run(() => s.Apply(steps,
+            line => OnUI(() =>
+            {
+                SetupLog.Text += line + "\n";
+                SetupLog.SelectionStart = SetupLog.Text.Length;
+            }),
+            p => OnUI(() =>
+            {
+                applying = p;
+                UpdateSetupCard();
+                if (!token.IsCancellationRequested && p.Now != "Done") StatusText.Text = setupStatus = $"{p.Now} ({Math.Min(p.Done + 1, p.Total)} of {p.Total})";
+            }),
+            token));
         Working(false);
+        SkipButton.Visibility = StopButton.Visibility = Visibility.Collapsed;
+        applying = null;
+        previewed = null;
         icons = Task.Run(IconLoader.Build);
-        PreviewButton.IsEnabled = true;
+        PreviewButton.IsEnabled = BackupPicker.IsEnabled = true;
         var done = failed.Count == 0 ? "Done." : $"Didn't finish: {string.Join(", ", failed)}.";
+        if (s.Skipped.Count > 0) done += $" Skipped: {string.Join(", ", s.Skipped)}.";
         if (s.NeedsRestart) done += " Restart Windows to finish installing.";
         else if (s.NeedsSignOut) done += " Sign out and back in to see your taskbar.";
+        setupResult = done;
+        UpdateSetupCard();
         SetStatus(true, done);
+    }
+
+    CancellationTokenSource? stopping;
+
+    void Skip_Click(object sender, RoutedEventArgs e)
+    {
+        setup?.SkipCurrent();
+        SetStatus(true, "Skipping…");
+    }
+
+    void Stop_Click(object sender, RoutedEventArgs e)
+    {
+        stopping?.Cancel();
+        StopButton.IsEnabled = false;
+        SetStatus(true, "Stopping after this step…");
     }
 }
