@@ -1031,6 +1031,7 @@ public sealed partial class MainWindow : Window
             p => OnUI(() =>
             {
                 applying = p;
+                tray?.SetProgress(p.Total == 0 ? 0 : (double)p.Done / p.Total);
                 UpdateSetupCard();
                 if (!token.IsCancellationRequested && p.Now != "Done") StatusText.Text = setupStatus = $"{p.Now} ({Math.Min(p.Done + 1, p.Total)} of {p.Total})";
             }),
@@ -1038,6 +1039,7 @@ public sealed partial class MainWindow : Window
         Working(false);
         SkipButton.Visibility = StopButton.Visibility = Visibility.Collapsed;
         applying = null;
+        tray?.SetProgress(null);
         previewed = null;
         icons = Task.Run(IconLoader.Build);
         PreviewButton.IsEnabled = BackupPicker.IsEnabled = true;

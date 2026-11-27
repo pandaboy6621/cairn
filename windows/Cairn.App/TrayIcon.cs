@@ -16,6 +16,8 @@ sealed class TrayIcon : IDisposable
 
     readonly WndProc proc; // kept alive: Windows calls it
     readonly IntPtr hwnd, icon;
+    readonly Dictionary<(double, bool), IntPtr> rings = new();
+    IntPtr current;
     readonly uint taskbarCreated;
     readonly Func<TrayState> state;
     readonly Action<TrayMenu.Command> run;
@@ -37,6 +39,47 @@ sealed class TrayIcon : IDisposable
         taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
         var path = Path.Combine(AppContext.BaseDirectory, "Assets", "Cairn.ico");
         icon = File.Exists(path) ? LoadImageW(IntPtr.Zero, path, 1 /* IMAGE_ICON */, GetSystemMetrics(49), GetSystemMetrics(50), 0x10 /* LR_LOADFROMFILE */) : IntPtr.Zero;
+        current = icon;
+    }
+
+    /// While a set-up runs: a ring that fills with its progress; null puts Cairn's icon back.
+    public void SetProgress(double? fraction)
+    {
+        var next = fraction is { } f ? Ring(TrayRing.Step(f), LightTaskbar()) : icon;
+        if (next == current) return;
+        current = next;
+        if (!added) return;
+        var data = Data(NIF_ICON);
+        Shell_NotifyIconW(NIM_MODIFY, ref data);
+    }
+
+    static bool LightTaskbar()
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        return key?.GetValue("SystemUsesLightTheme") is int v && v == 1;
+    }
+
+    IntPtr Ring(double step, bool light)
+    {
+        if (rings.TryGetValue((step, light), out var cached)) return cached;
+        var size = GetSystemMetrics(49);
+        var pixels = TrayRing.Pixels(size, step, light);
+        var header = new BITMAPINFOHEADER { biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>(), biWidth = size, biHeight = -size, biPlanes = 1, biBitCount = 32 };
+        var color = CreateDIBSection(IntPtr.Zero, ref header, 0, out var bits, IntPtr.Zero, 0);
+        if (color == IntPtr.Zero) return icon;
+        Marshal.Copy(MemoryMarshal.Cast<uint, int>(pixels).ToArray(), 0, bits, pixels.Length);
+        // An all-zero mask: the colour bitmap's own alpha decides what shows.
+        var maskBits = Marshal.AllocHGlobal((size + 15) / 16 * 2 * size);
+        for (var i = 0; i < (size + 15) / 16 * 2 * size; i++) Marshal.WriteByte(maskBits, i, 0);
+        var mask = CreateBitmap(size, size, 1, 1, maskBits);
+        Marshal.FreeHGlobal(maskBits);
+        var info = new ICONINFO { fIcon = true, hbmMask = mask, hbmColor = color };
+        var made = CreateIconIndirect(ref info);
+        DeleteObject(color);
+        DeleteObject(mask);
+        if (made == IntPtr.Zero) return icon;
+        rings[(step, light)] = made;
+        return made;
     }
 
     public bool Visible => added;
@@ -70,7 +113,7 @@ sealed class TrayIcon : IDisposable
     NOTIFYICONDATAW Data(uint flags) => new()
     {
         cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(), hWnd = hwnd, uID = 1, uFlags = flags,
-        uCallbackMessage = WM_APP_TRAY, hIcon = icon, szTip = tip,
+        uCallbackMessage = WM_APP_TRAY, hIcon = current, szTip = tip,
     };
 
     IntPtr Proc(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam)
@@ -112,6 +155,8 @@ sealed class TrayIcon : IDisposable
         Hide();
         if (hwnd != IntPtr.Zero) DestroyWindow(hwnd);
         if (icon != IntPtr.Zero) DestroyIcon(icon);
+        foreach (var r in rings.Values) DestroyIcon(r);
+        rings.Clear();
     }
 
     // MARK: Win32
@@ -148,6 +193,30 @@ sealed class TrayIcon : IDisposable
     }
 
     struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth, biHeight;
+        public ushort biPlanes, biBitCount;
+        public uint biCompression, biSizeImage;
+        public int biXPelsPerMeter, biYPelsPerMeter;
+        public uint biClrUsed, biClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct ICONINFO
+    {
+        [MarshalAs(UnmanagedType.Bool)] public bool fIcon;
+        public uint xHotspot, yHotspot;
+        public IntPtr hbmMask, hbmColor;
+    }
+
+    [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateBitmap(int width, int height, uint planes, uint bitCount, IntPtr bits);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("user32.dll")] static extern IntPtr CreateIconIndirect(ref ICONINFO info);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATAW data);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern ushort RegisterClassExW(ref WNDCLASSEXW wc);
