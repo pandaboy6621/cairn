@@ -30,7 +30,16 @@ public partial class App : Application
             // A NAS that's offline just means trying again next time.
             if (!Directory.Exists(Path.GetPathRoot(folder) ?? folder)) return $"Skipped: {folder} isn't reachable.";
             var m = Scanner.ScanThisPC(out _);
-            return AutoBackup.Run(m, new SnapshotStore(folder));
+            var result = AutoBackup.Run(m, new SnapshotStore(folder));
+            // Sync on: publish this PC's changes too. Incoming ones wait for the user.
+            var sync = new SyncStore(folder);
+            if (sync.Config(m.Device.Name).Enabled)
+            {
+                var secrets = VaultStore.ReadSecrets(VaultStore.DeviceSecretsPath(folder, m.Device.Name));
+                var plan = SyncRun.Publish(sync, m, secrets, SyncIdentity.LoadOrCreate(SyncIdentity.DefaultPath), SyncTrust.Load(SyncTrust.DefaultPath), DateTimeOffset.UtcNow);
+                if (plan.Outgoing.Count > 0) result += $" Synced {plan.Outgoing.Count} change{(plan.Outgoing.Count == 1 ? "" : "s")}.";
+            }
+            return result;
         }
         catch (Exception e) { return $"Couldn't back up: {e.Message}"; }
     }

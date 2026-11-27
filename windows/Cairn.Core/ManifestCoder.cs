@@ -40,6 +40,10 @@ public static class ManifestCoder
 
     public static Manifest Read(string path) => Decode(File.ReadAllText(path));
 
+    /// Any of Cairn's YAML files (sync, for one): the same reader and writer as backups.
+    internal static T? DecodeAny<T>(string yaml) => Reader.Deserialize<T>(yaml);
+    internal static string EncodeAny(object value) => Writer.Serialize(value);
+
     /// Writes next to the target, then moves it in place: never a half-written backup.
     public static void Write(Manifest m, string path)
     {
@@ -49,7 +53,7 @@ public static class ManifestCoder
     }
 
     /// Dictionaries with sorted string keys and plain lists, so values write the same every time.
-    static object? Canonical(object? v) => v switch
+    internal static object? Canonical(object? v) => v switch
     {
         IDictionary<object, object> d => new SortedDictionary<string, object?>(
             d.ToDictionary(kv => kv.Key.ToString() ?? "", kv => Canonical(kv.Value)), StringComparer.Ordinal),

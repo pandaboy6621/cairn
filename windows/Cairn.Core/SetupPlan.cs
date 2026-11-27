@@ -23,6 +23,20 @@ public sealed class SetupPlan
     public List<string> ByHand { get; } = new();
     public List<string> NotCarried { get; } = new();
 
+    /// One plan from several (changes from PCs and from Macs, say); a step in two is kept once.
+    public static SetupPlan Combine(Device from, params SetupPlan[] plans)
+    {
+        var plan = new SetupPlan { From = from };
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in plans)
+        {
+            plan.Steps.AddRange(p.Steps.Where(st => ids.Add(st.Id)));
+            plan.ByHand.AddRange(p.ByHand.Where(b => !plan.ByHand.Contains(b)));
+            plan.NotCarried.AddRange(p.NotCarried.Where(n => !plan.NotCarried.Contains(n)));
+        }
+        return plan;
+    }
+
     public static SetupPlan Make(Manifest backup, Catalog? catalog = null)
     {
         catalog ??= Catalog.Shared;
