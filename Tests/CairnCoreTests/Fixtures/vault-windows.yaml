@@ -1,0 +1,15 @@
+kdf: pbkdf2-hmac-sha256
+kdf_params:
+  iterations: 1000
+recovery_kdf: hkdf-sha256
+recovery_salt: 78RikukYX52KGaalaxyfHw==
+recovery_wrapped_key:
+  ciphertext: 64WB6doTPi9HeLBgh+y2j6eQ8tsutNE2a/9T3zwpiOo=
+  nonce: JYSW+yI7jNfdJGOq
+  tag: PyEYyQ0K1UPlaqbOL5hLog==
+salt: cwrBDO+TswIUgkGrk3JrIg==
+v: 1
+wrapped_vault_key:
+  ciphertext: XL3QevtpwIY2Sbtnv4PMhPm6SAK7ge9vjp4gg9QFIQk=
+  nonce: WUfD7Eb4MPiST/FP
+  tag: WK/DKdDePD9UJl70AQ+XuQ==

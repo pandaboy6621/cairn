@@ -21,7 +21,7 @@
 
   <!-- Made-up backups shared with the Mac app's tests, so both read the same format. -->
   <ItemGroup>
-    <None Include="..\..\Tests\CairnCoreTests\Fixtures\windows-manifest.yaml;..\..\Tests\CairnCoreTests\Fixtures\mac-manifest.yaml" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Tests\CairnCoreTests\Fixtures\windows-manifest.yaml;..\..\Tests\CairnCoreTests\Fixtures\mac-manifest.yaml;..\..\Tests\CairnCoreTests\Fixtures\vault-mac*" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
