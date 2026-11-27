@@ -164,8 +164,7 @@ public sealed partial class MainWindow : Window
             Content = new TextBlock { Text = "Back up", Style = TextStyle("CaptionTextBlockStyle"), FontWeight = FontWeights.SemiBold, Foreground = Res("TextFillColorSecondaryBrush") },
         });
         foreach (var c in Categories) Sidebar.Items.Add(Item(c, true));
-        Sidebar.Items.Add(new ListViewItem { IsEnabled = false, IsHitTestVisible = false, MinHeight = 12, Height = 12 });
-        Sidebar.Items.Add(Item(Prefs, false));
+        SidebarFooter.Items.Add(Item(Prefs, false));
     }
 
     readonly Dictionary<string, TextBlock> statValues = new();
@@ -207,10 +206,10 @@ public sealed partial class MainWindow : Window
     /// opens from Home and from Sync, like the Mac app's restore).
     void Select(Category c)
     {
-        var item = Sidebar.Items.OfType<ListViewItem>().FirstOrDefault(i => Equals(i.Tag, c));
-        if (item is not null) { Sidebar.SelectedItem = item; return; }
+        foreach (var list in new[] { Sidebar, SidebarFooter })
+            if (list.Items.OfType<ListViewItem>().FirstOrDefault(i => Equals(i.Tag, c)) is { } item) { list.SelectedItem = item; return; }
         if (c == SetUp) cameFrom = current;
-        Sidebar.SelectedItem = null;
+        Sidebar.SelectedItem = SidebarFooter.SelectedItem = null;
         ShowPage(c);
     }
 
@@ -222,7 +221,13 @@ public sealed partial class MainWindow : Window
 
     void Sidebar_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if ((Sidebar.SelectedItem as ListViewItem)?.Tag is Category c) ShowPage(c);
+        if ((Sidebar.SelectedItem as ListViewItem)?.Tag is Category c) { SidebarFooter.SelectedItem = null; ShowPage(c); }
+    }
+
+    /// Settings sits in its own list at the bottom; one selection across both lists.
+    void SidebarFooter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if ((SidebarFooter.SelectedItem as ListViewItem)?.Tag is Category c) { Sidebar.SelectedItem = null; ShowPage(c); }
     }
 
     void ShowPage(Category c)
