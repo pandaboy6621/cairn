@@ -76,6 +76,8 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $name = "Cairn-$($tag.TrimStart('v'))-Windows-x64.zip"
+          # Marks a release copy: only these update themselves (Updates.cs, UpdateInstall).
+          Set-Content -Path publish/Cairn/Cairn.release -Value $tag.TrimStart('v') -Encoding ascii -NoNewline
           Compress-Archive -Path publish/Cairn -DestinationPath $name
           "$((Get-FileHash $name -Algorithm SHA256).Hash.ToLower())  $name" | Out-File "$name.sha256" -Encoding ascii -NoNewline
           # Whichever build finishes first creates the release; release.yml writes the notes.

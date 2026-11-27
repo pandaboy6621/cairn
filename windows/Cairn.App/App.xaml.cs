@@ -18,10 +18,43 @@ public partial class App : Application
             Exit();
             return;
         }
+        // The new version, unzipped next to this folder, finishing an update.
+        var args = Environment.GetCommandLineArgs().Skip(1).ToList();
+        if (args.IndexOf(UpdateInstall.FinishFlag) is var at and >= 0)
+        {
+            FinishUpdate(args, at);
+            Exit();
+            return;
+        }
         window = new MainWindow();
         // Started at sign-in: wait in the tray (if the icon is on) instead of opening.
         var hidden = Environment.GetCommandLineArgs().Skip(1).Contains(SignInStartup.HiddenFlag, StringComparer.OrdinalIgnoreCase);
         if (!hidden || !AppSettings.Load().ShowInTray) window.Activate();
+    }
+
+    /// `--finish-update <pid> <app folder> [--hidden | --no-start]`: wait for the old Cairn
+    /// to quit, replace its folder with this one, then start the new version from there.
+    static void FinishUpdate(List<string> args, int at)
+    {
+        if (args.Count < at + 3 || !int.TryParse(args[at + 1], out var pid)) return;
+        var appDir = args[at + 2];
+        var here = AppContext.BaseDirectory;
+        if (!UpdateInstall.IsStagedFor(here, appDir)) return;
+        try { using var old = System.Diagnostics.Process.GetProcessById(pid); old.WaitForExit(60_000); }
+        catch (ArgumentException) { /* already gone */ }
+        try { UpdateInstall.Finish(here, appDir); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Finish put the old Cairn back; say why next time it opens.
+            var s = AppSettings.Load();
+            s.UpdateError = $"Couldn't install the update: {e.Message}";
+            s.Save();
+        }
+        if (args.Contains(UpdateInstall.NoStartFlag)) return;
+        var start = new System.Diagnostics.ProcessStartInfo(Path.Combine(appDir, UpdateInstall.Exe)) { UseShellExecute = false, WorkingDirectory = appDir };
+        if (args.Contains(SignInStartup.HiddenFlag)) start.ArgumentList.Add(SignInStartup.HiddenFlag);
+        try { System.Diagnostics.Process.Start(start); }
+        catch (System.ComponentModel.Win32Exception) { }
     }
 
     static string BackUpQuietly()

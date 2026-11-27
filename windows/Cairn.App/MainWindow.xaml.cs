@@ -121,6 +121,7 @@ public sealed partial class MainWindow : Window
         ShowSettings();
         ShowSync();
         SetupTray();
+        SetupUpdates();
         Sidebar.SelectedIndex = 0;
         _ = Startup();
     }
@@ -333,6 +334,7 @@ public sealed partial class MainWindow : Window
         AutoToggle.IsOn = settings.AutoBackupMinutes > 0;
         IntervalPicker.IsEnabled = AutoToggle.IsOn;
         ShowTraySettings();
+        ShowUpdateSettings();
         VersionText.Text = $"Version {typeof(MainWindow).Assembly.GetName().Version?.ToString(3)} · {WindowsTitle}";
         showingSettings = false;
         UpdateAutoStatus();

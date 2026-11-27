@@ -14,11 +14,19 @@ public class TrayMenuTests
         Assert.Equal("Last backup 5 min ago", items[0].Text);
         Assert.False(items[0].Enabled);
         Assert.Equal("Backed up: 3 programs changed.", items[1].Text); // first sentence only
-        Assert.Equal(new[] { Command.BackUpNow, Command.AutoBackup, Command.OpenAtSignIn, Command.OpenFolder, Command.OpenCairn, Command.Settings, Command.HideIcon, Command.Quit },
+        Assert.Equal(new[] { Command.BackUpNow, Command.AutoBackup, Command.OpenAtSignIn, Command.OpenFolder, Command.OpenCairn, Command.Settings, Command.CheckForUpdates, Command.HideIcon, Command.Quit },
             items.Where(i => i.Command != Command.None).Select(i => i.Command));
         Assert.True(items.Single(i => i.Command == Command.AutoBackup).Checked);
         Assert.False(items.Single(i => i.Command == Command.OpenAtSignIn).Checked);
         Assert.Equal(2, items.Count(i => i.Text is null)); // separators
+        Assert.Equal("Check for Updates…", items.Single(i => i.Command == Command.CheckForUpdates).Text);
+    }
+
+    [Fact]
+    public void AnUpdateFoundShowsInTheMenu()
+    {
+        var items = Items(new TrayState(null, null, false, false, false, Now, UpdateVersion: "0.3.0"));
+        Assert.Equal("Install Cairn 0.3.0…", items.Single(i => i.Command == Command.CheckForUpdates).Text);
     }
 
     [Fact]

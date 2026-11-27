@@ -24,6 +24,17 @@ public sealed class AppSettings
     /// Cairn's icon in the notification area (the tray), like the Mac's menu bar icon.
     public bool ShowInTray { get; set; } = true;
 
+    /// Look for a new release on GitHub a minute after launch and every 6 hours.
+    public bool CheckForUpdates { get; set; } = true;
+
+    /// Download and install what that finds (only when checking is on).
+    public bool InstallUpdates { get; set; } = true;
+
+    public DateTimeOffset? LastUpdateCheck { get; set; }
+
+    /// Left by the new version when it couldn't replace this one (shown once in Settings).
+    public string? UpdateError { get; set; }
+
     public static string DefaultBackupFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn", "Backups");
 
