@@ -94,7 +94,7 @@ final class SyncFlow {
     var isOn: Bool { config.enabled }
     /// Where sync's files live: the backup folder, or this Mac (direct mode).
     var root: URL? { backupFolder.map { local.syncRoot(mode: mode, backupFolder: $0) } }
-    var store: SyncStore? { root.map { SyncStore(root: $0) } }
+    var store: SyncStore? { root.map { SyncStore(root: $0, me: identity?.deviceID) } }
 
     var pendingCount: Int {
         (plan?.incoming.count ?? 0) + (plan?.conflicts.count ?? 0) + (plan?.asks.count ?? 0)
@@ -138,7 +138,7 @@ final class SyncFlow {
     /// Plans a sync without writing anything, so incoming changes show up.
     func preview(scan: Manifest) {
         guard isOn, !isSyncing, let root, let backupFolder else { return }
-        let run = SyncRun(store: SyncStore(root: root), device: scan.device, identity: identity, trusted: trust.ids)
+        let run = SyncRun(store: SyncStore(root: root, me: identity?.deviceID), device: scan.device, identity: identity, trusted: trust.ids)
         Task {
             let plan = await Task.detached(priority: .utility) { () -> SyncPlan in
                 run.plan(local: scan, secrets: VaultStore.readSecrets(in: backupFolder, device: scan.device.name))
@@ -287,7 +287,7 @@ final class SyncFlow {
         isSyncing = true
         error = nil
         lastScan = scan
-        let run = SyncRun(store: SyncStore(root: root), device: scan.device, identity: identity, trusted: trust.ids)
+        let run = SyncRun(store: SyncStore(root: root, me: identity?.deviceID), device: scan.device, identity: identity, trusted: trust.ids)
         let direct = mode == .direct
         let context = directContext()
         let online: [(SyncPeer, NWEndpoint)] = direct ? peers.compactMap { p in
@@ -361,7 +361,7 @@ final class SyncFlow {
     /// After the restore sheet applied incoming changes: record what landed.
     func restored(after manifest: Manifest) {
         guard let root, let backupFolder, let device, !applying.isEmpty else { return }
-        let run = SyncRun(store: SyncStore(root: root), device: device, identity: identity, trusted: trust.ids)
+        let run = SyncRun(store: SyncStore(root: root, me: identity?.deviceID), device: device, identity: identity, trusted: trust.ids)
         do {
             try run.taken(applying, after: manifest, secrets: VaultStore.readSecrets(in: backupFolder, device: device.name))
         } catch { self.error = error.localizedDescription }
@@ -449,12 +449,12 @@ final class SyncFlow {
     private func directContext() -> DirectSyncContext? {
         guard let identity, let device, let root else { return nil }
         return DirectSyncContext(identity: identity, name: device.name, local: local,
-                                 store: SyncStore(root: root), exchange: mode == .direct)
+                                 store: SyncStore(root: root, me: identity.deviceID), exchange: mode == .direct)
     }
 
     /// Asks a Mac found on the network to pair: both show a code.
     func pair(with machine: Machine) {
-        guard let peer = peers.first(where: { $0.device == machine.name }), let endpoint = bonjour.endpoint(for: peer),
+        guard let peer = peers.first(where: { peer in machine.deviceID.map { peer.deviceID == $0 } ?? (peer.device == machine.name) }), let endpoint = bonjour.endpoint(for: peer),
               let context = directContext() else {
             pairing = Pairing(peer: machine.name, stage: .failed("That Mac isn't reachable right now. Pair by ID instead."))
             return
@@ -561,6 +561,12 @@ final class SyncFlow {
         guard let backupFolder, let device, let store else { machines = []; return }
         let snapshots = SnapshotStore(root: backupFolder)
         var byName: [String: Machine] = [:]
+        /// Two Macs can share a name (a clone, a second "MacBook Air"): the
+        /// second one is shown with its short ID.
+        func key(_ name: String, _ id: DeviceID?) -> String {
+            guard let id, let have = byName[name]?.deviceID, have != id else { return name }
+            return "\(name) (\(id.short))"
+        }
         func touch(_ name: String, _ change: (inout Machine) -> Void) {
             guard !name.isEmpty else { return }
             var m = byName[name] ?? Machine(name: name)
@@ -571,18 +577,18 @@ final class SyncFlow {
             $0.isThisMac = true; $0.osVersion = device.osVersion; $0.syncing = config.enabled
             $0.lastSync = lastSync; $0.deviceID = deviceID
         }
-        for d in store.devices() where d.info.name != device.name {
-            touch(d.info.name) {
+        for d in store.devices() where d.info.deviceID.map({ $0 != deviceID }) ?? (d.info.name != device.name) {
+            touch(key(d.info.name, d.info.deviceID)) {
                 $0.osVersion = $0.osVersion ?? d.info.osVersion; $0.syncing = d.config.enabled
                 $0.lastSync = d.info.lastSync; $0.deviceID = $0.deviceID ?? d.info.deviceID
             }
         }
-        for t in trust.devices { touch(t.name.isEmpty ? t.id.description : t.name) { $0.deviceID = t.id; $0.paired = true } }
+        for t in trust.devices { touch(t.name.isEmpty ? t.id.description : key(t.name, t.id)) { $0.deviceID = t.id; $0.paired = true } }
         for s in snapshots.list() where byName[s.info.device]?.latestBackup == nil {
             touch(s.info.device) { $0.latestBackup = s.manifestURL; $0.latestBackupDate = s.info.created }
         }
-        for p in peers {
-            touch(p.device) {
+        for p in peers where p.deviceID == nil || p.deviceID != deviceID {
+            touch(key(p.device, p.deviceID)) {
                 $0.online = true
                 $0.acceptsPairing = p.accepts
                 $0.osVersion = $0.osVersion ?? p.osVersion
@@ -614,7 +620,7 @@ final class SyncFlow {
         stopNetwork()
         guard config.enabled else { peers = []; refreshMachines(); return }
         let context = DirectSyncContext(identity: identity, name: device.name, local: local,
-                                        store: SyncStore(root: root), exchange: mode == .direct)
+                                        store: SyncStore(root: root, me: identity.deviceID), exchange: mode == .direct)
         let server = DirectSyncServer(context: context, ask: { [weak self] request in
             guard let self else { return false }
             return await self.ask(request)

@@ -38,13 +38,15 @@ struct SyncCommand: ParsableCommand {
         var mode: SyncMode { local.mode() }
         /// Where sync's files live: the backup folder, or this Mac (direct mode).
         var url: URL { local.syncRoot(mode: mode, backupFolder: backupFolder) }
+        /// Sync's files, finding this Mac's own folder by its device ID.
+        var store: SyncStore { SyncStore(root: url, me: try? local.identity().deviceID) }
     }
 
     /// Scans this Mac and plans a sync (writes nothing).
     static func prepare(_ options: Options) throws -> (run: SyncRun, scan: Manifest, secrets: SecretsFile, plan: SyncPlan) {
         let scan = SetupScanner().scan().manifest
         let local = options.local
-        let run = SyncRun(store: SyncStore(root: options.url), device: scan.device,
+        let run = SyncRun(store: options.store, device: scan.device,
                           identity: try local.identity(), trusted: local.trust().ids)
         // Secrets are always captured into the backup folder's vault files.
         let secrets = VaultStore.readSecrets(in: options.backupFolder, device: scan.device.name)
@@ -65,7 +67,7 @@ struct SyncCommand: ParsableCommand {
     static func context(_ options: Options, device: Device) throws -> DirectSyncContext {
         let local = options.local
         return DirectSyncContext(identity: try local.identity(), name: device.name, local: local,
-                                 store: SyncStore(root: options.url), exchange: options.mode == .direct)
+                                 store: options.store, exchange: options.mode == .direct)
     }
 
     static func requireOn(_ store: SyncStore, _ device: String) throws {
@@ -137,7 +139,7 @@ struct SyncCommand: ParsableCommand {
         var preset: SyncPreset?
 
         func run() throws {
-            let store = SyncStore(root: options.url)
+            let store = options.store
             let device = SetupScanner().scan().manifest.device.name
             var config = store.config(device: device)
             config.enabled = true
@@ -154,7 +156,7 @@ struct SyncCommand: ParsableCommand {
         @OptionGroup var options: Options
 
         func run() throws {
-            let store = SyncStore(root: options.url)
+            let store = options.store
             let device = SetupScanner().scan().manifest.device.name
             var config = store.config(device: device)
             config.enabled = false
@@ -279,7 +281,7 @@ struct SyncCommand: ParsableCommand {
         var scope: String?
 
         func run() throws {
-            let store = SyncStore(root: options.url)
+            let store = options.store
             let device = SetupScanner().scan().manifest.device.name
             var config = store.config(device: device)
             if let preset { config.apply(preset) }
@@ -392,7 +394,7 @@ struct SyncCommand: ParsableCommand {
         @OptionGroup var options: Options
 
         func run() throws {
-            let store = SyncStore(root: options.url)
+            let store = options.store
             let snapshots = SnapshotStore(root: options.backupFolder)
             let trust = options.local.trust()
             let syncing = store.devices()
@@ -429,9 +431,9 @@ struct SyncCommand: ParsableCommand {
             try options.local.saveMode(mode)
             // Keep this Mac's choices when switching where sync's files live.
             let device = SetupScanner().scan().manifest.device.name
-            let config = SyncStore(root: before).config(device: device)
+            let config = SyncStore(root: before, me: try? options.local.identity().deviceID).config(device: device)
             let after = options.local.syncRoot(mode: mode, backupFolder: options.backupFolder)
-            try SyncStore(root: after).saveConfig(config, device: device)
+            try SyncStore(root: after, me: try? options.local.identity().deviceID).saveConfig(config, device: device)
             print("\(mode.title). \(mode.summary)")
         }
     }
@@ -489,9 +491,9 @@ struct SyncCommand: ParsableCommand {
             }
             // Keep this Mac's choices in the new folder.
             let device = SetupScanner().device().name
-            let config = SyncStore(root: options.url).config(device: device)
+            let config = options.store.config(device: device)
             try local.saveFolder(chosen)
-            let store = SyncStore(root: options.url)
+            let store = options.store
             if config.enabled, options.mode == .folder {
                 try store.saveConfig(config, device: device)
                 _ = try store.ensureGroup(now: Date())
@@ -567,7 +569,7 @@ struct SyncCommand: ParsableCommand {
         @OptionGroup var options: Options
         func run() throws {
             let local = options.local
-            let requests = SyncStore(root: options.url).requests(trust: local.trust(), me: try local.identity().deviceID)
+            let requests = options.store.requests(trust: local.trust(), me: try local.identity().deviceID)
             if requests.isEmpty { print("No requests."); return }
             for r in requests { print("  \(r.name)  macOS \(r.osVersion)  ID \(r.deviceID!)") }
             print("Check the ID on that Mac (`cairn sync id`), then `cairn sync accept <ID>` or `cairn sync ignore <ID>`.")
@@ -581,12 +583,12 @@ struct SyncCommand: ParsableCommand {
         func run() throws {
             guard let id = DeviceID(parsing: deviceID) else { throw ValidationError("That isn't a device ID.") }
             let local = options.local
-            guard let info = SyncStore(root: options.url).requests(trust: local.trust(), me: try local.identity().deviceID)
+            guard let info = options.store.requests(trust: local.trust(), me: try local.identity().deviceID)
                 .first(where: { $0.deviceID == id }) else { throw ValidationError("No request from \(id).") }
             var trust = local.trust()
             trust.trust(id, name: info.name, publicKey: info.publicKey, how: .folder, now: Date())
             try local.saveTrust(trust)
-            if SyncStore(root: options.url).config(device: SetupScanner().device().name).enabled {
+            if options.store.config(device: SetupScanner().device().name).enabled {
                 print("Now syncing with \(info.name).")
             } else {
                 print("Accepted \(info.name). Sync is off on this Mac: turn it on with `cairn sync on` to start syncing.")

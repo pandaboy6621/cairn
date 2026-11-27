@@ -60,7 +60,7 @@ public struct SoftwareRemover: Sendable {
             switch p.kind {
             case .formula: return SoftwareRemoval(title: p.id, method: .brew(Command("brew", ["uninstall", "--formula", name])))
             case .cask: return SoftwareRemoval(title: p.id, method: .brew(Command("brew", ["uninstall", "--cask", name])))
-            case .tap: return nil
+            default: return nil // taps, and other platforms' package kinds
             }
         }
         if let a = value.app, let url = appStoreApp(named: a.name) {

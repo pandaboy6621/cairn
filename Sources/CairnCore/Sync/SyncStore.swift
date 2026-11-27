@@ -12,18 +12,45 @@ import Yams
 /// Each Mac only ever writes its own folder, so two Macs syncing at once over
 /// a NAS never write the same file. The group's state is the merge of every
 /// Mac's `published.yaml`, newest entry first.
+///
+/// A Mac's folder is named after it. Two Macs can share a name (a clone, a
+/// second "MacBook Air"), so a folder belongs to the device ID that claimed it
+/// first, and a later Mac with the same name gets `<name>-<short id>`.
 public struct SyncStore: Sendable {
     public var root: URL
+    /// This Mac's device ID, to find its own folder when another Mac has the same name.
+    public var me: DeviceID?
 
-    public init(root: URL) { self.root = root }
+    public init(root: URL, me: DeviceID? = nil) {
+        self.root = root
+        self.me = me
+    }
 
     public var syncURL: URL { root.appendingPathComponent("sync", isDirectory: true) }
     var devicesURL: URL { syncURL.appendingPathComponent("devices", isDirectory: true) }
     var groupURL: URL { syncURL.appendingPathComponent("group.yaml") }
 
     func deviceURL(_ device: String) -> URL {
-        devicesURL.appendingPathComponent(SnapshotStore.folderName(device: device), isDirectory: true)
+        devicesURL.appendingPathComponent(folder(for: device, id: me), isDirectory: true)
     }
+
+    /// The folder for the Mac named `device` with `id`: its name, or its name
+    /// plus its short ID when a different Mac with that name already has it.
+    public func folder(for device: String, id: DeviceID?) -> String {
+        let base = SnapshotStore.folderName(device: device)
+        guard let id, let owner = owner(of: base), owner != id else { return base }
+        return base + "-" + id.short.lowercased()
+    }
+
+    /// The device ID a folder belongs to: from its device.yaml, or the claim
+    /// written with its first file (before there is a device.yaml).
+    func owner(of folder: String) -> DeviceID? {
+        let dir = devicesURL.appendingPathComponent(folder, isDirectory: true)
+        return read(SyncDeviceInfo.self, dir.appendingPathComponent("device.yaml"))?.deviceID
+            ?? read(DeviceID.self, dir.appendingPathComponent(Self.ownerFile))
+    }
+    static let ownerFile = "owner.yaml"
+
 
     // MARK: Group
 
@@ -40,19 +67,20 @@ public struct SyncStore: Sendable {
     // MARK: One Mac
 
     public func config(device: String) -> SyncConfig { read(SyncConfig.self, file("config", device)) ?? SyncConfig() }
-    public func saveConfig(_ c: SyncConfig, device: String) throws { try write(c, file("config", device)) }
+    public func saveConfig(_ c: SyncConfig, device: String) throws { try claim(device); try write(c, file("config", device)) }
 
     public func base(device: String) -> SyncBase { read(SyncBase.self, file("base", device)) ?? SyncBase() }
-    public func saveBase(_ b: SyncBase, device: String) throws { try write(b, file("base", device)) }
+    public func saveBase(_ b: SyncBase, device: String) throws { try claim(device); try write(b, file("base", device)) }
 
     public func published(device: String) -> SyncPublished { read(SyncPublished.self, file("published", device)) ?? SyncPublished() }
 
     public func info(device: String) -> SyncDeviceInfo? { read(SyncDeviceInfo.self, file("device", device)) }
-    public func saveInfo(_ i: SyncDeviceInfo, device: String) throws { try write(i, file("device", device)) }
+    public func saveInfo(_ i: SyncDeviceInfo, device: String) throws { try claim(device); try write(i, file("device", device)) }
 
     /// Adds entries to this Mac's published file (newer entries replace older ones).
     public func publish(_ entries: [String: SyncEntry], device: String) throws {
         guard !entries.isEmpty else { return }
+        try claim(device)
         var file = published(device: device)
         for (id, e) in entries { file.entries[id] = e }
         try write(file, self.file("published", device))
@@ -106,7 +134,7 @@ public struct SyncStore: Sendable {
         for d in bundle.devices {
             guard let id = d.info.deviceID, id != me, trusted.contains(id),
                   let key = d.info.publicKey, id.matches(publicKey: key) else { continue }
-            let folder = SnapshotStore.folderName(device: d.info.name)
+            let folder = self.folder(for: d.info.name, id: id)
             let dir = devicesURL.appendingPathComponent(folder)
             let have = read(SyncPublished.self, dir.appendingPathComponent("published.yaml"))
             let haveInfo = read(SyncDeviceInfo.self, dir.appendingPathComponent("device.yaml"))
@@ -135,7 +163,7 @@ public struct SyncStore: Sendable {
     /// The group's newest entry per item, leaving out this Mac's own (and, with
     /// `trusted`, any Mac that isn't paired).
     public func group(excluding device: String, trusted: Set<DeviceID>? = nil) -> [String: SyncEntry] {
-        SyncEngine.merge(allPublished(trusted: trusted), excluding: SnapshotStore.folderName(device: device))
+        SyncEngine.merge(allPublished(trusted: trusted), excluding: folder(for: device, id: me))
     }
 
     // MARK: Files
@@ -155,6 +183,14 @@ public struct SyncStore: Sendable {
 
     private func file(_ name: String, _ device: String) -> URL {
         deviceURL(device).appendingPathComponent(name + ".yaml")
+    }
+
+    /// The first write to this Mac's folder claims it for `me`.
+    private func claim(_ device: String) throws {
+        guard let me else { return }
+        let dir = deviceURL(device)
+        guard owner(of: dir.lastPathComponent) == nil else { return }
+        try write(me, dir.appendingPathComponent(Self.ownerFile))
     }
 
     private func read<T: Decodable>(_ type: T.Type, _ url: URL) -> T? {
@@ -179,6 +215,8 @@ public struct SyncRun {
     public var trusted: Set<DeviceID>?
 
     public init(store: SyncStore, device: Device, identity: SyncIdentity? = nil, trusted: Set<DeviceID>? = nil) {
+        var store = store
+        if store.me == nil { store.me = identity?.deviceID }
         self.store = store
         self.device = device
         self.identity = identity

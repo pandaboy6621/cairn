@@ -262,7 +262,7 @@ struct Backup: ParsableCommand {
         // sync files; changes from other Macs wait for `cairn sync now --apply`).
         let local = SyncLocal()
         let mode = local.mode()
-        let store = SyncStore(root: local.syncRoot(mode: mode, backupFolder: folder))
+        let store = SyncStore(root: local.syncRoot(mode: mode, backupFolder: folder), me: try? local.identity().deviceID)
         let device = report.manifest.device
         if store.config(device: device.name).enabled, mode == .direct || backup.folderIsAvailable() {
             let run = SyncRun(store: store, device: device, identity: try? local.identity(), trusted: local.trust().ids)

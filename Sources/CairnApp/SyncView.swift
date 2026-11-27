@@ -731,19 +731,37 @@ private struct MachineRow: View {
                     .controlSize(.small)
                     .help("Compare its latest backup with this Mac. Nothing changes unless you restore.")
             }
+            if hasActions {
+                Menu {
+                    actions
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Unpair or remove this Mac")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .contextMenu {
-            if let url = machine.latestBackup {
-                Button("Show Latest Backup in Finder") { model.showInFinder(url) }
-            }
-            if !machine.isThisMac, machine.paired, let id = machine.deviceID {
-                Button("Unpair") { model.sync.unpair(id) }
-            }
-            if !machine.isThisMac, machine.lastSeen != nil {
-                Button("Forget This Mac") { model.sync.forget(machine) }
-            }
+        .contextMenu { actions }
+    }
+
+    private var canUnpair: Bool { !machine.isThisMac && machine.paired && machine.deviceID != nil }
+    private var canForget: Bool { !machine.isThisMac && machine.lastSeen != nil }
+    private var hasActions: Bool { canUnpair || canForget || (!machine.isThisMac && machine.latestBackup != nil) }
+
+    @ViewBuilder private var actions: some View {
+        if let url = machine.latestBackup {
+            Button("Show Latest Backup in Finder") { model.showInFinder(url) }
+        }
+        if canUnpair, let id = machine.deviceID {
+            Divider()
+            Button("Unpair", role: .destructive) { model.sync.unpair(id) }
+        }
+        if canForget {
+            Button("Forget This Mac", role: .destructive) { model.sync.forget(machine) }
         }
     }
 

@@ -162,3 +162,51 @@ private final class Trashed: @unchecked Sendable {
     private(set) var urls: [URL] = []
     func add(_ url: URL) { lock.lock(); urls.append(url); lock.unlock() }
 }
+
+/// Two Macs with the same name (a cloned VM, two "MacBook Air"s) in one sync folder.
+@Suite struct SameNameTests {
+    func tempRoot() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("cairn-samename-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    @Test func sameNamedMacsGetTheirOwnFolders() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = SyncIdentity(), b = SyncIdentity()
+        let storeA = SyncStore(root: root, me: a.deviceID), storeB = SyncStore(root: root, me: b.deviceID)
+        try storeA.saveConfig(SyncConfig(enabled: true), device: "Example Mac")
+        try storeB.saveConfig(SyncConfig(enabled: false), device: "Example Mac")
+        #expect(storeA.config(device: "Example Mac").enabled)       // not overwritten by b
+        #expect(!storeB.config(device: "Example Mac").enabled)
+        #expect(storeA.folder(for: "Example Mac", id: a.deviceID) == "Example-Mac")
+        #expect(storeB.folder(for: "Example Mac", id: b.deviceID) == "Example-Mac-" + b.deviceID.short.lowercased())
+
+        let device = Device(name: "Example Mac", os: "macos", osVersion: "14.5")
+        let runA = SyncRun(store: SyncStore(root: root), device: device, identity: a)
+        let runB = SyncRun(store: SyncStore(root: root), device: device, identity: b)
+        try runA.publish(runA.plan(local: SoftwareChangeTests.mac("Example Mac"), secrets: SecretsFile()))
+        try storeB.saveConfig(SyncConfig(enabled: true), device: "Example Mac")
+        try runB.publish(runB.plan(local: SoftwareChangeTests.mac("Example Mac", packages: ["jq", "tree"]), secrets: SecretsFile()))
+        // Each sees the other's items, and both appear as separate Macs.
+        #expect(storeA.group(excluding: "Example Mac").keys.contains("package:formula:tree"))
+        #expect(storeB.group(excluding: "Example Mac").keys.contains("package:formula:jq"))
+        #expect(Set(storeA.devices().compactMap(\.info.deviceID)) == [a.deviceID, b.deviceID])
+        #expect(storeA.requests(trust: SyncTrust(), me: a.deviceID).map(\.deviceID) == [b.deviceID])
+    }
+
+    @Test func directExchangeKeepsSameNamedMacsApart() throws {
+        let rootA = tempRoot(), rootB = tempRoot()
+        defer { try? FileManager.default.removeItem(at: rootA); try? FileManager.default.removeItem(at: rootB) }
+        let a = SyncIdentity(), b = SyncIdentity()
+        let device = Device(name: "Example Mac", os: "macos", osVersion: "14.5")
+        let runB = SyncRun(store: SyncStore(root: rootB), device: device, identity: b)
+        try SyncStore(root: rootB, me: b.deviceID).saveConfig(SyncConfig(enabled: true), device: "Example Mac")
+        try runB.publish(runB.plan(local: SoftwareChangeTests.mac("Example Mac"), secrets: SecretsFile()))
+        let storeA = SyncStore(root: rootA, me: a.deviceID)
+        try storeA.saveConfig(SyncConfig(enabled: true), device: "Example Mac")
+        let taken = try storeA.take(SyncStore(root: rootB).bundle(), me: a.deviceID, trusted: [b.deviceID])
+        #expect(taken == 1)
+        #expect(storeA.config(device: "Example Mac").enabled)
+        #expect(storeA.group(excluding: "Example Mac", trusted: [b.deviceID]).keys.contains("package:formula:jq"))
+    }
+}
