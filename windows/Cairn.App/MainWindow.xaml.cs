@@ -119,6 +119,7 @@ public sealed partial class MainWindow : Window
         BuildCards();
         ShowSettings();
         ShowSync();
+        SetupTray();
         Sidebar.SelectedIndex = 0;
         _ = Startup();
     }
@@ -261,6 +262,7 @@ public sealed partial class MainWindow : Window
         busy += on ? 1 : -1;
         Busy.IsActive = DeviceBusy.IsActive = busy > 0;
         DeviceDetail.Text = busy > 0 && label is not null ? label : WindowsTitle;
+        tray?.SetTip(busy > 0 ? label ?? "Working…" : null);
     }
 
     // MARK: Backup folder
@@ -329,6 +331,7 @@ public sealed partial class MainWindow : Window
         IntervalPicker.SelectedItem = IntervalPicker.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (int)i.Tag == chosen) ?? IntervalPicker.Items[1];
         AutoToggle.IsOn = settings.AutoBackupMinutes > 0;
         IntervalPicker.IsEnabled = AutoToggle.IsOn;
+        ShowTraySettings();
         VersionText.Text = $"Version {typeof(MainWindow).Assembly.GetName().Version?.ToString(3)} · {WindowsTitle}";
         showingSettings = false;
         UpdateAutoStatus();
@@ -772,7 +775,9 @@ public sealed partial class MainWindow : Window
         return when.ToLocalTime().ToString("d MMM yyyy");
     }
 
-    async void Backup_Click(object sender, RoutedEventArgs e)
+    async void Backup_Click(object sender, RoutedEventArgs e) => await BackUpNow();
+
+    async Task BackUpNow()
     {
         if (scanned is null) return;
         foreach (var r in backupEntries)

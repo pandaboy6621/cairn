@@ -19,7 +19,9 @@ public partial class App : Application
             return;
         }
         window = new MainWindow();
-        window.Activate();
+        // Started at sign-in: wait in the tray (if the icon is on) instead of opening.
+        var hidden = Environment.GetCommandLineArgs().Skip(1).Contains(SignInStartup.HiddenFlag, StringComparer.OrdinalIgnoreCase);
+        if (!hidden || !AppSettings.Load().ShowInTray) window.Activate();
     }
 
     static string BackUpQuietly()

@@ -251,6 +251,24 @@
                             </Border>
 
                             <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <Grid>
+                                        <TextBlock Text="Show Cairn in the notification area" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="TrayToggle" HorizontalAlignment="Right" MinWidth="0"
+                                                      OnContent="On" OffContent="Off" Toggled="TrayToggle_Toggled" />
+                                    </Grid>
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Cairn's icon by the clock: back up now, see the last backup, and open Cairn. While it's there, closing this window keeps Cairn running; quit from the icon's menu." />
+                                    <Grid>
+                                        <TextBlock Text="Open at sign-in" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="SignInToggle" HorizontalAlignment="Right" MinWidth="0"
+                                                      OnContent="On" OffContent="Off" Toggled="SignInToggle_Toggled" />
+                                    </Grid>
+                                    <TextBlock x:Name="SignInStatus" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CairnCard}">
                                 <StackPanel Spacing="6">
                                     <TextBlock Text="About Cairn" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                     <TextBlock x:Name="VersionText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

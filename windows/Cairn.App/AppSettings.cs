@@ -21,6 +21,9 @@ public sealed class AppSettings
     /// The folder to sync through in folder mode; null means the backup folder.
     public string? SyncFolder { get; set; }
 
+    /// Cairn's icon in the notification area (the tray), like the Mac's menu bar icon.
+    public bool ShowInTray { get; set; } = true;
+
     public static string DefaultBackupFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn", "Backups");
 
