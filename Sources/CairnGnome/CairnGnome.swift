@@ -3,10 +3,10 @@ import CAdw
 import CairnCore
 import Foundation
 
-// WORK IN PROGRESS. Known bug: after the first state change made from a click,
-// every Cairn button stops responding (GTK's own window buttons still work).
-// Changes from the background scan don't trigger it. Suspect: adwaita-swift's
-// `meta` dependency (tracked by branch). Debug on a real Ubuntu machine.
+// Note: in a container over GTK Broadway, Cairn's buttons stopped responding
+// after the first click that changed state. On a real GNOME Wayland desktop
+// (Ubuntu 26.04) clicks keep working, so that was a Broadway quirk. Test the
+// app on a real desktop, not over Broadway.
 //
 // Cairn for GNOME: a thin window over CairnCore, like the Mac app over SwiftUI.
 // Read-only on this computer: scanning only reads, and backing up only writes a
@@ -50,8 +50,8 @@ struct MainView: View {
     @State private var toastText = ""
 
     var view: Body {
-        // The page changes inside a container that stays put: switching the
-        // root view would rebuild the header bar and drop its buttons' handlers.
+        // The page changes inside a container that stays put, so the header
+        // bar isn't rebuilt when switching pages.
         VStack { content }
             .vexpand()
             .topToolbar {
@@ -78,8 +78,8 @@ struct MainView: View {
             }
     }
 
-    /// Both pages stay built and only one is shown: replacing one with the other
-    /// rebuilds the window's widgets and leaves the header bar's buttons dead.
+    /// Both pages stay built and only one is shown, so switching pages is instant
+    /// and keeps each page's scroll position.
     @ViewBuilder var content: Body {
         BackupPage(checklist: $checklist, warnings: warnings, scanning: scanning, saving: saving,
                    folder: folder, chooseFolder: { chooseFolder.signal() }, backUp: backUp)
