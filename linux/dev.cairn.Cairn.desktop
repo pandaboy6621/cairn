@@ -6,6 +6,6 @@ Comment=Back up this computer's apps and settings, not its files
 Icon=dev.cairn.Cairn
 Exec=cairn-gnome
 Terminal=false
-Categories=GTK;GNOME;Utility;System;
+Categories=GTK;GNOME;Utility;
 Keywords=backup;restore;setup;settings;apps;flatpak;snap;
 StartupNotify=true
