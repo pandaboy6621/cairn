@@ -195,17 +195,6 @@ public sealed partial class MainWindow
         if (plan is not null) Preview_Click(this, new RoutedEventArgs());
     }
 
-    void UpdateSyncCard()
-    {
-        syncCard.Ring.Set(SyncTint, null, SyncGlyph, disabled: true);
-        syncCard.Status.Text = "Off";
-        syncCard.Detail.Text = "Keep your PCs and Macs in step through the backup folder or NAS. Coming soon.";
-        var main = DashboardCard.Tinted("Turn on sync", SyncGlyph, SyncTint);
-        main.IsEnabled = false;
-        syncCard.SetActions(main);
-        syncCard.FooterText.Text = "Through the backup folder";
-    }
-
     void ApplyPreset(string name)
     {
         if (scanned is null) return;

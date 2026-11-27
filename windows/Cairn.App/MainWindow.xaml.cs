@@ -118,9 +118,16 @@ public sealed partial class MainWindow : Window
         BuildStats();
         BuildCards();
         ShowSettings();
+        ShowSync();
         Sidebar.SelectedIndex = 0;
-        Scan();
+        _ = Startup();
+    }
+
+    async Task Startup()
+    {
         LoadBackups();
+        await ScanAsync();
+        if (syncConfig.Enabled) await SyncNow();
     }
 
     static string WindowsTitle =>
@@ -151,6 +158,7 @@ public sealed partial class MainWindow : Window
 
         Sidebar.Items.Add(Item(Home, false));
         Sidebar.Items.Add(Item(SetUp, false));
+        Sidebar.Items.Add(Item(SyncCategory, true));
         Sidebar.Items.Add(new ListViewItem
         {
             IsEnabled = false, IsHitTestVisible = false, Padding = new Thickness(14, 14, 0, 4), MinHeight = 0,
@@ -208,8 +216,10 @@ public sealed partial class MainWindow : Window
         HomePage.Visibility = c == Home ? Visibility.Visible : Visibility.Collapsed;
         SetupPage.Visibility = c == SetUp ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = c == Prefs ? Visibility.Visible : Visibility.Collapsed;
+        SyncPage.Visibility = c == SyncCategory ? Visibility.Visible : Visibility.Collapsed;
+        if (c == SyncCategory) BuildDevices();
         CategoryPage.Visibility = Categories.Contains(c) ? Visibility.Visible : Visibility.Collapsed;
-        BackupActions.Visibility = c == SetUp || c == Prefs ? Visibility.Collapsed : Visibility.Visible;
+        BackupActions.Visibility = c == SetUp || c == Prefs || c == SyncCategory ? Visibility.Collapsed : Visibility.Visible;
         SetupActions.Visibility = c == SetUp ? Visibility.Visible : Visibility.Collapsed;
         StatusText.Text = c == SetUp ? setupStatus : backupStatus;
         if (CategoryPage.Visibility == Visibility.Visible) ShowCategory(c);
@@ -256,6 +266,10 @@ public sealed partial class MainWindow : Window
         settings.Save();
         SettingsFolderText.Text = path;
         DefaultFolderButton.IsEnabled = path != AppSettings.DefaultBackupFolder;
+        syncReview = null;
+        lastSyncPlan = null;
+        lastSynced = null;
+        ShowSync();
     }
 
     void DefaultFolder_Click(object sender, RoutedEventArgs e)
@@ -542,7 +556,9 @@ public sealed partial class MainWindow : Window
 
     void Scan_Click(object sender, RoutedEventArgs e) => Scan();
 
-    async void Scan()
+    void Scan() => _ = ScanAsync();
+
+    async Task ScanAsync()
     {
         ScanButton.IsEnabled = BackupButton.IsEnabled = backupNow.IsEnabled = false;
         Working(true, "Scanning…");
@@ -840,14 +856,29 @@ public sealed partial class MainWindow : Window
         try
         {
             var backup = choice.Load();
+            reviewingSync = false;
             chosenBackup = choice.Path;
+            LoadPlan(SetupPlan.Make(backup),
+                $"From {backup.Device.Name} ({backup.Device.OsTitle}). Preview shows what would change; nothing changes until you click Set up.");
+        }
+        catch (Exception ex) when (ex is IOException or ManifestException)
+        {
+            SetStatus(true, $"Couldn't read that backup: {ex.Message}");
+            PreviewButton.IsEnabled = ApplyButton.IsEnabled = false;
+        }
+    }
+
+    /// Shows a plan on the Set up page: from a backup, or sync's incoming changes.
+    void LoadPlan(SetupPlan newPlan, string subtitle)
+    {
+        {
             // Another backup may have another vault: forget a key unlocked just for the last one.
             if (setup is not null)
             {
                 if (!ReferenceEquals(setup.Key, vaultKey)) setup.Key?.Dispose();
                 setup.Key = null;
             }
-            plan = SetupPlan.Make(backup);
+            plan = newPlan;
             setupEntries = plan.Steps.Select(s => StepEntry(s)).ToList();
             var panel = new StackPanel();
             setupGroups = BuildGroups(panel, setupEntries, NeedPreview);
@@ -864,13 +895,8 @@ public sealed partial class MainWindow : Window
             UpdateSetupCard();
             PreviewButton.IsEnabled = true;
             NeedPreview();
-            SetupSubtitle.Text = $"From {backup.Device.Name} ({backup.Device.OsTitle}). Preview shows what would change; nothing changes until you click Set up.";
+            SetupSubtitle.Text = subtitle;
             SetStatus(true, "Click Preview to see what would change.");
-        }
-        catch (Exception ex) when (ex is IOException or ManifestException)
-        {
-            SetStatus(true, $"Couldn't read that backup: {ex.Message}");
-            PreviewButton.IsEnabled = ApplyButton.IsEnabled = false;
         }
     }
 
@@ -955,8 +981,8 @@ public sealed partial class MainWindow : Window
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         PrepareSecrets(setup);
-        if (steps.Any(x => x is SetupStep.Secret) && setup.Key is null && chosenBackup is not null)
-            setup.Key = await AskToUnlock(VaultFolderNear(chosenBackup),
+        if (steps.Any(x => x is SetupStep.Secret) && setup.Key is null && (chosenBackup is not null || reviewingSync))
+            setup.Key = await AskToUnlock(reviewingSync ? Folder : VaultFolderNear(chosenBackup!),
                 "This backup's Wi-Fi passwords and SSH keys are encrypted. Enter its vault password to set them up, or cancel to skip them.");
 
         PreviewButton.IsEnabled = ApplyButton.IsEnabled = BackupPicker.IsEnabled = false;
@@ -997,6 +1023,7 @@ public sealed partial class MainWindow : Window
         setupResult = done;
         UpdateSetupCard();
         SetStatus(true, done);
+        if (reviewingSync) await AfterSyncApplied();
     }
 
     CancellationTokenSource? stopping;
@@ -1015,6 +1042,12 @@ public sealed partial class MainWindow : Window
     /// The backup's encrypted secrets, and the vault key if it's already unlocked here.
     void PrepareSecrets(Setup s)
     {
+        if (reviewingSync)
+        {
+            s.Secrets = syncSecrets;
+            if (s.Key is null && vaultKey is not null) s.Key = vaultKey;
+            return;
+        }
         if (chosenBackup is null) return;
         s.Secrets = VaultStore.ReadSecrets(Path.Combine(Path.GetDirectoryName(chosenBackup)!, VaultStore.SecretsFileName));
         if (s.Key is null && vaultKey is not null && VaultFolderNear(chosenBackup) == Folder) s.Key = vaultKey;

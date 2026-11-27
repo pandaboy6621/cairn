@@ -252,6 +252,67 @@
                         </StackPanel>
                     </ScrollViewer>
 
+                    <!-- Sync with other computers -->
+                    <ScrollViewer x:Name="SyncPage" Visibility="Collapsed">
+                        <StackPanel MaxWidth="820" Padding="32,28,32,28" Spacing="16">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="Sync" Style="{StaticResource TitleTextBlockStyle}" />
+                                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Keep your PCs in step through the backup folder or NAS, and bring in changes from your Macs. Nothing changes here until you review and set up the changes." />
+                                </StackPanel>
+                                <ToggleSwitch x:Name="SyncToggle" Grid.Column="1" MinWidth="0" OnContent="On" OffContent="Off" Toggled="SyncToggle_Toggled" />
+                            </Grid>
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="Changes" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock x:Name="SyncStatusText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Name="SyncNowButton" Content="Sync now" Click="SyncNow_Click" />
+                                        <Button x:Name="ReviewButton" Content="Review changes" IsEnabled="False"
+                                                Style="{StaticResource AccentButtonStyle}" Click="Review_Click" />
+                                    </StackPanel>
+                                    <StackPanel x:Name="SyncNoticesPanel" Spacing="8" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="What syncs" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <ComboBox x:Name="SyncPresetPicker" MinWidth="200" SelectionChanged="SyncPreset_SelectionChanged" />
+                                    <TextBlock x:Name="SyncPresetSummary" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,4" />
+                                    <Grid>
+                                        <TextBlock Text="Take changes from my Macs" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="IncludeMacsToggle" HorizontalAlignment="Right" MinWidth="0" OnContent="On" OffContent="Off"
+                                                      Toggled="IncludeMacs_Toggled" />
+                                    </Grid>
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Your Macs' programs, settings, Dock and config come in translated for Windows: a Homebrew app becomes its Windows version, the Dock becomes the taskbar. It's one way: your Macs don't take changes from PCs, so nothing goes back and forth." />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="Computers" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Only computers you accept here are synced with. A computer asks once it turns sync on with the same backup folder. Check its ID matches the one it shows." />
+                                    <StackPanel x:Name="SyncDevicesPanel" Spacing="8" />
+                                    <StackPanel Spacing="2" Margin="0,6,0,0">
+                                        <TextBlock Text="This PC's ID" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock x:Name="SyncIdText" IsTextSelectionEnabled="True" FontFamily="Cascadia Mono, Consolas" FontSize="16" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
                     <!-- Status bar -->
                     <Grid Grid.Row="1" Padding="24,10,24,10" ColumnSpacing="8"
                           BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
