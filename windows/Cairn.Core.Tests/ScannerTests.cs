@@ -41,6 +41,7 @@ public sealed class ScannerTests : IDisposable
         {
             Answer = (exe, args) =>
             {
+                if (args[0] == "list") return new CommandResult(0, WingetList, "");
                 // winget export writes its file where -o says.
                 File.WriteAllText(args[Array.IndexOf(args, "-o") + 1], ManifestTests.Fixture("winget-export.json"));
                 return new CommandResult(0, "", "");
@@ -76,9 +77,43 @@ public sealed class ScannerTests : IDisposable
         Assert.Equal(new[] { "~/.gitconfig", "~/.ssh/config" }, m.Dotfiles.Select(d => d.Path));
         Assert.Empty(scanner.Warnings);
         // Scanning only reads.
-        Assert.Equal(new[] { "winget" }, runner.Ran.Select(r => r.Split(' ')[0]));
+        Assert.Equal(new[] { "winget", "winget" }, runner.Ran.Select(r => r.Split(' ')[0]));
         Assert.StartsWith("winget export -o", runner.Ran[0]);
+        Assert.StartsWith("winget list", runner.Ran[1]);
+        Assert.Equal("Mozilla Firefox (x64 en-US)", scanner.Names["Mozilla.Firefox"]);
     }
+
+    // Made-up `winget list` output, with the spinner winget draws first.
+    const string WingetList =
+        "\r   - \r   \\ \r\r\n" +
+        "Name                         Id                  Version   Available Source\r\n" +
+        "---------------------------------------------------------------------------\r\n" +
+        "Git                          Git.Git             2.47.0              winget\r\n" +
+        "Mozilla Firefox (x64 en-US)  Mozilla.Firefox     133.0     134.0     winget\r\n" +
+        "Some Very Long Program Nam…  Example.LongName    1.0                 winget\r\n" +
+        "Windows Notepad              9WZDNCRFJ3TJ        11.2410             msstore\r\n" +
+        "Old Thing                    ARP\\Machine\\X64\\{1} 1.0\r\n";
+
+    [Fact]
+    public void ReadsProgramNamesFromWingetList()
+    {
+        var names = ProgramNames.ParseWingetList(WingetList);
+        Assert.Equal("Git", names["Git.Git"]);
+        Assert.Equal("Windows Notepad", names["9WZDNCRFJ3TJ"]);
+        Assert.False(names.ContainsKey("Example.LongName")); // cut short by winget
+        Assert.Empty(ProgramNames.ParseWingetList("No installed package found matching input criteria."));
+    }
+
+    [Theory]
+    [InlineData("AOMEI.PartitionAssistant", "Partition Assistant")]
+    [InlineData("7zip.7zip", "7zip")]
+    [InlineData("Apple.iTunes", "iTunes")]
+    [InlineData("ArduinoSA.IDE.stable", "Arduino SA IDE")]
+    [InlineData("BillStewart.SyncthingWindowsSetup", "Syncthing Windows")]
+    [InlineData("Docker.DockerDesktop", "Docker Desktop")]
+    [InlineData("Microsoft.VisualStudioCode", "Visual Studio Code")]
+    [InlineData("Git.Git", "Git")]
+    public void MakesNamesFromIds(string id, string name) => Assert.Equal(name, ProgramNames.FromId(id));
 
     [Fact]
     public void MissingWingetIsAWarningNotACrash()

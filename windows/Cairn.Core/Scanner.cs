@@ -8,6 +8,10 @@ public sealed class Scanner(ICommandRunner runner, IUserRegistry registry, HomeF
 {
     public List<string> Warnings { get; } = new();
 
+    /// Programs' real names from `winget list`, by id. For display only: the backup
+    /// keeps ids. Empty if winget couldn't say.
+    public Dictionary<string, string> Names { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public Manifest Scan(string deviceName, string osVersion)
     {
         var m = new Manifest
@@ -24,12 +28,15 @@ public sealed class Scanner(ICommandRunner runner, IUserRegistry registry, HomeF
         return m;
     }
 
-    public static Manifest ScanThisPC(out List<string> warnings)
+    public static Manifest ScanThisPC(out List<string> warnings) => ScanThisPC(out warnings, out _);
+
+    public static Manifest ScanThisPC(out List<string> warnings, out Dictionary<string, string> names)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Scanning needs Windows.");
         var s = new Scanner(new ProcessRunner(), new UserRegistry(), HomeFolder.Current);
         var m = s.Scan(Environment.MachineName, Environment.OSVersion.Version.ToString(3));
         warnings = s.Warnings;
+        names = s.Names;
         return m;
     }
 
@@ -48,7 +55,10 @@ public sealed class Scanner(ICommandRunner runner, IUserRegistry registry, HomeF
                 Warnings.Add(r.ExitCode == -1 ? "winget isn't installed: install App Installer from the Microsoft Store." : $"winget export failed: {r.Error.Trim()}");
                 return new();
             }
-            return ParseWingetExport(File.ReadAllText(file));
+            var items = ParseWingetExport(File.ReadAllText(file));
+            if (items.Count > 0)
+                Names = ProgramNames.ParseWingetList(runner.Run("winget", "list", "--accept-source-agreements", "--disable-interactivity").Output);
+            return items;
         }
         finally { if (File.Exists(file)) File.Delete(file); }
     }
