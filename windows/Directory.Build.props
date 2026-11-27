@@ -1,0 +1,9 @@
+<Project>
+  <!-- One version for every Cairn app: read it from the Mac app's Cairn.version, so the
+       Windows app's Settings page and file properties show the release it came from. -->
+  <PropertyGroup>
+    <CairnSwiftFile>$(MSBuildThisFileDirectory)..\Sources\CairnCore\Cairn.swift</CairnSwiftFile>
+    <CairnVersion Condition="Exists('$(CairnSwiftFile)')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(CairnSwiftFile)')), 'version = "([0-9.]+)"').Groups[1].Value)</CairnVersion>
+    <Version Condition="'$(CairnVersion)' != ''">$(CairnVersion)</Version>
+  </PropertyGroup>
+</Project>
