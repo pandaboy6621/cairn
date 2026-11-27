@@ -7,7 +7,7 @@
 **Set up a new Mac in minutes.**
 
 Cairn backs up, restores, and syncs your Mac's *setup*: apps, Homebrew packages, Dock, system settings,
-app preferences, displays, and network shares. It never touches your files. A Windows app and a Linux
+app preferences, displays, fonts, and network shares. It never touches your files. A Windows app and a Linux
 setup kit take the same backups to a PC.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-4B44B8?logo=apple&logoColor=white)
@@ -51,6 +51,7 @@ set up a Windows or Linux PC.
 | 🧩 **App preferences** | Allowlisted app settings, with caches, window state, IDs, and anything that looks like a token filtered out |
 | 🖥️ **Displays** | Monitor arrangement, main display, resolution, refresh rate, and mirroring, matched per monitor |
 | 💻 **Developer config** | `~/.gitconfig`, git ignore files, `~/.ssh/config`, and zsh, bash and fish startup files. Lines that look like tokens or passwords are left out, and a file holding a private key is skipped |
+| 🔤 **Fonts** | Fonts you installed (`~/Library/Fonts`, never the system's), each kept once in the backup folder however many snapshots use it. Fonts over 50 MB are left out |
 | 🌐 **Network shares** | SMB, AFP, NFS, and WebDAV shares plus Finder's Connect to Server favorites (usernames only, never passwords) |
 | 🔐 **Secrets** | Wi-Fi passwords, SSH keys, credential files (GitHub CLI, npm, AWS, Docker, and more), and share passwords you choose, encrypted in your vault. VPN configurations are listed for the post-restore checklist |
 
@@ -72,6 +73,8 @@ set up a Windows or Linux PC.
   `cairn restore --from <backup> --apply`. Each item is checked afterwards against a fresh scan.
 - **Config files.** Git, SSH and shell config are written back; a file that's replaced is kept as
   `~/.zshrc.before-cairn` (and so on), and a file that's a link from a dotfiles tool is left alone.
+- **Fonts.** Missing fonts are copied into `~/Library/Fonts`. A font that's already there is never
+  replaced, and a font whose name in the backup isn't a plain file name is skipped.
 - **Settings and Dock.** Settings are written back and the affected apps restarted.
   Dock icons for apps that aren't installed yet are added back automatically once the app appears.
 - **Displays.** Puts your monitors back in the same arrangement, even on a different desk.
@@ -115,8 +118,8 @@ Cairn's manifest describes what you want, not how one OS stores it, so one backu
 **Windows app** (download the `Windows-x64` zip from the [latest release](https://github.com/pandaboy6621/cairn/releases/latest),
 unzip, run `Cairn.exe`; see [Getting started](#-getting-started) if Windows blocks it):
 
-- **Back up a PC:** winget and Microsoft Store programs, Windows settings, taskbar pins in order, and Git
-  and SSH config, into the same snapshot folders as the Mac app (one NAS share can hold both). Automatic
+- **Back up a PC:** winget and Microsoft Store programs, Windows settings, taskbar pins in order, fonts, and
+  Git and SSH config, into the same snapshot folders as the Mac app (one NAS share can hold both). Automatic
   backups on a schedule.
 - **Set up a PC from any backup,** Mac or PC: tick what you want, Preview, then Set up. Homebrew
   packages become winget packages, the Dock becomes the taskbar, matching settings carry over.
