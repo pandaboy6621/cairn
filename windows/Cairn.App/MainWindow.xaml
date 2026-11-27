@@ -327,6 +327,13 @@
                                     </Grid>
                                     <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                Text="Your Macs' programs, settings, Dock and config come in translated for Windows: a Homebrew app becomes its Windows version, the Dock becomes the taskbar. It's one way: your Macs don't take changes from PCs, so nothing goes back and forth." />
+                                    <Grid>
+                                        <TextBlock Text="Use my Mac's Dock for the taskbar" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="MacDockToggle" HorizontalAlignment="Right" MinWidth="0" OnContent="On" OffContent="Off"
+                                                      Toggled="MacDock_Toggled" />
+                                    </Grid>
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Pins this PC's taskbar in your Mac's Dock order. On the Mac, set the Dock to Synced in Cairn's Sync tab too: the Portable preset keeps it on that Mac." />
                                 </StackPanel>
                             </Border>
 

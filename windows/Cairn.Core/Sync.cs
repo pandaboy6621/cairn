@@ -66,6 +66,15 @@ public sealed class SyncConfig
     }
 
     public bool Travels(string id) => Scope(id) == SyncScope.Synced;
+
+    /// Windows only: take a Mac's Dock as this PC's taskbar, whatever the preset. (The Mac
+    /// has to sync its Dock too: Portable keeps it on that Mac.)
+    [YamlIgnore]
+    public bool TakesMacDock
+    {
+        get => Travels("layout:dock");
+        set => Items["layout:dock"] = value ? SyncScope.Synced : SyncScope.ThisDevice;
+    }
 }
 
 /// One item's value: exactly one field is set. Secrets carry their ciphertext.

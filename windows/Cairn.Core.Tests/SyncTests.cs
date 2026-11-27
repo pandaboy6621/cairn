@@ -91,6 +91,11 @@ public sealed class SyncTests : IDisposable
         // Portable keeps the Dock and secrets on each computer.
         var portable = MacChanges.From(macs, new SyncFromMacs(), new SyncConfig { Enabled = true });
         Assert.DoesNotContain(portable.Plan.Steps, s => s is SetupStep.Taskbar or SetupStep.Secret);
+        // ...unless this PC chooses to use the Mac's Dock for its taskbar.
+        var withDock = new SyncConfig { Enabled = true, TakesMacDock = true };
+        Assert.True(withDock.Travels("layout:dock"));
+        Assert.Single(MacChanges.From(macs, new SyncFromMacs(), withDock).Plan.Steps.OfType<SetupStep.Taskbar>());
+        Assert.False(new SyncConfig { Preset = SyncPreset.Everything, TakesMacDock = false }.Travels("layout:dock"));
 
         // Taken in once done; nothing comes again until the Mac changes it.
         var done = steps.Where(s => !s.StartsWith("package:Git")).ToHashSet();

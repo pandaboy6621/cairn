@@ -125,6 +125,7 @@ public sealed partial class MainWindow
         SyncPresetPicker.SelectedItem = SyncPresetPicker.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == syncConfig.Preset) ?? SyncPresetPicker.Items[0];
         SyncPresetSummary.Text = SyncPreset.All.FirstOrDefault(p => p.Id == syncConfig.Preset).Summary;
         IncludeMacsToggle.IsOn = syncConfig.IncludeMacs;
+        MacDockToggle.IsOn = syncConfig.TakesMacDock;
         SyncIdText.Text = Identity.DeviceId;
         showingSync = false;
         ShowSyncMode();
@@ -136,6 +137,7 @@ public sealed partial class MainWindow
     {
         var on = syncConfig.Enabled;
         SyncPresetPicker.IsEnabled = IncludeMacsToggle.IsEnabled = SyncNowButton.IsEnabled = on;
+        MacDockToggle.IsEnabled = on && syncConfig.IncludeMacs;
         ReviewButton.IsEnabled = on && PendingCount > 0;
         ReviewButton.Content = PendingCount > 0 ? $"Review {PendingCount} change{(PendingCount == 1 ? "" : "s")}" : "Review changes";
         SyncStatusText.Text = !on ? "Sync is off on this PC."
@@ -171,6 +173,9 @@ public sealed partial class MainWindow
         syncConfig.Categories.Clear();
         syncConfig.Items.Clear();
         SyncPresetSummary.Text = SyncPreset.All.First(p => p.Id == id).Summary;
+        showingSync = true;
+        MacDockToggle.IsOn = syncConfig.TakesMacDock; // the preset decides again
+        showingSync = false;
         SaveSyncConfig();
     }
 
@@ -179,6 +184,15 @@ public sealed partial class MainWindow
         if (showingSync) return;
         syncConfig.IncludeMacs = IncludeMacsToggle.IsOn;
         SaveSyncConfig();
+        UpdateSyncControls();
+    }
+
+    async void MacDock_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (showingSync) return;
+        syncConfig.TakesMacDock = MacDockToggle.IsOn;
+        SaveSyncConfig();
+        if (MacDockToggle.IsOn) await SyncNow();
     }
 
     // MARK: Computers
