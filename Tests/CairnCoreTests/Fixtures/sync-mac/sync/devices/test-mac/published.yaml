@@ -1,0 +1,99 @@
+entries:
+  app:497799835:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      app:
+        id: '497799835'
+        include: true
+        name: Xcode
+        source: mas
+  dotfile:~/.gitconfig:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      dotfile:
+        content: "[user]\n\tname = Test User\n[credential]\n\thelper = osxkeychain\n"
+        include: true
+        kind: git
+        path: ~/.gitconfig
+        redacted: 0
+  layout:dock:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      dock:
+        apps:
+        - /Applications/Firefox.app
+        - /System/Applications/Mail.app
+        - /Applications/Ghostty.app
+        include: true
+  package:cask:firefox:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      package:
+        id: firefox
+        include: true
+        kind: cask
+        resolvers:
+          brew: firefox
+  package:cask:old-tool:
+    device: test-mac
+    removed: true
+    updated: 2027-01-15T08:00:00.25Z
+  package:formula:git:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      package:
+        id: git
+        include: true
+        kind: formula
+        resolvers:
+          brew: git
+  package:formula:mas:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      package:
+        id: mas
+        include: true
+        kind: formula
+        resolvers:
+          brew: mas
+  sensitive:vault://wifi/Test Network:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      sealed:
+        ciphertext: 40IAjJZ6jcUp1bdTHew=
+        nonce: r6uwp02i1eoJ02eD
+        tag: w/kIpiZxZJQgHzuLMjdbcA==
+      secret:
+        include: true
+        ref: vault://wifi/Test Network
+        type: wifi
+  setting:finder.show_all_extensions:
+    device: test-mac
+    removed: false
+    updated: 2027-01-15T08:00:00.25Z
+    value:
+      setting:
+        adapter:
+          macos:
+            domain: NSGlobalDomain
+            key: AppleShowAllExtensions
+            type: bool
+        include: true
+        key: finder.show_all_extensions
+        platforms:
+        - macos
+        value: true

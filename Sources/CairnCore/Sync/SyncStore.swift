@@ -140,9 +140,17 @@ public struct SyncStore: Sendable {
 
     // MARK: Files
 
+    /// Every Mac's folder. Windows PCs keep folders here too: they sync among
+    /// themselves and take Macs' changes translated for Windows, but their items
+    /// (winget packages, the taskbar, Windows-flavoured config) don't apply to a
+    /// Mac, so Macs leave them out entirely.
     private func deviceFolders() -> [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: devicesURL.path)) ?? [])
-            .filter { !$0.hasPrefix(".") }.sorted()
+            .filter { !$0.hasPrefix(".") && !isWindows($0) }.sorted()
+    }
+
+    private func isWindows(_ folder: String) -> Bool {
+        read(SyncDeviceInfo.self, devicesURL.appendingPathComponent(folder).appendingPathComponent("device.yaml"))?.os == "windows"
     }
 
     private func file(_ name: String, _ device: String) -> URL {
