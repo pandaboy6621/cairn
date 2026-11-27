@@ -206,18 +206,11 @@ struct Dock: ParsableCommand {
 }
 #endif
 
-/// The app's settings. The `cairn` inside Cairn.app shares the app's bundle id,
-/// so there they're the standard defaults (macOS refuses a suite named after
-/// one's own bundle id); a separately built `cairn` reads them as a suite.
-var appDefaults: UserDefaults? {
-    Bundle.main.bundleIdentifier == "dev.cairn.Cairn" ? .standard : UserDefaults(suiteName: "dev.cairn.Cairn")
-}
+/// The app's settings (shared with the apps; see `AppFolder`).
+var appDefaults: UserDefaults? { AppFolder.defaults }
 
 /// The backup folder the app uses, so the CLI and the app agree.
-func appBackupFolder() -> URL {
-    appDefaults?.string(forKey: "backupFolder")
-        .map { URL(fileURLWithPath: $0, isDirectory: true) } ?? BackupFolder.defaultURL
-}
+func appBackupFolder() -> URL { AppFolder.backupFolder }
 
 struct Backup: ParsableCommand {
     static let configuration = CommandConfiguration(

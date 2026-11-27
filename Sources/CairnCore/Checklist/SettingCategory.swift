@@ -23,6 +23,13 @@ public enum SettingCategory {
 
     /// Group names for known abstract-key prefixes, matching the domain names
     /// below so known and unknown settings from one place land in one group.
+    /// GNOME's names for the same groups, for settings read on Linux.
+    static let gnomeGroupNames: [String: String] = [
+        "finder": "Files",
+        "menubar": "Top bar",
+        "trackpad": "Touchpad",
+    ]
+
     static let prefixGroupNames: [String: String] = [
         "dock": "Dock",
         "finder": "Finder",
@@ -73,6 +80,7 @@ public enum SettingCategory {
     /// Known settings group by their key prefix ("dock", "keyboard"); others by domain.
     static func groupName(for s: SettingItem, in category: ChecklistCategory) -> String {
         if !s.key.hasPrefix("macos."), let prefix = s.key.split(separator: ".").first.map(String.init) {
+            if s.adapter.gnome != nil, s.adapter.macos == nil, let name = gnomeGroupNames[prefix] { return name }
             return prefixGroupNames[prefix] ?? prefix.replacingOccurrences(of: "_", with: " ").capitalized
         }
         return displayName(domain: s.adapter.macos?.domain ?? "Other")
