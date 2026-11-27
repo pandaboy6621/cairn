@@ -73,7 +73,7 @@ sealed class Nearby : IDisposable
         service = new DnssdServiceInstance($"{ownService}.{SyncPeer.ServiceType}.local", host, port);
         foreach (var (k, v) in SyncPeer.Txt(context.Name, osVersion, groupTag, context.Identity.DeviceId, accepts: true)) service.TextAttributes[k] = v;
         var registered = await service.RegisterStreamSocketListenerAsync(listener);
-        if (registered.Status != DnssdServiceInstanceRegistrationStatus.Success)
+        if (registered.Status != DnssdRegistrationStatus.Success)
             throw new InvalidOperationException($"Windows didn't announce it ({registered.Status}).");
     }
 
