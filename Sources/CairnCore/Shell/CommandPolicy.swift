@@ -47,9 +47,13 @@ public struct CommandPolicy: Sendable {
         case "apt-mark":
             return args == ["showmanual"]
         case "dpkg-query":
-            return args == ["-W", "-f=${Package}\t${Priority}\n"]
+            return args == ["-W", AptScanner.dpkgFormat]
         case "gzip":
-            return args == ["-dc", AptScanner.installerList]
+            // The installer's package list, or apt's rotated history logs.
+            return args.count == 2 && args[0] == "-dc"
+                && (args[1] == AptScanner.installerList
+                    || (args[1].hasPrefix("/var/log/apt/") && !args[1].contains("..")
+                        && AptScanner.isRotatedHistory(String(args[1].dropFirst("/var/log/apt/".count)))))
         case "flatpak":
             return args == ["list", "--app", "--columns=application"]
         case "snap":

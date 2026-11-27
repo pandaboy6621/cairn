@@ -4,21 +4,102 @@ import Testing
 
 /// Linux scanners, with recorded (made-up) command output. Runs on macOS too.
 @Suite struct LinuxScannersTests {
+    /// A trimmed copy of a real Ubuntu 26.04 scan: the new installer leaves no
+    /// `initial-status.gz`, so dependencies, names and apt's history do the work.
     @Test func aptKeepsWhatTheUserInstalled() throws {
+        let manual = """
+        bash
+        brave-browser
+        curl
+        efibootmgr
+        gh
+        grub-efi-amd64-signed
+        hyphen-en-us
+        ibus-table-cangjie5
+        language-pack-en
+        libavif-bin
+        libegl1
+        libgl1:amd64
+        libimage-exiftool-perl
+        libinput-bin
+        libpinyin-data
+        linux-generic-hwe-24.04
+        nmap
+        shim-signed
+        steam-libs-amd64
+        steam-launcher
+        ubuntu-desktop
+        wpasupplicant
+        yt-dlp
+        """
+        let dpkg = [
+            "ii \tbash\trequired\t, base-files (>= 2.1.12)",
+            "ii \tbrave-browser\toptional\t, libgtk-3-0, libegl1 | libgl1",
+            "ii \tcurl\toptional\t, libcurl4t64 (= 8.5.0-2ubuntu10)",
+            "ii \tefibootmgr\toptional\t, libc6 (>= 2.34)",
+            "ii \tgh\toptional\t, ",
+            "ii \tgrub-efi-amd64-signed\toptional\t, grub-common",
+            "ii \thyphen-en-us\toptional\t, ",
+            "ii \tibus-table-cangjie5\toptional\t, ibus-table",
+            "ii \tlanguage-pack-en\toptional\t, language-pack-en-base",
+            "ii \tlibavif-bin\toptional\t, libavif16",
+            "ii \tlibegl1:amd64\toptional\t, libc6",
+            "ii \tlibgl1:amd64\toptional\t, libglx0",
+            "ii \tlibimage-exiftool-perl\toptional\t, perl:any",
+            "ii \tlibinput-bin\toptional\t, libc6",
+            "ii \tlibinput10:amd64\toptional\t, libinput-bin (>= 1.25)",
+            "ii \tlibpinyin-data\toptional\t, ",
+            "ii \tlinux-generic-hwe-24.04\toptional\t, linux-image-generic-hwe-24.04",
+            "ii \tnmap\toptional\t, libc6",
+            "ii \tshim-signed\toptional\tgrub-efi-amd64-signed, ",
+            "ii \tsteam-launcher\toptional\t, curl, steam-libs-amd64:amd64 (= 1:1.0.0.81)",
+            "ii \tsteam-libs-amd64:amd64\toptional\t, libc6",
+            "ii \tubuntu-desktop\toptional\t, ubuntu-desktop-minimal, wpasupplicant",
+            "ii \twpasupplicant\toptional\t, libc6",
+            "rc \tyt-dlp\toptional\t, python3",
+            "ii \tyt-dlp\toptional\t, python3",
+        ].joined(separator: "\n") + "\n"
+        let logs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: logs) }
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try """
+        Start-Date: 2026-11-15  09:00:00
+        Commandline: apt install -y nmap yt-dlp
+        Requested-By: someone (1000)
+        Install: nmap:amd64 (7.94), yt-dlp:amd64 (2025.1)
+        End-Date: 2026-11-15  09:00:10
+
+        """.write(to: logs.appendingPathComponent("history.log"), atomically: true, encoding: .utf8)
+        try "Commandline: apt-get install curl\n".write(to: logs.appendingPathComponent("history.log.1"), atomically: true, encoding: .utf8)
+
         let r = FixtureRunner()
-        r.stub(Command("apt-mark", ["showmanual"]), stdout: "bash\ngit\nhugo\nlibaacs0:amd64\nubuntu-desktop\nnano\n")
-        r.stub(Command("dpkg-query", ["-W", "-f=${Package}\t${Priority}\n"]),
-               stdout: "bash\trequired\nnano\timportant\ngit\toptional\nhugo\toptional\nlibaacs0\toptional\nubuntu-desktop\toptional\n")
-        // No installer list on the Mac running the test: priorities alone.
-        let found = try AptScanner().scan(using: r).packages
-        #expect(found.map(\.id) == ["git", "hugo", "libaacs0", "ubuntu-desktop"])
-        #expect(found[0].kind == .apt && found[0].resolvers == ["apt": "git"])
+        r.stub(Command("apt-mark", ["showmanual"]), stdout: manual + "\n")
+        r.stub(Command("dpkg-query", ["-W", AptScanner.dpkgFormat]), stdout: dpkg)
+        let found = try AptScanner(aptLogs: logs.path).scan(using: r).packages
+        // curl is needed by Steam, but apt's history says it was asked for.
+        #expect(found.map(\.id) == ["brave-browser", "curl", "gh", "libavif-bin", "libimage-exiftool-perl", "nmap", "steam-launcher", "yt-dlp"])
+        #expect(found[0].kind == .apt && found[0].resolvers == ["apt": "brave-browser"])
     }
 
-    @Test func aptSubtractsTheInstallersList() {
+    @Test func aptSubtractsTheOldInstallersList() {
         let status = "Package: ubuntu-desktop\nStatus: install ok installed\n\nPackage: firefox:amd64\nStatus: install ok installed\n"
         #expect(AptScanner.installed(statusFile: status) == ["ubuntu-desktop", "firefox"])
-        #expect(AptScanner.basePriority("a\trequired\nb\toptional\nc\tstandard\nbroken line\n") == ["a", "c"])
+        let rows = AptScanner.dpkgRows("ii \tfirefox\toptional\t, \nii \thtop\toptional\t, \n")
+        #expect(AptScanner.userPackages(manual: ["firefox", "htop"], rows: rows, installerList: ["firefox"], asked: ["firefox"]) == ["htop"])
+    }
+
+    @Test func aptHistoryAndDependencyParsing() {
+        #expect(AptScanner.dependencyNames(", libc6 (>= 2.34), perl:any | perl-base, ") == ["libc6", "perl", "perl-base"])
+        let history = """
+        Commandline: /usr/bin/apt-get -o Dpkg::Options::=--force-confdef install --no-install-recommends gh=2.45.0 hugo:amd64
+        Commandline: apt install ./claude-desktop_1.0_amd64.deb
+        Commandline: apt remove nano
+        Commandline: packagekit role='install-packages'
+        Commandline: apt reinstall git
+        """
+        #expect(AptScanner.requested(history: history) == ["gh", "hugo", "git"])
+        #expect(AptScanner.isRotatedHistory("history.log.1") && AptScanner.isRotatedHistory("history.log.12.gz"))
+        #expect(!AptScanner.isRotatedHistory("history.log") && !AptScanner.isRotatedHistory("history.log.gz") && !AptScanner.isRotatedHistory("term.log.1.gz"))
     }
 
     @Test func flatpakListsApps() {
@@ -96,7 +177,11 @@ import Testing
         #expect(p.allows(Command("gzip", ["-dc", AptScanner.installerList])))
         #expect(!p.allows(Command("gsettings", ["set", "org.gnome.desktop.interface", "color-scheme", "'default'"])))
         #expect(!p.allows(Command("apt-mark", ["manual", "git"])))
+        #expect(p.allows(Command("gzip", ["-dc", "/var/log/apt/history.log.2.gz"])))
+        #expect(p.allows(Command("dpkg-query", ["-W", AptScanner.dpkgFormat])))
         #expect(!p.allows(Command("gzip", ["-dc", "/etc/shadow"])))
+        #expect(!p.allows(Command("gzip", ["-dc", "/var/log/apt/../../../etc/shadow.1.gz"])))
+        #expect(!p.allows(Command("gzip", ["/var/log/apt/history.log.2.gz"])))
         #expect(!p.allows(Command("snap", ["install", "helm"])))
         #expect(!p.allows(Command("flatpak", ["install", "flathub", "org.blender.Blender"])))
     }

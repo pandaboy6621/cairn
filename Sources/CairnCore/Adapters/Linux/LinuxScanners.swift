@@ -7,28 +7,134 @@ import Foundation
 // MARK: - apt
 
 /// Packages the user installed with apt: the ones marked manual, minus what came
-/// with the system (the installer's list, and Debian's required/important/standard
-/// priorities), so a fresh Ubuntu doesn't turn into a list of 1,500 packages.
+/// with the system, so a fresh Ubuntu doesn't turn into a list of hundreds of packages.
+///
+/// "Came with the system" is several signals, because Ubuntu's installers differ:
+/// - the old installer's list (`initial-status.gz`; the 26.04 installer doesn't write it),
+/// - Debian's required/important/standard priorities,
+/// - anything another installed package depends on (restoring that one brings it back),
+/// - installer extras by name: language packs, dictionaries, input methods, boot
+///   loader, kernel, Ubuntu's metapackages, and bare libraries.
+/// What apt's history shows the user asked for (`apt install x`) is kept anyway,
+/// unless every Debian system has it.
 public struct AptScanner: SetupScanning {
-    /// Where Ubuntu's installer records the packages it put on the disk.
+    /// Where Ubuntu's (pre-26.04) installer recorded the packages it put on the disk.
     public static let installerList = "/var/log/installer/initial-status.gz"
+    /// One line per installed package: status, name, priority, what it needs.
+    static let dpkgFormat = "-f=${db:Status-Abbrev}\t${Package}\t${Priority}\t${Pre-Depends}, ${Depends}\n"
 
-    public init() {}
+    let aptLogs: String
+
+    public init(aptLogs: String = "/var/log/apt") { self.aptLogs = aptLogs }
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
         var out = ScanContribution()
         let manual = Self.names(try runner.output(Command("apt-mark", ["showmanual"])))
-        var system = Set<String>()
+        var installerList = Set<String>()
         if FileManager.default.fileExists(atPath: Self.installerList),
            let list = try? runner.output(Command("gzip", ["-dc", Self.installerList])) {
-            system.formUnion(Self.installed(statusFile: list))
+            installerList = Self.installed(statusFile: list)
         }
-        let priorities = try runner.output(Command("dpkg-query", ["-W", "-f=${Package}\t${Priority}\n"]))
-        system.formUnion(Self.basePriority(priorities))
-        out.packages = manual.subtracting(system).sorted().map {
-            PackageItem(id: $0, kind: .apt, resolvers: ["apt": $0])
-        }
+        let rows = Self.dpkgRows(try runner.output(Command("dpkg-query", ["-W", Self.dpkgFormat])))
+        let asked = Self.requested(history: history(using: runner))
+        out.packages = Self.userPackages(manual: manual, rows: rows, installerList: installerList, asked: asked)
+            .sorted().map { PackageItem(id: $0, kind: .apt, resolvers: ["apt": $0]) }
         return out
+    }
+
+    /// apt's history: the current log, then the rotated ones (`history.log.1.gz`, ...).
+    func history(using runner: CommandRunner) -> String {
+        var text = (try? String(contentsOfFile: aptLogs + "/history.log", encoding: .utf8)) ?? ""
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: aptLogs)) ?? []
+        for f in files where Self.isRotatedHistory(f) {
+            let path = aptLogs + "/" + f
+            if f.hasSuffix(".gz") {
+                text += "\n" + ((try? runner.output(Command("gzip", ["-dc", path]))) ?? "")
+            } else {
+                text += "\n" + ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "")
+            }
+        }
+        return text
+    }
+
+    /// `history.log.1`, `history.log.2.gz`, ...
+    static func isRotatedHistory(_ name: String) -> Bool {
+        guard name.hasPrefix("history.log.") else { return false }
+        var rest = name.dropFirst("history.log.".count)
+        if rest.hasSuffix(".gz") { rest = rest.dropLast(3) }
+        return !rest.isEmpty && rest.allSatisfy(\.isNumber)
+    }
+
+    static func userPackages(manual: Set<String>, rows: [DpkgRow], installerList: Set<String>, asked: Set<String>) -> Set<String> {
+        let installed = rows.filter(\.installed)
+        let base = Set(installed.filter { ["required", "important", "standard"].contains($0.priority) }.map(\.name))
+        var needed = Set<String>()
+        for row in installed { needed.formUnion(row.depends.subtracting([row.name])) }
+        return manual.filter { name in
+            if base.contains(name) || installerList.contains(name) { return false }
+            if asked.contains(name) { return true }
+            return !needed.contains(name) && !cameWithInstaller(name)
+        }
+    }
+
+    /// Installer extras nobody installs by hand (and that `apt install` history
+    /// can still rescue): Ubuntu's metapackages, languages, boot, kernel, libraries.
+    static func cameWithInstaller(_ name: String) -> Bool {
+        let exact: Set<String> = [
+            "ubuntu-desktop", "ubuntu-desktop-minimal", "ubuntu-minimal", "ubuntu-standard",
+            "ubuntu-server", "ubuntu-server-minimal", "ubuntu-restricted-addons", "ubuntu-wallpapers",
+            "efibootmgr", "sbsigntool", "mokutil", "os-prober", "secureboot-db", "wpasupplicant", "m17n-db",
+        ]
+        let prefixes = [
+            "language-pack-", "hyphen-", "mythes-", "hunspell-", "ibus-", "libreoffice-help-", "libreoffice-l10n-",
+            "thunderbird-locale-", "firefox-locale-", "grub-", "shim-", "linux-generic", "linux-image-",
+            "linux-headers-", "linux-modules-", "linux-oem-", "linux-firmware",
+        ]
+        if exact.contains(name) || prefixes.contains(where: name.hasPrefix) { return true }
+        // A bare library (libgl1, libpinyin-data); tools packaged as lib... are kept.
+        let tools = ["-bin", "-tools", "-utils", "-progs", "-perl", "-dev"]
+        return name.hasPrefix("lib") && !tools.contains(where: name.hasSuffix)
+    }
+
+    struct DpkgRow: Equatable {
+        var name: String
+        var installed: Bool
+        var priority: String
+        var depends: Set<String>
+    }
+
+    /// `dpkg-query` lines in `dpkgFormat`.
+    static func dpkgRows(_ output: String) -> [DpkgRow] {
+        output.split(whereSeparator: \.isNewline).compactMap { line in
+            let cols = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard cols.count >= 3, let name = names(cols[1]).first else { return nil }
+            return DpkgRow(name: name, installed: cols[0].hasPrefix("ii"), priority: cols[2],
+                           depends: cols.count > 3 ? dependencyNames(cols[3]) : [])
+        }
+    }
+
+    /// `a (>= 1), b:any | c, ` → [a, b, c]. Every alternative counts.
+    static func dependencyNames(_ field: String) -> Set<String> {
+        Set(field.split(whereSeparator: { $0 == "," || $0 == "|" }).compactMap { part in
+            let word = part.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? ""
+            return names(word).first
+        })
+    }
+
+    /// Package names the user asked apt for: `Commandline: apt install x y`.
+    /// Local files (`./app.deb`) and options are skipped.
+    static func requested(history: String) -> Set<String> {
+        var found = Set<String>()
+        for line in history.split(whereSeparator: \.isNewline) where line.hasPrefix("Commandline:") {
+            let words = line.dropFirst("Commandline:".count).split(separator: " ").map(String.init)
+            guard let program = words.first, ["apt", "apt-get", "aptitude"].contains(program.split(separator: "/").last.map(String.init) ?? ""),
+                  let verb = words.firstIndex(where: { $0 == "install" || $0 == "reinstall" }) else { continue }
+            for w in words[(verb + 1)...] where !w.hasPrefix("-") && !w.contains("/") && !w.hasSuffix(".deb") {
+                let name = w.split(separator: "=").first.map(String.init) ?? w
+                if let n = names(name).first { found.insert(n) }
+            }
+        }
+        return found
     }
 
     /// One name per line; `:amd64`-style suffixes dropped.
@@ -44,15 +150,6 @@ public struct AptScanner: SetupScanning {
         Set(statusFile.split(whereSeparator: \.isNewline).compactMap { line -> String? in
             guard line.hasPrefix("Package: ") else { return nil }
             return names(String(line.dropFirst(9))).first
-        })
-    }
-
-    /// Packages every Debian or Ubuntu system has: priority required, important or standard.
-    static func basePriority(_ output: String) -> Set<String> {
-        Set(output.split(whereSeparator: \.isNewline).compactMap { line -> String? in
-            let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
-            guard parts.count == 2, ["required", "important", "standard"].contains(parts[1]) else { return nil }
-            return names(String(parts[0])).first
         })
     }
 }
