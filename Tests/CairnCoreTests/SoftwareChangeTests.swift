@@ -210,5 +210,48 @@ private final class Trashed: @unchecked Sendable {
         #expect(storeA.config(device: "Example Mac").enabled)
         #expect(storeA.group(excluding: "Example Mac", trusted: [b.deviceID]).keys.contains("package:formula:jq"))
     }
+}/// Default apps that differ only in ways restore ignores aren't offered every sync.
+@Suite struct NoEffectIncomingTests {
+    typealias S = SyncTests
+
+    static func ls(_ pairs: [(String, String)], stamp: Int) -> SettingItem {
+        let v: SettingValue = .array(pairs.map { scheme, bundle in
+            .dict(["LSHandlerURLScheme": .string(scheme), "LSHandlerRoleAll": .string(bundle),
+                   "LSHandlerModificationDate": .int(stamp)])
+        })
+        return SettingItem(key: DefaultAppHandler.settingKey, value: v, platforms: ["macos"],
+                           adapter: SettingAdapters(macos: PreferenceRef(domain: "com.apple.LaunchServices/com.apple.launchservices.secure",
+                                                                        key: "LSHandlers", type: "array")))
+    }
+
+    static func mac(_ name: String, _ handlers: SettingItem) -> Manifest {
+        var m = S.mac(name)
+        m.settings.append(handlers)
+        return m.normalized()
+    }
+
+    func plan(_ m: Manifest, group: [String: SyncEntry], base: SyncBase = SyncBase(), at t: Date) -> SyncPlan {
+        SyncEngine.plan(local: SyncItems.from(m), group: group, base: base, config: S.on, device: m.device.name, now: t)
+    }
+
+    @Test func handlersThisMacAlreadyHasAreTakenAsSeen() {
+        let id = "setting:" + DefaultAppHandler.settingKey
+        let a = plan(Self.mac("a", Self.ls([("mailto", "com.example.mail")], stamp: 1)), group: [:], at: S.at(1))
+        let mineSet = Self.ls([("https", "com.example.browser"), ("mailto", "com.example.mail")], stamp: 2)
+        let b0 = plan(Self.mac("b", mineSet), group: a.outgoing, at: S.at(2))
+        #expect(!b0.incoming.contains { $0.id == id }) // first sync: nothing to bring in
+        // A later change on "a" that "b" already covers (same handler, new timestamp).
+        var group = a.outgoing
+        group[id] = SyncEntry(value: SyncValue(setting: Self.ls([("mailto", "com.example.mail")], stamp: 9)),
+                              updated: S.at(3), device: "a")
+        let b1 = plan(Self.mac("b", mineSet), group: group, base: b0.base, at: S.at(4))
+        #expect(!b1.incoming.contains { $0.id == id })
+        #expect(b1.base.seen[id] == S.at(3))
+        // A handler "b" doesn't have still comes in.
+        group[id] = SyncEntry(value: SyncValue(setting: Self.ls([("mailto", "com.example.other")], stamp: 9)),
+                              updated: S.at(5), device: "a")
+        #expect(plan(Self.mac("b", mineSet), group: group, base: b1.base, at: S.at(6)).incoming.contains { $0.id == id })
+    }
 }
+
 #endif

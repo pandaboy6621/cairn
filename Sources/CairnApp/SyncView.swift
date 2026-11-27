@@ -836,7 +836,7 @@ struct PairRequestSheet: View {
                 .font(.system(size: 40, weight: .semibold, design: .monospaced))
                 .padding(.horizontal, 22).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.6)))
-            Text("ID \(request.deviceID)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("ID \(request.deviceID.description)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
             Text("Accepting lets it share its setup with this Mac. You still review every change before it's applied here.")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             HStack(spacing: 12) {

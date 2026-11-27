@@ -161,6 +161,16 @@ public struct SyncValue: Codable, Equatable, Sendable {
         return v
     }
 
+    /// Whether bringing in `other` would change nothing here, although the two
+    /// differ. Default apps: restore only adds the handlers this Mac is missing,
+    /// so a Mac that already has all of the other's handlers (plus its own, or
+    /// in another order) has nothing to bring in.
+    public func covers(_ other: SyncValue) -> Bool {
+        guard let mine = setting, let theirs = other.setting,
+              mine.key == DefaultAppHandler.settingKey, theirs.key == DefaultAppHandler.settingKey else { return false }
+        return Set(DefaultAppHandler.parse(theirs.value)).isSubset(of: Set(DefaultAppHandler.parse(mine.value)))
+    }
+
     /// A stable fingerprint of the value, for spotting changes. A secret's
     /// ciphertext is left out: whether a Mac has the secret is what counts
     /// (its own vault file only gets the ciphertext at its next capture).

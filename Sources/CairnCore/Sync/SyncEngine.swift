@@ -102,9 +102,15 @@ public enum SyncEngine {
                 continue
             }
 
+            // Different, but bringing theirs in would change nothing here.
+            let covered = theirs.flatMap { t in t.removed ? nil : t.value.flatMap { mine?.value.covers($0) } } ?? false
+
             if firstSync {
                 plan.base.local[id] = localHash
-                if let theirs, !theirs.removed {
+                if covered, let theirs, let mine {
+                    plan.base.seen[id] = max(seen, theirs.updated)
+                    plan.outgoing[id] = SyncEntry(value: mine.value, updated: now, device: device)
+                } else if let theirs, !theirs.removed {
                     // The group has it differently: offer theirs, keep ours unpublished.
                     plan.incoming.append(SyncIncoming(id: id, category: category, title: title, entry: theirs, current: mine?.value))
                 } else if let mine {
@@ -128,6 +134,10 @@ public enum SyncEngine {
             } else if changedHere {
                 plan.outgoing[id] = SyncEntry(value: mine?.value, removed: mine == nil, updated: now, device: device)
                 plan.base.local[id] = localHash
+            } else if theirsNew, covered, let theirs {
+                // Nothing to bring in: take it as seen so it isn't listed every sync.
+                plan.base.seen[id] = theirs.updated
+                plan.base.conflicts[id] = nil
             } else if theirsNew, let theirs {
                 let incoming = SyncIncoming(id: id, category: category, title: title, entry: theirs, current: mine?.value)
                 if theirs.removed {
