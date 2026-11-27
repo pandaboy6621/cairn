@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Cairn
+GenericName=Setup Backup
+Comment=Back up this computer's apps and settings, not its files
+Icon=dev.cairn.Cairn
+Exec=cairn-gnome
+Terminal=false
+Categories=GTK;GNOME;Utility;System;
+Keywords=backup;restore;setup;settings;apps;flatpak;snap;
+StartupNotify=true

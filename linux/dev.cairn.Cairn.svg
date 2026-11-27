@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Cairn: three stacked teal stones on an indigo rounded square, small gold dot above. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4d45b8"/>
+      <stop offset="1" stop-color="#2e2680"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <rect x="8" y="8" width="112" height="56" rx="26" fill="url(#shine)"/>
+  <circle cx="64" cy="31" r="5.2" fill="#fac74d"/>
+  <ellipse cx="64" cy="47" rx="13.5" ry="6.8" fill="#29ccbb"/>
+  <ellipse cx="64" cy="64" rx="20.8" ry="8.3" fill="#29ad9c"/>
+  <ellipse cx="64" cy="83.5" rx="29" ry="10" fill="#2b8f80"/>
+</svg>
