@@ -47,10 +47,19 @@ public struct SoftwareRemover: Sendable {
     public init(runner: CommandRunner = ProcessRunner(policy: .uninstall),
                 applications: [URL] = [URL(fileURLWithPath: "/Applications"),
                                        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Applications")],
-                trash: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) {
+                trash: @escaping @Sendable (URL) throws -> Void = SoftwareRemover.moveToTrash) {
         self.runner = runner
         self.applications = applications
         self.trash = trash
+    }
+
+    /// The Finder's Trash. Linux has no Foundation Trash call (and no App Store apps).
+    public static let moveToTrash: @Sendable (URL) throws -> Void = { url in
+        #if os(macOS)
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        #else
+        throw SoftwareRemoverError.failed("there's no Trash to move \(url.lastPathComponent) to here")
+        #endif
     }
 
     /// What removing this would do, or nil if Cairn can't remove it here.

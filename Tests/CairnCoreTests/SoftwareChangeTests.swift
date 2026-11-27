@@ -1,3 +1,4 @@
+#if os(macOS) // builds on SyncTests, which is Mac-only
 import Foundation
 import Testing
 @testable import CairnCore
@@ -210,3 +211,4 @@ private final class Trashed: @unchecked Sendable {
         #expect(storeA.group(excluding: "Example Mac", trusted: [b.deviceID]).keys.contains("package:formula:jq"))
     }
 }
+#endif
