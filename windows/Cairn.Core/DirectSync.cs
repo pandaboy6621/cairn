@@ -295,8 +295,12 @@ public sealed record PairRequest(string DeviceId, string Name, string Code);
 public sealed class DirectSyncException(string message) : Exception(message);
 
 /// One end of a direct connection: who this PC is, its sync files, and its trust list.
-public sealed class DirectSyncContext(SyncIdentity identity, string name, SyncStore store, Func<SyncTrust> loadTrust, Action<SyncTrust> saveTrust)
+public sealed class DirectSyncContext(SyncIdentity identity, string name, SyncStore store, Func<SyncTrust> loadTrust, Action<SyncTrust> saveTrust,
+    bool exchange = true)
 {
+    /// Swap changes after connecting (direct mode); pairing alone otherwise (folder mode,
+    /// where changes travel through the shared folder), as on the Mac.
+    public bool Exchange { get; } = exchange;
     public SyncIdentity Identity { get; } = identity;
     internal byte[] PrivateKey => Identity.PrivateKey;
     public string Name { get; } = name;
@@ -405,9 +409,9 @@ public static class DirectSync
             latest.Trust(result.PeerId, result.PeerName, "", Convert.ToBase64String(result.PeerPublicKey), DateTimeOffset.UtcNow);
             c.SaveTrust(latest);
         }
-        await session.Send(new Wire { Status = "trusted", Exchange = true }, ct);
+        await session.Send(new Wire { Status = "trusted", Exchange = c.Exchange }, ct);
         var reply = await session.Receive(After(TimeSpan.FromSeconds(15), ct));
-        if (reply.Exchange == true) exchanged(result.PeerName, await session.ExchangeBundles(c, first: false, After(TimeSpan.FromSeconds(60), ct)));
+        if (c.Exchange && reply.Exchange == true) exchanged(result.PeerName, await session.ExchangeBundles(c, first: false, After(TimeSpan.FromSeconds(60), ct)));
     }
 
     /// Pairs with a computer: both show the code (given to `showCode` as soon as it's
@@ -419,11 +423,11 @@ public static class DirectSync
         if (expectedId is not null && DeviceIds.Normalize(expectedId) != result.PeerId)
             throw new DirectSyncException($"Expected the computer {expectedId[..5]}…, but {result.PeerId[..5]}… answered.");
         showCode(result.Code);
-        await AwaitTrusted(session, ct);
+        var status = await AwaitTrusted(session, ct);
         var trust = c.Trust();
         trust.Trust(result.PeerId, result.PeerName, "", Convert.ToBase64String(result.PeerPublicKey), DateTimeOffset.UtcNow);
         c.SaveTrust(trust);
-        await Finish(session, c, ct);
+        await Finish(session, status, c, ct);
         return result.PeerName;
     }
 
@@ -435,8 +439,8 @@ public static class DirectSync
         var trust = c.Trust();
         if (!Admit(trust, result)) throw new DirectSyncException("That computer isn't paired with this one.");
         c.SaveTrust(trust);
-        await AwaitTrusted(session, ct);
-        return await Finish(session, c, ct);
+        var status = await AwaitTrusted(session, ct);
+        return await Finish(session, status, c, ct);
     }
 
     /// Trusted, and its key matches the one seen before.
@@ -449,21 +453,23 @@ public static class DirectSync
         return true;
     }
 
-    static async Task AwaitTrusted(DirectSession session, CancellationToken ct)
+    static async Task<Wire> AwaitTrusted(DirectSession session, CancellationToken ct)
     {
         var limit = After(TimeSpan.FromSeconds(190), ct);
         while (true)
         {
             var w = await session.Receive(limit);
-            if (w.Status == "trusted") return;
+            if (w.Status == "trusted") return w;
             if (w.Status == "declined") throw new DirectSyncException("The other computer said no.");
         }
     }
 
-    static async Task<int> Finish(DirectSession session, DirectSyncContext c, CancellationToken ct)
+    /// Exchanges only if both ends want to (both in direct mode).
+    static async Task<int> Finish(DirectSession session, Wire status, DirectSyncContext c, CancellationToken ct)
     {
-        await session.Send(new Wire { Status = "trusted", Exchange = true }, ct);
-        return await session.ExchangeBundles(c, first: true, After(TimeSpan.FromSeconds(60), ct));
+        var both = c.Exchange && status.Exchange == true;
+        await session.Send(new Wire { Status = "trusted", Exchange = both }, ct);
+        return both ? await session.ExchangeBundles(c, first: true, After(TimeSpan.FromSeconds(60), ct)) : 0;
     }
 }
 

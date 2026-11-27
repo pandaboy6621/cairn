@@ -109,6 +109,18 @@ public sealed class DirectSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task FolderModePairsWithoutSwapping()
+    {
+        var a = Computer("pc-a");
+        var b = Computer("pc-b");
+        var folderMode = new DirectSyncContext(b.Context.Identity, "pc-b", b.Store, b.Trust, b.Context.SaveTrust, exchange: false);
+        await Connect(s => DirectSync.Serve(s, folderMode, _ => Task.FromResult(true), (_, _) => { }, default),
+            s => DirectSync.Pair(s, a.Context, null, _ => { }, default));
+        Assert.True(a.Trust().IsTrusted(b.Context.Identity.DeviceId)); // paired
+        Assert.Empty(a.Store.Published("pc-b").Entries);               // changes go through the folder instead
+    }
+
+    [Fact]
     public void AnnouncesLikeTheMac()
     {
         var txt = SyncPeer.Txt("test-pc", "10.0.26100", "abc123", "ABCDE-FGHJK-MNPQR-STVWX", accepts: true);

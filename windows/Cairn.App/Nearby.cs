@@ -34,11 +34,27 @@ sealed class Nearby : IDisposable
         "System.Devices.Dnssd.InstanceName", "System.Devices.IpAddress", "System.Devices.Dnssd.PortNumber", "System.Devices.Dnssd.TextAttributes",
     };
 
-    public async Task Start(DirectSyncContext context, string osVersion, string? groupTag,
+    /// Starts looking for other computers. Returns an error, or null.
+    public string? Browse(string device)
+    {
+        ownService = SyncPeer.ServiceName(device);
+        try
+        {
+            watcher = DeviceInformation.CreateWatcher(Aqs, Properties, DeviceInformationKind.AssociationEndpointService);
+            watcher.Added += (_, info) => { lock (gate) devices[info.Id] = info; Notify(); };
+            watcher.Updated += (_, update) => { lock (gate) if (devices.TryGetValue(update.Id, out var d)) d.Update(update); Notify(); };
+            watcher.Removed += (_, update) => { lock (gate) devices.Remove(update.Id); Notify(); };
+            watcher.EnumerationCompleted += (_, _) => Notify();
+            watcher.Start();
+            return null;
+        }
+        catch (Exception e) { return e.Message; }
+    }
+
+    /// Listens for pairing and syncs, and announces this PC so others can find it.
+    public async Task Announce(DirectSyncContext context, string osVersion, string? groupTag,
         Func<PairRequest, Task<bool>> ask, Action<string, int> exchanged)
     {
-        Stop();
-        ownService = SyncPeer.ServiceName(context.Name);
 
         // Answer connections: pairing (the user is asked) and syncs from paired computers.
         listener = new StreamSocketListener();
@@ -56,13 +72,9 @@ sealed class Nearby : IDisposable
                    ?? new HostName(Environment.MachineName + ".local");
         service = new DnssdServiceInstance($"{ownService}.{SyncPeer.ServiceType}.local", host, port);
         foreach (var (k, v) in SyncPeer.Txt(context.Name, osVersion, groupTag, context.Identity.DeviceId, accepts: true)) service.TextAttributes[k] = v;
-        await service.RegisterStreamSocketListenerAsync(listener);
-
-        watcher = DeviceInformation.CreateWatcher(Aqs, Properties, DeviceInformationKind.AssociationEndpointService);
-        watcher.Added += (_, info) => { lock (gate) devices[info.Id] = info; Notify(); };
-        watcher.Updated += (_, update) => { lock (gate) if (devices.TryGetValue(update.Id, out var d)) d.Update(update); Notify(); };
-        watcher.Removed += (_, update) => { lock (gate) devices.Remove(update.Id); Notify(); };
-        watcher.Start();
+        var registered = await service.RegisterStreamSocketListenerAsync(listener);
+        if (registered.Status != DnssdServiceInstanceRegistrationStatus.Success)
+            throw new InvalidOperationException($"Windows didn't announce it ({registered.Status}).");
     }
 
     void Notify()

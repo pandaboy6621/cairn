@@ -293,7 +293,6 @@
                                             <Button x:Name="UseBackupFolderButton" Content="Use the backup folder" Click="UseBackupFolderForSync_Click" />
                                         </StackPanel>
                                     </StackPanel>
-                                    <StackPanel x:Name="NearbyPanel" Spacing="8" Visibility="Collapsed" />
                                 </StackPanel>
                             </Border>
 
@@ -333,6 +332,8 @@
                                     <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                Text="Only computers you accept here are synced with. A computer asks once it turns sync on with the same backup folder. Check its ID matches the one it shows." />
                                     <StackPanel x:Name="SyncDevicesPanel" Spacing="8" />
+                                    <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,4" />
+                                    <StackPanel x:Name="NearbyPanel" Spacing="8" />
                                     <StackPanel Spacing="2" Margin="0,6,0,0">
                                         <TextBlock Text="This PC's ID" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         <TextBlock x:Name="SyncIdText" IsTextSelectionEnabled="True" FontFamily="Cascadia Mono, Consolas" FontSize="16" />

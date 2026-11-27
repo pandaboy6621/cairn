@@ -42,14 +42,13 @@ public sealed partial class MainWindow
             ? "Computers on the same network exchange changes over an encrypted connection while Cairn is open on both. No NAS needed. Pair each one once and compare the code both show."
             : "Each computer publishes its changes to one folder they can all reach, like a share on your NAS. Works even when they're never on at the same time. Choose the same folder on your Macs.";
         SyncFolderPanel.Visibility = DirectMode ? Visibility.Collapsed : Visibility.Visible;
-        NearbyPanel.Visibility = DirectMode ? Visibility.Visible : Visibility.Collapsed;
         SyncFolderText.Text = SyncRoot;
         UseBackupFolderButton.IsEnabled = settings.SyncFolder is { Length: > 0 };
         SyncFolderWarning.Text = !DirectMode && IsLocalOnly(SyncRoot)
             ? "This folder is on this PC, so your other computers can't see it. Choose a share on your NAS that they use too."
             : "";
         SyncFolderWarning.Visibility = SyncFolderWarning.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        StartNearby();
+        if (nearby is null || !syncConfig.Enabled) StartNearby(); else BuildNearby();
     }
 
     async void SyncMode_SelectionChanged(object sender, SelectionChangedEventArgs e)

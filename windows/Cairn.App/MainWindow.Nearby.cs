@@ -12,63 +12,76 @@ public sealed partial class MainWindow
     List<NearbyComputer> found = new();
     string? nearbyError;
 
-    DirectSyncContext DirectContext => new(Identity, Me, SyncFolder,
-        () => trust = SyncTrust.Load(SyncTrust.DefaultPath), t => { trust = t; t.Save(SyncTrust.DefaultPath); });
 
-    /// Runs only while sync is on in direct mode, as on the Mac.
+    string? announceError;
+    bool announced;
+
+    DirectSyncContext ContextForMode => new(Identity, Me, SyncFolder,
+        () => trust = SyncTrust.Load(SyncTrust.DefaultPath), t => { trust = t; t.Save(SyncTrust.DefaultPath); }, exchange: DirectMode);
+
+    /// While sync is on (either mode, as on the Mac): look for computers on this network,
+    /// and announce this PC so they can pair with it. Changes are swapped over the network
+    /// only in direct mode; in folder mode they go through the folder.
     async void StartNearby()
     {
         nearby?.Dispose();
         nearby = null;
         found = new();
-        nearbyError = null;
-        if (!(DirectMode && syncConfig.Enabled)) { BuildNearby(); return; }
+        nearbyError = announceError = null;
+        announced = false;
+        if (!syncConfig.Enabled) { BuildNearby(); return; }
         var n = new Nearby();
-        n.Changed += list => OnUI(() => { found = list; BuildNearby(); });
+        nearby = n;
+        n.Changed += list => OnUI(() => { if (nearby == n) { found = list; BuildNearby(); } });
+        nearbyError = n.Browse(Me);
+        BuildNearby(); // "Looking…" straight away
         try
         {
             var group = SyncFolder.Group()?.Id;
-            await n.Start(DirectContext, Environment.OSVersion.Version.ToString(3), group is null ? null : SyncPeer.TagFor(group),
+            await n.Announce(ContextForMode, Environment.OSVersion.Version.ToString(3), group is null ? null : SyncPeer.TagFor(group),
                 AskToPair, (name, changed) => OnUI(async () =>
                 {
                     SetStatus(false, $"Synced with {name}.");
                     BuildDevices();
                     if (changed > 0) await SyncNow(exchange: false);
-                }));
-            nearby = n;
+                })).WaitAsync(TimeSpan.FromSeconds(20));
+            announced = true;
         }
-        catch (Exception e)
-        {
-            n.Dispose();
-            nearbyError = $"Couldn't look for computers on this network: {e.Message}";
-        }
-        BuildNearby();
+        catch (Exception e) { announceError = e is TimeoutException ? "Windows didn't finish announcing this PC." : e.Message; }
+        if (nearby == n) BuildNearby();
     }
 
     void BuildNearby()
     {
         NearbyPanel.Children.Clear();
-        if (!DirectMode) return;
-        NearbyPanel.Children.Add(new TextBlock { Text = "On this network", Style = TextStyle("CaptionTextBlockStyle"), Foreground = Res("TextFillColorSecondaryBrush") });
+        var header = new Grid();
+        header.Children.Add(new TextBlock { Text = "On this network", Style = TextStyle("BodyStrongTextBlockStyle"), VerticalAlignment = VerticalAlignment.Center });
+        var again = Action("Look again", () => StartNearby());
+        again.HorizontalAlignment = HorizontalAlignment.Right;
+        again.IsEnabled = syncConfig.Enabled;
+        header.Children.Add(again);
+        NearbyPanel.Children.Add(header);
         if (!syncConfig.Enabled)
         {
             NearbyPanel.Children.Add(Note("Turn sync on to find computers on this network."));
             return;
         }
-        if (nearbyError is not null) { NearbyPanel.Children.Add(Note(nearbyError)); return; }
+        if (nearbyError is not null) NearbyPanel.Children.Add(Note($"Couldn't look for computers: {nearbyError}"));
+        NearbyPanel.Children.Add(Note(announceError is not null ? $"Other computers can't find this PC yet: {announceError} Check that Windows allows Cairn on private networks."
+            : announced ? $"This PC is visible as \"{SyncPeer.ServiceName(Me)}\"." : "Announcing this PC…"));
         foreach (var c in found)
         {
             var paired = c.Peer.DeviceId is { } id && trust.IsTrusted(id);
             var kind = c.Peer.IsWindows ? "PC" : "Mac";
-            var detail = paired ? $"{kind} · paired" : c.Peer.Accepts ? $"{kind} · ID {c.Peer.DeviceId}" : $"{kind} · turn on direct sync there to pair";
+            var detail = paired ? $"{kind} · paired" : c.Peer.Accepts ? $"{kind} · ID {c.Peer.DeviceId}" : $"{kind} · open Cairn's Sync there to pair";
             var row = DeviceRow(c.Peer.Device, detail);
-            if (paired) row.Buttons.Children.Add(Action("Sync", async () => { await ExchangeWith(c); await SyncNow(exchange: false); }));
-            else if (c.Peer.Accepts) row.Buttons.Children.Add(Action("Pair…", async () => await PairWith(c), accent: true));
+            if (paired && DirectMode) row.Buttons.Children.Add(Action("Sync", async () => { await ExchangeWith(c); await SyncNow(exchange: false); }));
+            else if (!paired && c.Peer.Accepts) row.Buttons.Children.Add(Action("Pair…", async () => await PairWith(c), accent: true));
             NearbyPanel.Children.Add(row.Root);
         }
-        if (found.Count == 0)
-            NearbyPanel.Children.Add(Note("Looking… Open Cairn on your Mac or another PC on the same network, and turn on direct sync there. "
-                + "(A Mac in a virtual machine shared through its host's network can't be seen from here.)"));
+        if (found.Count == 0 && nearbyError is null)
+            NearbyPanel.Children.Add(Note("Looking… Open Cairn on your Mac or another PC on the same network with sync on. "
+                + "(A Mac in a virtual machine that shares its host's network can't be seen from here.)"));
     }
 
     TextBlock Note(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Res("TextFillColorTertiaryBrush") };
@@ -107,7 +120,7 @@ public sealed partial class MainWindow
         var pairing = Task.Run(async () =>
         {
             await using var stream = await Nearby.Connect(c, cancel.Token);
-            return await DirectSync.Pair(stream, DirectContext, c.Peer.DeviceId, code => OnUI(() => codeText.Text = code), cancel.Token);
+            return await DirectSync.Pair(stream, ContextForMode, c.Peer.DeviceId, code => OnUI(() => codeText.Text = code), cancel.Token);
         });
         var shown = dialog.ShowAsync().AsTask();
         var first = await Task.WhenAny(pairing, shown);
@@ -144,7 +157,7 @@ public sealed partial class MainWindow
             {
                 using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(90));
                 await using var stream = await Nearby.Connect(c, cancel.Token);
-                await DirectSync.Sync(stream, DirectContext, cancel.Token);
+                await DirectSync.Sync(stream, ContextForMode, cancel.Token);
             });
             SetTrustOs(c);
         }
