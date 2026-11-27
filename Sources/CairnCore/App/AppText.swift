@@ -38,6 +38,26 @@ public enum BackupMessages {
         }
     }
 
+    /// A snapshot's stored summary in words: "+3 -1 ~0" → "3 added, 1 removed",
+    /// "~2 secrets" → "2 secrets changed". Anything else is shown as stored.
+    public static func summary(_ stored: String) -> String {
+        let tokens = stored.split(separator: " ").map(String.init)
+        var parts: [String] = []
+        var i = 0
+        while i < tokens.count {
+            let t = tokens[i]
+            guard let sign = t.first, "+-~".contains(sign), let n = Int(t.dropFirst()) else { return stored }
+            if i + 1 < tokens.count, tokens[i + 1].hasPrefix("secret") {
+                if n > 0 { parts.append("\(n) \(n == 1 ? "secret" : "secrets") changed") }
+                i += 2
+                continue
+            }
+            if n > 0 { parts.append("\(n) " + (sign == "+" ? "added" : sign == "-" ? "removed" : "changed")) }
+            i += 1
+        }
+        return parts.isEmpty ? "no changes" : parts.joined(separator: ", ")
+    }
+
     /// "26 Nov 2026, 9:41 PM" in the user's locale.
     public static func date(_ date: Date, locale: Locale = .current, timeZone: TimeZone = .current) -> String {
         let f = DateFormatter()

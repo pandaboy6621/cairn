@@ -27,6 +27,14 @@ import Testing
         #expect(SettingCategory.groupName(for: mac, in: .lookAndLayout) == "Finder")
     }
 
+    @Test func snapshotSummariesInWords() {
+        #expect(BackupMessages.summary("+1 -1 ~0") == "1 added, 1 removed")
+        #expect(BackupMessages.summary("+0 -0 ~3 ~1 secret") == "3 changed, 1 secret changed")
+        #expect(BackupMessages.summary("~2 secrets") == "2 secrets changed")
+        #expect(BackupMessages.summary("first snapshot") == "first snapshot")
+        #expect(BackupMessages.summary("+0 -0 ~0") == "no changes")
+    }
+
     @Test func backupMessages() {
         let folder = URL(fileURLWithPath: "/mnt/nas/Cairn")
         let s = Snapshot(info: SnapshotInfo(id: "x", device: "d", created: Date(), parent: nil, trigger: .manual,
