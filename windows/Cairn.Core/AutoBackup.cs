@@ -14,6 +14,7 @@ public static class BackupChoices
         OrderedApps => "taskbar",
         DotfileItem d => $"dotfile:{d.Path}", // the Mac app's name for these
         ShareItem s => $"share:{s.Url}",
+        FontItem f => $"font:{f.File}",
         SensitiveRef s => $"sensitive:{s.Ref}",
         _ => "",
     };
@@ -30,6 +31,7 @@ public static class BackupChoices
         foreach (var s in m.Settings) s.Include = !set.Contains(ItemId(s));
         foreach (var d in m.Dotfiles) d.Include = !set.Contains(ItemId(d));
         foreach (var s in m.Shares) s.Include = !set.Contains(ItemId(s));
+        foreach (var f in m.Fonts) f.Include = !set.Contains(ItemId(f));
         if (m.Layout.Taskbar is { } t) t.Include = !set.Contains("taskbar");
     }
 }

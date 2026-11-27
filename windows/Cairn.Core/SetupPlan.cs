@@ -10,6 +10,7 @@ public abstract record SetupStep(string Id, string Group, string Text)
         : SetupStep($"share:{Url}", "Network drives", Drive is null ? Unc : $"{Unc} ({Drive})");
     public sealed record Secret(string Type, string Ref, string Name)
         : SetupStep($"sensitive:{Ref}", "Secrets", Type == WindowsSecrets.WifiType ? $"Wi-Fi password for {Name}" : $"SSH key {Name}");
+    public sealed record Font(FontItem Item) : SetupStep($"font:{Item.File}", "Fonts", $"{Item.Name} ({Item.File})");
     public sealed record Config(string Target, string Content, bool KeepHosts, int Commented, string Label)
         : SetupStep($"config:{Target}", "Config files", Label);
 }
@@ -86,6 +87,10 @@ public sealed class SetupPlan
             if (commented > 0) plan.ByHand.Add($"{f.Path}: {commented} Mac-only line{(commented == 1 ? " is" : "s are")} commented out (look for \"# cairn: macOS only\")");
             if (f.Redacted > 0) plan.ByHand.Add($"{f.Path}: {f.Redacted} line{(f.Redacted == 1 ? "" : "s")} that looked like secrets were never backed up (look for \"# cairn: removed\")");
         }
+
+        foreach (var f in backup.Fonts.Where(f => f.Include && f.IsPortable)) plan.Steps.Add(new SetupStep.Font(f));
+        var macFonts = backup.Fonts.Where(f => f.Include && !f.IsPortable).Select(f => f.File).OrderBy(x => x).ToList();
+        if (macFonts.Count > 0) plan.NotCarried.Add($"{macFonts.Count} Mac-only font{(macFonts.Count == 1 ? "" : "s")}: {string.Join(", ", macFonts)}");
 
         foreach (var share in backup.Shares.Where(s => s.Include))
         {

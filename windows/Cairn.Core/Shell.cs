@@ -55,8 +55,11 @@ public interface IUserRegistry
 {
     object? Get(string path, string name);
     void SetDword(string path, string name, int value);
+    void SetString(string path, string name, string value);
     /// Names of the keys just below `path`; empty if it doesn't exist.
     IEnumerable<string> SubKeys(string path);
+    /// The values in `path`, by name; empty if it doesn't exist.
+    IEnumerable<(string Name, object? Value)> Values(string path) => Array.Empty<(string, object?)>();
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -72,6 +75,18 @@ public sealed class UserRegistry : IUserRegistry
     {
         using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(path);
         return key?.GetSubKeyNames() ?? Array.Empty<string>();
+    }
+
+    public IEnumerable<(string Name, object? Value)> Values(string path)
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(path);
+        return key is null ? Array.Empty<(string, object?)>() : key.GetValueNames().Select(n => (n, key.GetValue(n))).ToList();
+    }
+
+    public void SetString(string path, string name, string value)
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(path, writable: true);
+        key.SetValue(name, value, Microsoft.Win32.RegistryValueKind.String);
     }
 
     public void SetDword(string path, string name, int value)

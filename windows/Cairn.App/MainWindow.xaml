@@ -105,7 +105,7 @@
                             </Grid>
                             <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                       Text="Cairn saves your setup (programs, settings, taskbar, Git and SSH config), never your files. A new snapshot is only saved when something changed, and lines that look like passwords or tokens are left out." />
+                                       Text="Cairn saves your setup (programs, settings, taskbar, fonts, Git and SSH config), never your files. A new snapshot is only saved when something changed, and lines that look like passwords or tokens are left out." />
                         </StackPanel>
                     </ScrollViewer>
 
@@ -273,7 +273,7 @@
                                     <TextBlock Text="About Cairn" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                     <TextBlock x:Name="VersionText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               Text="Cairn backs up a computer's setup (programs, settings, taskbar, Git and SSH config), never your files, and sets up a new Mac or PC from it." />
+                                               Text="Cairn backs up a computer's setup (programs, settings, taskbar, fonts, Git and SSH config), never your files, and sets up a new Mac or PC from it." />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

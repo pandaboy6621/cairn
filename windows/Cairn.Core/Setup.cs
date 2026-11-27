@@ -11,6 +11,8 @@ public interface ISystemActions
     /// Runs a PowerShell command as administrator (Windows asks the user). True if it ran.
     bool RunElevatedPowerShell(string command);
     void RestartExplorer();
+    /// Tells running apps a font was added, so it shows without signing out.
+    void FontAdded(string path);
     /// Maps a network drive that Windows reconnects at sign-in, asking for the password
     /// in its own window if it needs one. Uses `drive` if it's free, else a free letter.
     /// Returns the letter used, or an error.
@@ -56,6 +58,19 @@ public sealed class WindowsActions : ISystemActions
     static extern int WNetUseConnection(IntPtr owner, ref NetResource resource, string? password, string? user, int flags,
         StringBuilder accessName, ref int bufferSize, out int result);
 
+    public void FontAdded(string path)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        AddFontResourceW(path);
+        SendMessageTimeoutW(new IntPtr(0xFFFF) /* HWND_BROADCAST */, 0x001D /* WM_FONTCHANGE */, IntPtr.Zero, IntPtr.Zero, 0x2 /* SMTO_ABORTIFHUNG */, 1000, out _);
+    }
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int AddFontResourceW(string path);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr SendMessageTimeoutW(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+
     public void RestartExplorer()
     {
         foreach (var p in Process.GetProcessesByName("explorer")) { try { p.Kill(); } catch (InvalidOperationException) { } }
@@ -91,6 +106,8 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
     public VaultKey? Key { get; set; }
     /// The backup's encrypted secrets (its `secrets.yaml`).
     public SecretsFile Secrets { get; set; } = new();
+    /// The backup's font copies (`FontStore.FolderNear`); null when it has none.
+    public string? FontsFolder { get; set; }
     public bool NeedsSignOut { get; private set; }
 
     // MARK: Preview
@@ -103,11 +120,47 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
         SetupStep.Taskbar t => CheckTaskbar(t),
         SetupStep.Config c => CheckConfig(c),
         SetupStep.Secret s => CheckSecret(s),
+        SetupStep.Font f => CheckFont(f),
         SetupStep.Share s => NetworkDrives.Mapped(registry).TryGetValue(s.Unc, out var d)
             ? new(step, StepState.Done, $"already mapped as {d}")
             : new(step, StepState.ToDo, s.Drive is null ? "would map" : $"would map as {s.Drive}"),
         _ => new(step, StepState.ToDo, ""),
     };
+
+    string FontTarget(SetupStep.Font f) => Path.Combine(home.Full(WindowsFonts.RelativeFolder), f.Item.File);
+    string? FontSource(SetupStep.Font f) => FontsFolder is null ? null : Path.Combine(FontsFolder, f.Item.StoredName);
+
+    StepStatus CheckFont(SetupStep.Font f)
+    {
+        if (File.Exists(FontTarget(f))) return new(f, StepState.Done, "already installed");
+        return FontSource(f) is { } src && File.Exists(src) ? new(f, StepState.ToDo, "would install") : new(f, StepState.NotFound, "not in the backup");
+    }
+
+    /// Installs a font for this user only (no administrator needed), as Windows' own
+    /// "Install" does: copy it into the user's fonts folder and list it in the registry.
+    /// A font that's already there is never replaced.
+    bool InstallFont(SetupStep.Font f, Action<string> log)
+    {
+        var target = FontTarget(f);
+        if (File.Exists(target)) { log($"{f.Item.Name}: already installed"); return true; }
+        if (FontSource(f) is not { } src || !File.Exists(src)) { log($"{f.Item.Name}: not in the backup"); return false; }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            using (var from = File.OpenRead(src))
+            using (var to = new FileStream(target, FileMode.CreateNew))
+                from.CopyTo(to);
+            registry.SetString(WindowsFonts.RegistryKey, WindowsFonts.RegistryName(f.Item), target);
+            system.FontAdded(target);
+            log($"Installed the font {f.Item.Name}");
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log($"Couldn't install {f.Item.Name}: {e.Message}");
+            return false;
+        }
+    }
 
     StepStatus CheckInstall(SetupStep.Install i)
     {
@@ -254,6 +307,9 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
                     break;
                 case SetupStep.Secret sec:
                     if (!ApplySecret(sec, log)) failed.Add(sec.Text);
+                    break;
+                case SetupStep.Font f:
+                    if (!InstallFont(f, log)) failed.Add(f.Text);
                     break;
             }
             done++;

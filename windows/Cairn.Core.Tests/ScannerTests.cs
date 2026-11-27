@@ -20,6 +20,9 @@ sealed class FakeRegistry : IUserRegistry
     public Dictionary<(string, string), object> Values { get; } = new();
     public object? Get(string path, string name) => Values.GetValueOrDefault((path, name));
     public void SetDword(string path, string name, int value) => Values[(path, name)] = value;
+    public void SetString(string path, string name, string value) => Values[(path, name)] = value;
+    IEnumerable<(string Name, object? Value)> IUserRegistry.Values(string path) =>
+        Values.Where(kv => string.Equals(kv.Key.Item1, path, StringComparison.OrdinalIgnoreCase)).Select(kv => (kv.Key.Item2, (object?)kv.Value)).ToList();
     public IEnumerable<string> SubKeys(string path) => Values.Keys
         .Where(k => k.Item1.StartsWith(path + "\\", StringComparison.OrdinalIgnoreCase))
         .Select(k => k.Item1[(path.Length + 1)..].Split('\\')[0]).Distinct().ToList();

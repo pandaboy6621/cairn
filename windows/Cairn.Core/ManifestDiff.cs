@@ -20,6 +20,7 @@ public static class ManifestDiff
             Ordered("layout.taskbar", a.Layout.Taskbar, b.Layout.Taskbar),
             Keyed("shares", a.Shares, b.Shares, s => s.Url, (x, y) => x.Include != y.Include || x.Username != y.Username || x.Favorite != y.Favorite),
             Keyed("dotfiles", a.Dotfiles, b.Dotfiles, d => d.Path, (x, y) => x.Include != y.Include || x.Content != y.Content),
+            Keyed("fonts", a.Fonts, b.Fonts, f => f.File, (x, y) => x.Include != y.Include || x.Sha256 != y.Sha256),
             Keyed("sensitive", a.Sensitive, b.Sensitive, s => s.Ref, (x, y) => x.Include != y.Include),
         };
         return sections.Where(s => !s.IsEmpty).ToList();

@@ -15,6 +15,8 @@ public sealed class Manifest
     [YamlMember(Alias = "created")] public string Created { get; set; } = "";
     [YamlMember(Alias = "device")] public Device Device { get; set; } = new();
     [YamlMember(Alias = "dotfiles")] public List<DotfileItem> Dotfiles { get; set; } = new();
+    /// User-installed fonts; the files are in the backup folder's `fonts` folder.
+    [YamlMember(Alias = "fonts")] public List<FontItem> Fonts { get; set; } = new();
     [YamlMember(Alias = "layout")] public Layout Layout { get; set; } = new();
     [YamlMember(Alias = "packages")] public List<PackageItem> Packages { get; set; } = new();
     [YamlMember(Alias = "schema")] public int Schema { get; set; } = CurrentSchema;
@@ -38,6 +40,7 @@ public sealed class Manifest
         Settings = Settings.OrderBy(s => s.Key, StringComparer.Ordinal).ToList();
         Shares = Shares.OrderBy(s => s.Url, StringComparer.Ordinal).ToList();
         Dotfiles = Dotfiles.OrderBy(d => d.Path, StringComparer.Ordinal).ToList();
+        Fonts = Fonts.OrderBy(f => f.File, StringComparer.Ordinal).ToList();
         Sensitive = Sensitive.OrderBy(s => s.Type, StringComparer.Ordinal).ThenBy(s => s.Ref, StringComparer.Ordinal).ToList();
         foreach (var p in Packages) p.Resolvers = new SortedDictionary<string, string>(p.Resolvers, StringComparer.Ordinal);
     }

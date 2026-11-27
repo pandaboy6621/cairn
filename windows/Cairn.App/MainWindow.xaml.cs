@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
         new("settings", "System settings", "", Rgb(0x64748B), "settings"),
         new("taskbar", "Taskbar", "", Rgb(0xA855F7), "taskbar pins"),
         new("config", "Config files", "", Rgb(0x6366F1), "config files"),
+        new("fonts", "Fonts", "\uE8D2", Rgb(0xEC4899), "fonts you installed"),
         new("shares", "Network drives", "", Rgb(0x06B6D4), "mapped network drives"),
         new("secrets", "Secrets", "", Rgb(0xEF4444), "saved Wi-Fi networks or SSH keys"),
     };
@@ -635,8 +636,14 @@ public sealed partial class MainWindow : Window
         foreach (var sh in m.Shares)
             backupEntries.Add(new Entry
             {
-                Category = "shares", Group = "Mapped drives", Title = SetupPlan.Unc(sh.Url), Item = sh, Glyph = "", Tint = Categories[4].Tint,
+                Category = "shares", Group = "Mapped drives", Title = SetupPlan.Unc(sh.Url), Item = sh, Glyph = "", Tint = Categories[5].Tint,
                 Detail = string.Join(" · ", new[] { sh.Drive, sh.Username is { } u ? $"as {u}" : null }.OfType<string>()),
+            });
+        foreach (var f in m.Fonts)
+            backupEntries.Add(new Entry
+            {
+                Category = "fonts", Group = "Fonts you installed", Title = f.Name, Item = f, Glyph = "\uE8D2", Tint = Categories[4].Tint,
+                Detail = $"{f.File} · {f.Size / 1024.0:0} KB",
             });
         foreach (var sr in m.Sensitive.Where(x => WindowsSecrets.Wifi(x.Ref) is not null || WindowsSecrets.SshFile(x.Ref) is not null))
         {
@@ -644,7 +651,7 @@ public sealed partial class MainWindow : Window
             backupEntries.Add(new Entry
             {
                 Category = "secrets", Group = isWifi ? "Wi-Fi networks" : "SSH keys", Title = SecretTitle(sr), Detail = "", Item = sr,
-                Glyph = isWifi ? "" : "", Tint = Categories[5].Tint,
+                Glyph = isWifi ? "" : "", Tint = Categories[6].Tint,
             });
         }
         foreach (var d in m.Dotfiles)
@@ -682,7 +689,7 @@ public sealed partial class MainWindow : Window
     static bool Included(object item) => item switch
     {
         PackageItem p => p.Include, SettingItem s => s.Include, OrderedApps t => t.Include, DotfileItem d => d.Include,
-        ShareItem sh => sh.Include, SensitiveRef r => r.Include, _ => true,
+        ShareItem sh => sh.Include, SensitiveRef r => r.Include, FontItem f => f.Include, _ => true,
     };
 
     void SelectionChanged()
@@ -790,6 +797,7 @@ public sealed partial class MainWindow : Window
                 case OrderedApps t: t.Include = on; break;
                 case DotfileItem d: d.Include = on; break;
                 case ShareItem sh: sh.Include = on; break;
+                case FontItem f: f.Include = on; break;
                 case SensitiveRef sr: sr.Include = on && Captured.Contains(sr.Ref); break;
             }
         }
@@ -938,9 +946,10 @@ public sealed partial class MainWindow : Window
         },
         SetupStep.Share sh => new Entry
         {
-            Category = "setup", Group = s.Group, Title = sh.Unc, Item = s, Glyph = "", Tint = Categories[4].Tint,
+            Category = "setup", Group = s.Group, Title = sh.Unc, Item = s, Glyph = "", Tint = Categories[5].Tint,
             Detail = string.Join(" · ", new[] { sh.Drive, sh.User is { } u ? $"as {u}" : null }.OfType<string>()),
         },
+        SetupStep.Font f => new Entry { Category = "setup", Group = s.Group, Title = f.Item.Name, Detail = f.Item.File, Item = s, Glyph = "\uE8D2", Tint = Categories[4].Tint },
         _ => new Entry { Category = "setup", Group = s.Group, Title = s.Text, Detail = "", Item = s, Glyph = "", Tint = Categories[3].Tint },
     };
 
@@ -1069,6 +1078,8 @@ public sealed partial class MainWindow : Window
     /// The backup's encrypted secrets, and the vault key if it's already unlocked here.
     void PrepareSecrets(Setup s)
     {
+        // Fonts come from the backup's shared copies; sync doesn't carry fonts.
+        s.FontsFolder = reviewingSync || chosenBackup is null ? null : FontStore.FolderNear(chosenBackup);
         if (reviewingSync)
         {
             s.Secrets = syncSecrets;

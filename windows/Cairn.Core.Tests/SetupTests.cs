@@ -23,6 +23,8 @@ sealed class FakeActions(FakeRegistry registry) : ISystemActions
         return true;
     }
     public void RestartExplorer() => ExplorerRestarts++;
+    public List<string> FontsAdded { get; } = new();
+    public void FontAdded(string path) => FontsAdded.Add(path);
 }
 
 public sealed class SetupTests : IDisposable

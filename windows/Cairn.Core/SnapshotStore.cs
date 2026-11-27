@@ -110,6 +110,7 @@ public sealed class SnapshotStore(string root)
         secrets ??= new SecretsFile();
         var date = at ?? DateTimeOffset.UtcNow;
         m.Created = Manifest.FormatDate(date);
+        var fontSources = m.Fonts.ToList(); // the round trip below drops where each was found
         m = ManifestCoder.Decode(ManifestCoder.Encode(m)); // compare what will be on disk
         var device = m.Device.Name;
         var previous = Latest(device);
@@ -125,6 +126,8 @@ public sealed class SnapshotStore(string root)
             summary = parts.Count == 0 ? "no changes" : string.Join(", ", parts);
         }
 
+        // Font files first, so a snapshot never names a font the folder lacks.
+        FontStore.Store(fontSources, Root);
         var dir = DeviceFolder(device);
         Directory.CreateDirectory(dir);
         var id = IdFor(date);
