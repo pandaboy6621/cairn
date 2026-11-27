@@ -7,13 +7,17 @@
 **Set up a new Mac in minutes.**
 
 Cairn backs up, restores, and syncs your Mac's *setup*: apps, Homebrew packages, Dock, system settings,
-app preferences, displays, and network shares. It never touches your files.
+app preferences, displays, and network shares. It never touches your files. A Windows app and a Linux
+setup kit take the same backups to a PC.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-4B44B8?logo=apple&logoColor=white)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-first-2BB5A5)
 ![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)
 ![Status](https://img.shields.io/badge/status-early%20development-F9C74F)
-![Windows & Linux](https://img.shields.io/badge/Windows%20%26%20Linux-setup%20kits-2BB5A5)
+![Windows app](https://img.shields.io/badge/Windows-app-2BB5A5?logo=windows&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-CLI%20%2B%20setup%20kit-2BB5A5?logo=linux&logoColor=white)
+
+**[⬇︎ Download the latest release](https://github.com/pandaboy6621/cairn/releases/latest)** (Mac and Windows)
 
 <br>
 
@@ -100,13 +104,33 @@ set up a Windows or Linux PC.
 | 3 | Snapshots, NAS storage, automatic backups, network shares | ✅ Done |
 | 4 | 🔐 Encrypted vault: Wi-Fi networks, SSH keys, API tokens, share passwords, VPN list | ✅ Done |
 | 5 | Full restore: Xcode tools → Homebrew → packages → App Store → settings → layout | 🚧 In progress (all steps built, Restore button in the app; VM testing) |
-| 6 | 🔄 Sync between your Macs, auto-discovered on your network | 🚧 In progress (NAS or device-to-device, pairing with codes; VM testing) |
-| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 🚧 In progress (setup kits from any backup, with git and SSH config) |
+| 6 | 🔄 Sync between your Macs, auto-discovered on your network | 🚧 In progress (NAS or device-to-device, pairing with codes, installs and removals confirmed on each Mac; VM testing) |
+| 7 | 🪟 **Windows** (winget) and 🐧 **Linux** (apt, dnf, Flatpak) | 🚧 In progress (Windows app: back up, set up, vault, sync between PCs and from Macs. Linux: `cairn` CLI and setup kits) |
+| 8 | ✍️ Signed and notarized releases | Planned (needs an Apple Developer ID; Windows code signing) |
 
 ### Windows and Linux
 
-Cairn's manifest describes what you want, not how one OS stores it. **File → Export for Windows…**
-(or Linux, or `cairn export windows|linux`) turns a backup into a setup kit for a PC:
+Cairn's manifest describes what you want, not how one OS stores it, so one backup works on all three.
+
+**Windows app** (download the `Windows-x64` zip from the [latest release](https://github.com/pandaboy6621/cairn/releases/latest),
+unzip, run `Cairn.exe`):
+
+- **Back up a PC:** winget and Microsoft Store programs, Windows settings, taskbar pins in order, and Git
+  and SSH config, into the same snapshot folders as the Mac app (one NAS share can hold both). Automatic
+  backups on a schedule.
+- **Set up a PC from any backup,** Mac or PC: tick what you want, Preview, then Set up. Homebrew
+  packages become winget packages, the Dock becomes the taskbar, matching settings carry over.
+- **Encrypted vault** that opens the Mac's: Wi-Fi passwords and SSH keys travel encrypted.
+- **Sync:** PCs sync with each other through a NAS folder or directly (paired with a code), and take
+  your Macs' changes translated for Windows. Macs leave PCs' changes alone.
+
+See [`windows/README.md`](windows/README.md) to build it. The app isn't code-signed yet, so SmartScreen
+warns the first time (More info → Run anyway).
+
+**Linux:** CairnCore and the `cairn` CLI build and run on Linux (`cairn scan` reads a Linux machine).
+
+**Setup kits, no app needed:** **File → Export for Windows…** (or Linux, or `cairn export windows|linux`)
+turns a backup into a kit for a PC:
 
 - **Windows:** double-click `Cairn Setup.cmd` for a window: tick what you want, preview it, then set
   it up. Behind it, `setup.ps1` installs packages with `winget` (skipping what's there, and leaving
@@ -148,7 +172,11 @@ you can read and diff it.
 
 ## 🚀 Getting started
 
-**You'll need:** macOS 14 or later on Apple Silicon, and Swift 5.9 or later (the Command Line Tools are
+**Download:** the [latest release](https://github.com/pandaboy6621/cairn/releases/latest) has `Cairn.app`
+for the Mac and `Cairn.exe` for Windows. Neither is signed yet: on the Mac, right-click Cairn.app and
+choose Open the first time; on Windows, choose More info → Run anyway.
+
+**Or build it yourself.** You'll need macOS 14 or later on Apple Silicon, and Swift 5.9 or later (the Command Line Tools are
 enough; you don't need Xcode). Optional, for scanning: Homebrew and `mas` (`brew install mas`).
 
 Build `Cairn.app` and put it in `~/Applications`:
