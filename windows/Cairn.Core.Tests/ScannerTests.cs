@@ -105,6 +105,18 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Theory]
+    [InlineData("TickTick version 8.2.5.0", "TickTick")]
+    [InlineData("7-Zip 26.06 (x64 edition)", "7-Zip")]
+    [InlineData("AOMEI Partition Assistant 10.12.1", "AOMEI Partition Assistant")]
+    [InlineData("Mozilla Firefox (x64 en-US)", "Mozilla Firefox")]
+    [InlineData("Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33130", "Microsoft Visual C++ 2015-2022 Redistributable")]
+    [InlineData("Python 3.12.1 (64-bit)", "Python")]
+    [InlineData("Claude", "Claude")]
+    [InlineData("Windows 11 Installation Assistant", "Windows 11 Installation Assistant")]
+    [InlineData("1.2.3", "1.2.3")]
+    public void CleansVersionsOffNames(string raw, string clean) => Assert.Equal(clean, ProgramNames.Clean(raw));
+
+    [Theory]
     [InlineData("AOMEI.PartitionAssistant", "Partition Assistant")]
     [InlineData("7zip.7zip", "7zip")]
     [InlineData("Apple.iTunes", "iTunes")]

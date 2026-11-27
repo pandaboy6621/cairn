@@ -32,6 +32,22 @@ public static partial class ProgramNames
         return names;
     }
 
+    /// A name without the version and edition winget lists it with:
+    /// "TickTick version 8.2.5.0" → "TickTick", "7-Zip 26.06 (x64 edition)" → "7-Zip".
+    public static string Clean(string name)
+    {
+        var s = Architecture().Replace(name, "");
+        s = TrailingVersion().Replace(s, "").Trim();
+        return s.Length == 0 ? name.Trim() : s;
+    }
+
+    [GeneratedRegex(@"\s*\((x64|x86|64-bit|32-bit|arm64|amd64)\b[^)]*\)", RegexOptions.IgnoreCase)]
+    private static partial Regex Architecture();
+
+    // " 10.12.1", " version 8.2.5.0", " - 14.38.33130", " v2.1 (beta)", and anything after.
+    [GeneratedRegex(@"\s+(-\s+)?(version\s+|v)?\d+(\.\d+)+\b.*$", RegexOptions.IgnoreCase)]
+    private static partial Regex TrailingVersion();
+
     static readonly HashSet<string> Noise = new(StringComparer.OrdinalIgnoreCase)
         { "stable", "beta", "setup", "app", "desktop", "x64", "x86", "arm64", "exe", "msi", "install", "installer" };
 

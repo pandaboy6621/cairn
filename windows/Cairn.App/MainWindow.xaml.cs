@@ -270,6 +270,8 @@ public sealed partial class MainWindow : Window
         public required string Category, Group, Title, Detail;
         public required object Item;
         public string? Glyph;
+        public string? WingetId;          // programs: for finding the real icon
+        public ContentPresenter? IconHost; // holds the letter tile until the icon loads
         public Color Tint;
         public List<string>? Lines; // the taskbar's apps, in order
         public CheckBox Box = null!;
@@ -354,7 +356,8 @@ public sealed partial class MainWindow : Window
         e.Box.Click += (_, _) => changed();
         row.Children.Add(e.Box);
 
-        FrameworkElement icon = e.Glyph is { } glyph ? Tile(glyph, e.Tint, 28) : LetterTile(e.Title);
+        FrameworkElement icon = e.Glyph is { } glyph ? Tile(glyph, e.Tint, 28)
+            : e.IconHost = new ContentPresenter { Width = 28, Height = 28, Content = LetterTile(e.Title) };
         icon.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(icon, 1);
         row.Children.Add(icon);
@@ -412,7 +415,25 @@ public sealed partial class MainWindow : Window
         _ => "",
     };
 
-    string ProgramName(string wingetId) => names.TryGetValue(wingetId, out var n) ? n : ProgramNames.FromId(wingetId);
+    string ProgramName(string wingetId) => names.TryGetValue(wingetId, out var n) ? ProgramNames.Clean(n) : ProgramNames.FromId(wingetId);
+
+    // MARK: Icons
+
+    Task<IconLoader> icons = Task.Run(IconLoader.Build);
+
+    /// Swaps letter tiles for programs' real icons, where Windows has one.
+    async void LoadIcons(List<Entry> entries)
+    {
+        IconLoader loader;
+        try { loader = await icons; } catch (Exception) { return; }
+        foreach (var e in entries)
+        {
+            if (e.IconHost is not { } host || e.WingetId is not { } id) continue;
+            if (loader.Find(names.GetValueOrDefault(id), e.Title) is not { } path) continue;
+            if (await loader.Load(path) is { } image)
+                host.Content = new Image { Source = image, Width = 28, Height = 28, Stretch = Stretch.Uniform };
+        }
+    }
 
     void Scan_Click(object sender, RoutedEventArgs e) => Scan();
 
@@ -431,6 +452,7 @@ public sealed partial class MainWindow : Window
             scanned = m;
             names = found;
             BuildBackupPages(m, excluded.ToHashSet());
+            LoadIcons(backupEntries);
             SetStatus(false, $"Found {m.Packages.Count} programs, {m.Settings.Count} settings and {m.Dotfiles.Count} config files."
                 + (warnings.Count > 0 ? " " + string.Join(" ", warnings) : ""));
             HomeSubtitle.Text = $"{Environment.MachineName} · scanned {DateTime.Now:t}";
@@ -452,7 +474,7 @@ public sealed partial class MainWindow : Window
             backupEntries.Add(new Entry
             {
                 Category = "programs", Group = p.Kind == PackageKind.MsStore ? "Microsoft Store apps" : "Programs from winget",
-                Title = ProgramName(p.Id), Detail = p.Id, Item = p,
+                Title = ProgramName(p.Id), Detail = p.Id, Item = p, WingetId = p.Id,
             });
         foreach (var s in m.Settings)
             backupEntries.Add(new Entry
@@ -694,6 +716,7 @@ public sealed partial class MainWindow : Window
             foreach (var x in setupEntries) x.Box.IsChecked = true;
             foreach (var g in setupGroups) RefreshGroup(g);
             SetupScroller.Content = panel;
+            LoadIcons(setupEntries);
             ByHandText.Text = plan.ByHand.Count == 0 ? "Nothing." : string.Join("\n\n", plan.ByHand.Select(b => "• " + b));
             NotCarriedText.Text = plan.NotCarried.Count == 0 ? "Nothing." : string.Join("\n\n", plan.NotCarried.Select(b => "• " + b));
             SetupLog.Text = "";
@@ -714,7 +737,7 @@ public sealed partial class MainWindow : Window
 
     Entry StepEntry(SetupStep s) => s switch
     {
-        SetupStep.Install i => new Entry { Category = "setup", Group = s.Group, Title = ProgramName(i.WingetId), Detail = i.WingetId, Item = s },
+        SetupStep.Install i => new Entry { Category = "setup", Group = s.Group, Title = ProgramName(i.WingetId), Detail = i.WingetId, Item = s, WingetId = i.WingetId },
         SetupStep.Setting => new Entry { Category = "setup", Group = s.Group, Title = s.Text, Detail = "", Item = s, Glyph = "", Tint = Categories[1].Tint },
         SetupStep.Taskbar t => new Entry
         {
@@ -793,6 +816,7 @@ public sealed partial class MainWindow : Window
             SetupLog.SelectionStart = SetupLog.Text.Length;
         })));
         Working(false);
+        icons = Task.Run(IconLoader.Build);
         PreviewButton.IsEnabled = true;
         var done = failed.Count == 0 ? "Done." : $"Didn't finish: {string.Join(", ", failed)}.";
         if (s.NeedsRestart) done += " Restart Windows to finish installing.";
