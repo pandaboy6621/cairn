@@ -157,7 +157,6 @@ public sealed partial class MainWindow : Window
         }
 
         Sidebar.Items.Add(Item(Home, false));
-        Sidebar.Items.Add(Item(SetUp, false));
         Sidebar.Items.Add(Item(SyncCategory, true));
         Sidebar.Items.Add(new ListViewItem
         {
@@ -204,14 +203,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    void Select(Category c) =>
-        Sidebar.SelectedItem = Sidebar.Items.OfType<ListViewItem>().FirstOrDefault(i => Equals(i.Tag, c));
+    /// Shows a page: through the sidebar when it's there, else directly (Set up, which
+    /// opens from Home and from Sync, like the Mac app's restore).
+    void Select(Category c)
+    {
+        var item = Sidebar.Items.OfType<ListViewItem>().FirstOrDefault(i => Equals(i.Tag, c));
+        if (item is not null) { Sidebar.SelectedItem = item; return; }
+        if (c == SetUp) cameFrom = current;
+        Sidebar.SelectedItem = null;
+        ShowPage(c);
+    }
+
+    Category cameFrom = Home;
+
+    void SetupBack_Click(object sender, RoutedEventArgs e) => Select(cameFrom == SetUp ? Home : cameFrom);
 
     Category current = Home;
 
     void Sidebar_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if ((Sidebar.SelectedItem as ListViewItem)?.Tag is not Category c) return;
+        if ((Sidebar.SelectedItem as ListViewItem)?.Tag is Category c) ShowPage(c);
+    }
+
+    void ShowPage(Category c)
+    {
         current = c;
         HomePage.Visibility = c == Home ? Visibility.Visible : Visibility.Collapsed;
         SetupPage.Visibility = c == SetUp ? Visibility.Visible : Visibility.Collapsed;
@@ -982,7 +997,7 @@ public sealed partial class MainWindow : Window
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         PrepareSecrets(setup);
         if (steps.Any(x => x is SetupStep.Secret) && setup.Key is null && (chosenBackup is not null || reviewingSync))
-            setup.Key = await AskToUnlock(reviewingSync ? Folder : VaultFolderNear(chosenBackup!),
+            setup.Key = await AskToUnlock(reviewingSync ? SyncVaultFolder : VaultFolderNear(chosenBackup!),
                 "This backup's Wi-Fi passwords and SSH keys are encrypted. Enter its vault password to set them up, or cancel to skip them.");
 
         PreviewButton.IsEnabled = ApplyButton.IsEnabled = BackupPicker.IsEnabled = false;
@@ -1045,7 +1060,7 @@ public sealed partial class MainWindow : Window
         if (reviewingSync)
         {
             s.Secrets = syncSecrets;
-            if (s.Key is null && vaultKey is not null) s.Key = vaultKey;
+            if (s.Key is null && vaultKey is not null && SyncVaultFolder == Folder) s.Key = vaultKey;
             return;
         }
         if (chosenBackup is null) return;

@@ -14,6 +14,13 @@ public sealed class AppSettings
     /// The Cairn.exe the scheduled task runs. If Cairn moves, the task is pointed at the new place.
     public string? AutoBackupExe { get; set; }
 
+    /// How this PC syncs: "folder" (a NAS or shared folder) or "direct" (with computers on
+    /// this network), like the Mac app.
+    public string SyncMode { get; set; } = "folder";
+
+    /// The folder to sync through in folder mode; null means the backup folder.
+    public string? SyncFolder { get; set; }
+
     public static string DefaultBackupFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn", "Backups");
 

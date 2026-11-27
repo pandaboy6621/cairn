@@ -144,7 +144,12 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <ContentPresenter x:Name="SetupRingHost" Grid.Column="2" VerticalAlignment="Center" />
-                            <ContentPresenter x:Name="SetupTile" VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <Button x:Name="SetupBack" Click="SetupBack_Click" ToolTipService.ToolTip="Back" Padding="8">
+                                    <FontIcon Glyph="&#xE72B;" FontSize="14" />
+                                </Button>
+                                <ContentPresenter x:Name="SetupTile" VerticalAlignment="Center" />
+                            </StackPanel>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                 <TextBlock Text="Set up this PC" Style="{StaticResource SubtitleTextBlockStyle}" />
                                 <TextBlock x:Name="SetupSubtitle" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -267,6 +272,30 @@
                                 </StackPanel>
                                 <ToggleSwitch x:Name="SyncToggle" Grid.Column="1" MinWidth="0" OnContent="On" OffContent="Off" Toggled="SyncToggle_Toggled" />
                             </Grid>
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="How computers sync" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <RadioButtons x:Name="SyncModePicker" SelectionChanged="SyncMode_SelectionChanged">
+                                        <RadioButton Content="Through a NAS or shared folder" Tag="folder" />
+                                        <RadioButton Content="Directly between computers on this network" Tag="direct" />
+                                    </RadioButtons>
+                                    <TextBlock x:Name="SyncModeSummary" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <StackPanel x:Name="SyncFolderPanel" Spacing="8">
+                                        <StackPanel>
+                                            <TextBlock Text="Sync folder" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock x:Name="SyncFolderText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="SyncFolderWarning" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Choose folder…" Click="ChooseSyncFolder_Click" />
+                                            <Button x:Name="UseBackupFolderButton" Content="Use the backup folder" Click="UseBackupFolderForSync_Click" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel x:Name="NearbyPanel" Spacing="8" Visibility="Collapsed" />
+                                </StackPanel>
+                            </Border>
 
                             <Border Style="{StaticResource CairnCard}">
                                 <StackPanel Spacing="10">

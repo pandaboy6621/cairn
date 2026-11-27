@@ -12,7 +12,91 @@ public sealed partial class MainWindow
 {
     static readonly Category SyncCategory = new("sync", "Sync", "", Rgb(0xA855F7), "");
 
-    SyncStore SyncFolder => new(Folder);
+    bool DirectMode => settings.SyncMode == "direct";
+
+    /// Where sync's files live: the chosen folder (or the backup folder) in folder mode;
+    /// a folder on this PC in direct mode, filled by exchanges with nearby computers.
+    string SyncRoot => DirectMode
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn", "Sync")
+        : settings.SyncFolder is { Length: > 0 } f ? f : Folder;
+
+    SyncStore SyncFolder => new(SyncRoot);
+
+    /// The vault for synced secrets: the sync folder's if it has one, else the backup folder's.
+    string SyncVaultFolder => VaultStore.Exists(SyncRoot) ? SyncRoot : Folder;
+
+    /// A folder only this PC can see (a local disk) can't reach other computers.
+    static bool IsLocalOnly(string path)
+    {
+        if (path.StartsWith(@"\\")) return false;
+        try { return new DriveInfo(Path.GetPathRoot(path) ?? path).DriveType != DriveType.Network; }
+        catch (Exception e) when (e is ArgumentException or IOException) { return true; }
+    }
+
+    void ShowSyncMode()
+    {
+        showingSync = true;
+        SyncModePicker.SelectedIndex = DirectMode ? 1 : 0;
+        showingSync = false;
+        SyncModeSummary.Text = DirectMode
+            ? "Computers on the same network exchange changes over an encrypted connection while Cairn is open on both. No NAS needed. Pair each one once and compare the code both show."
+            : "Each computer publishes its changes to one folder they can all reach, like a share on your NAS. Works even when they're never on at the same time. Choose the same folder on your Macs.";
+        SyncFolderPanel.Visibility = DirectMode ? Visibility.Collapsed : Visibility.Visible;
+        NearbyPanel.Visibility = DirectMode ? Visibility.Visible : Visibility.Collapsed;
+        SyncFolderText.Text = SyncRoot;
+        UseBackupFolderButton.IsEnabled = settings.SyncFolder is { Length: > 0 };
+        SyncFolderWarning.Text = !DirectMode && IsLocalOnly(SyncRoot)
+            ? "This folder is on this PC, so your other computers can't see it. Choose a share on your NAS that they use too."
+            : "";
+        SyncFolderWarning.Visibility = SyncFolderWarning.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        StartNearby();
+    }
+
+    async void SyncMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (showingSync || SyncModePicker.SelectedItem is not RadioButton { Tag: string mode } || mode == settings.SyncMode) return;
+        settings.SyncMode = mode;
+        settings.Save();
+        await SyncPlaceChanged();
+    }
+
+    async void ChooseSyncFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FolderPicker();
+        picker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        if (await picker.PickSingleFolderAsync() is not { } folder) return;
+        settings.SyncFolder = folder.Path == Folder ? null : folder.Path;
+        settings.Save();
+        await SyncPlaceChanged();
+    }
+
+    async void UseBackupFolderForSync_Click(object sender, RoutedEventArgs e)
+    {
+        settings.SyncFolder = null;
+        settings.Save();
+        await SyncPlaceChanged();
+    }
+
+    /// A new folder or mode is a different group: start fresh there with the same choices.
+    async Task SyncPlaceChanged()
+    {
+        var keep = syncConfig;
+        syncReview = null;
+        lastSyncPlan = null;
+        lastSynced = null;
+        if (keep.Enabled)
+        {
+            try
+            {
+                SyncFolder.SaveConfig(keep, Me);
+                SyncRun.SaveInfo(SyncFolder, new Device { Name = Me, Os = "windows", OsVersion = Environment.OSVersion.Version.ToString(3) }, Identity, null);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        ShowSync();
+        if (keep.Enabled) await SyncNow();
+    }
     static string Me => Environment.MachineName;
     SyncIdentity? identity;
     SyncIdentity Identity => identity ??= SyncIdentity.LoadOrCreate(SyncIdentity.DefaultPath);
@@ -44,6 +128,7 @@ public sealed partial class MainWindow
         IncludeMacsToggle.IsOn = syncConfig.IncludeMacs;
         SyncIdText.Text = Identity.DeviceId;
         showingSync = false;
+        ShowSyncMode();
         UpdateSyncControls();
         BuildDevices();
     }
@@ -76,6 +161,7 @@ public sealed partial class MainWindow
         try { SyncRun.SaveInfo(SyncFolder, new Device { Name = Me, Os = "windows", OsVersion = Environment.OSVersion.Version.ToString(3) }, Identity, null); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         UpdateSyncControls();
+        StartNearby();
         if (syncConfig.Enabled) await SyncNow();
     }
 
@@ -160,10 +246,12 @@ public sealed partial class MainWindow
     async void SyncNow_Click(object sender, RoutedEventArgs e) => await SyncNow();
 
     /// Publishes this PC's changes and works out what's coming in. Changes nothing here.
-    async Task SyncNow()
+    /// In direct mode it first swaps changes with the paired computers that are around.
+    async Task SyncNow(bool exchange = true)
     {
         syncConfig = SyncFolder.Config(Me);
         if (!syncConfig.Enabled) return;
+        if (exchange && DirectMode) await ExchangeWithPaired();
         if (scanned is null) await ScanAsync();
         if (scanned is not { } m) { SyncStatusText.Text = "Scan this PC first."; return; }
         SyncNowButton.IsEnabled = false;

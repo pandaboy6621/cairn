@@ -105,7 +105,7 @@ public sealed class SettingItem
     [YamlMember(Alias = "key")] public string Key { get; set; } = "";
     [YamlMember(Alias = "platforms")] public List<string> Platforms { get; set; } = new();
     /// bool, long, double, string, list or dictionary, as YAML gives them.
-    [YamlMember(Alias = "value")] public object? Value { get; set; }
+    [YamlMember(Alias = "value"), System.Text.Json.Serialization.JsonConverter(typeof(SettingValueJson))] public object? Value { get; set; }
 }
 
 public sealed class SettingAdapters

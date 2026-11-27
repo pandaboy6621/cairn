@@ -137,7 +137,7 @@ public sealed class SyncEntry
 {
     [YamlMember(Alias = "device")] public string Device { get; set; } = "";
     [YamlMember(Alias = "removed")] public bool Removed { get; set; }
-    [YamlMember(Alias = "updated")] public string Updated { get; set; } = "";
+    [YamlMember(Alias = "updated"), System.Text.Json.Serialization.JsonConverter(typeof(SwiftDateJson))] public string Updated { get; set; } = "";
     [YamlMember(Alias = "value", DefaultValuesHandling = DefaultValuesHandling.OmitNull)] public SyncValue? Value { get; set; }
 
     [YamlIgnore] public DateTimeOffset UpdatedAt => SyncDates.Parse(Updated);
@@ -176,8 +176,10 @@ public sealed class SyncFromMacs
 
 public sealed class SyncDeviceInfo
 {
-    [YamlMember(Alias = "deviceID", DefaultValuesHandling = DefaultValuesHandling.OmitNull)] public string? DeviceId { get; set; }
-    [YamlMember(Alias = "lastSync", DefaultValuesHandling = DefaultValuesHandling.OmitNull)] public string? LastSync { get; set; }
+    [YamlMember(Alias = "deviceID", DefaultValuesHandling = DefaultValuesHandling.OmitNull), System.Text.Json.Serialization.JsonPropertyName("deviceID")]
+    public string? DeviceId { get; set; }
+    [YamlMember(Alias = "lastSync", DefaultValuesHandling = DefaultValuesHandling.OmitNull), System.Text.Json.Serialization.JsonConverter(typeof(SwiftDateJson))]
+    public string? LastSync { get; set; }
     [YamlMember(Alias = "name")] public string Name { get; set; } = "";
     [YamlMember(Alias = "os")] public string Os { get; set; } = "";
     [YamlMember(Alias = "osVersion")] public string OsVersion { get; set; } = "";
@@ -491,6 +493,36 @@ public sealed class SyncStore(string root)
         return SyncEngine.Merge(published, SnapshotStore.FolderName(me));
     }
 
+    /// This PC's files and other PCs' to send to a paired computer (Macs' are theirs to
+    /// send: Macs ignore PCs' files anyway, and passing theirs on could lose details).
+    public SyncBundle Bundle() => new()
+    {
+        Devices = Devices().Where(d => d.Info.Os == "windows")
+            .Select(d => new SyncBundle.Device { Info = d.Info, Published = Published(d.Folder) }).ToList(),
+    };
+
+    /// Takes in what a paired computer sent: its files and those it has from other
+    /// trusted computers. Never this PC's own, and a file only replaces an older one.
+    /// Returns how many computers' files changed.
+    public int Take(SyncBundle bundle, string me, IReadOnlySet<string> trusted)
+    {
+        var changed = 0;
+        foreach (var d in bundle.Devices)
+        {
+            if (!d.Info.HasIdentity || DeviceIds.Normalize(d.Info.DeviceId!) is not { } id || id == DeviceIds.Normalize(me) || !trusted.Contains(id)) continue;
+            var have = Read<SyncPublished>(File("published", d.Info.Name));
+            var haveInfo = Info(d.Info.Name);
+            if (haveInfo?.DeviceId is { } haveId && DeviceIds.Normalize(haveId) != id) continue; // another computer with the same name
+            static DateTimeOffset Newest(SyncPublished? p) => p?.Entries.Values.Select(e => e.UpdatedAt).DefaultIfEmpty(DateTimeOffset.MinValue).Max() ?? DateTimeOffset.MinValue;
+            var newer = Newest(d.Published) > Newest(have);
+            if (have is not null && !newer && SyncDates.Parse(haveInfo?.LastSync) >= SyncDates.Parse(d.Info.LastSync)) continue;
+            Write(d.Info, File("device", d.Info.Name));
+            if (have is null || newer) Write(d.Published, File("published", d.Info.Name));
+            changed++;
+        }
+        return changed;
+    }
+
     /// Computers asking to sync: they have an ID, sync is on, and they aren't this one,
     /// trusted, or turned down.
     public List<SyncDeviceInfo> Requests(SyncTrust trust, string me) =>
@@ -506,9 +538,12 @@ public sealed class SyncIdentity
 {
     public byte[] PublicKey { get; }
     public string DeviceId { get; }
+    /// Never leaves this PC: only used in the direct-sync handshake.
+    internal byte[] PrivateKey { get; }
 
     SyncIdentity(byte[] privateKey)
     {
+        PrivateKey = privateKey;
         PublicKey = X25519.PublicKey(privateKey);
         DeviceId = DeviceIds.FromPublicKey(PublicKey);
     }
@@ -599,11 +634,17 @@ public sealed class SyncTrust
 
     public void Trust(SyncDeviceInfo info, DateTimeOffset now)
     {
-        if (!info.HasIdentity) return;
-        var id = DeviceIds.Normalize(info.DeviceId!)!;
+        if (info.HasIdentity) Trust(DeviceIds.Normalize(info.DeviceId!)!, info.Name, info.Os, info.PublicKey!, now);
+    }
+
+    /// From pairing: the ID and key the handshake proved. `os` may be unknown ("") until
+    /// its files arrive.
+    public void Trust(string id, string name, string os, string publicKey, DateTimeOffset now)
+    {
         Ignored.Remove(id);
+        var old = Devices.FirstOrDefault(d => d.Id == id);
         Devices.RemoveAll(d => d.Id == id);
-        Devices.Add(new Device { Id = id, Name = info.Name, Os = info.Os, PublicKey = info.PublicKey!, Added = SyncDates.Format(now) });
+        Devices.Add(new Device { Id = id, Name = name, Os = os.Length > 0 ? os : old?.Os ?? "", PublicKey = publicKey, Added = old?.Added ?? SyncDates.Format(now) });
         Devices.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
     }
 
