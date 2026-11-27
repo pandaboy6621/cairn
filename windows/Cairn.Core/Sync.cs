@@ -413,12 +413,50 @@ public static class MacChanges
 }
 
 /// Sync's files in the backup folder, as on the Mac. Each computer writes only its own folder.
-public sealed class SyncStore(string root)
+///
+/// A computer's folder is named after it. Two can share a name (a clone, a second
+/// "MacBook Air"), so a folder belongs to the device ID that claimed it first, and a later
+/// one with the same name gets `<name>-<short id>`, as on the Mac (SyncStore.folder(for:id:)).
+public sealed class SyncStore(string root, string? me = null)
 {
     public string Root { get; } = root;
+    /// This PC's device ID, to find its own folder when another computer has its name.
+    public string? Me { get; } = me is null ? null : DeviceIds.Normalize(me);
     string SyncFolder => Path.Combine(Root, "sync");
     string DevicesFolder => Path.Combine(SyncFolder, "devices");
-    string File(string name, string device) => Path.Combine(DevicesFolder, SnapshotStore.FolderName(device), name + ".yaml");
+    string File(string name, string device) => FileIn(Folder(device, Me), name);
+    string FileIn(string folder, string name) => Path.Combine(DevicesFolder, folder, name + ".yaml");
+    public const string OwnerFile = "owner.yaml";
+
+    /// The folder for the computer named `device` with `id`: its name, or its name plus its
+    /// short ID when a different computer with that name already has it.
+    public string Folder(string device, string? id)
+    {
+        var name = SnapshotStore.FolderName(device);
+        if (id is null || DeviceIds.Normalize(id) is not { } mine || Owner(name) is not { } owner || owner == mine) return name;
+        return name + "-" + mine[..5].ToLowerInvariant();
+    }
+
+    /// The device ID a folder belongs to: its device.yaml's, or the claim written with its
+    /// first file.
+    public string? Owner(string folder)
+    {
+        if (Read<SyncDeviceInfo>(FileIn(folder, "device"))?.DeviceId is { } id) return DeviceIds.Normalize(id);
+        try
+        {
+            var path = Path.Combine(DevicesFolder, folder, OwnerFile);
+            return System.IO.File.Exists(path) && ManifestCoder.DecodeAny<string>(System.IO.File.ReadAllText(path)) is { } claim ? DeviceIds.Normalize(claim) : null;
+        }
+        catch (Exception e) when (e is IOException or YamlDotNet.Core.YamlException) { return null; }
+    }
+
+    /// The first write to this PC's folder claims it.
+    void Claim(string device)
+    {
+        if (Me is null) return;
+        var folder = Folder(device, Me);
+        if (Owner(folder) is null) Write(Me, Path.Combine(DevicesFolder, folder, OwnerFile));
+    }
 
     T? Read<T>(string path) where T : class
     {
@@ -445,17 +483,19 @@ public sealed class SyncStore(string root)
     }
 
     public SyncConfig Config(string device) => Read<SyncConfig>(File("config", device)) ?? new SyncConfig();
-    public void SaveConfig(SyncConfig c, string device) => Write(c, File("config", device));
+    public void SaveConfig(SyncConfig c, string device) { Claim(device); Write(c, File("config", device)); }
     public SyncBase Base(string device) => Read<SyncBase>(File("base", device)) ?? new SyncBase();
-    public void SaveBase(SyncBase b, string device) => Write(b, File("base", device));
+    public void SaveBase(SyncBase b, string device) { Claim(device); Write(b, File("base", device)); }
     public SyncFromMacs FromMacs(string device) => Read<SyncFromMacs>(File("from-macs", device)) ?? new SyncFromMacs();
-    public void SaveFromMacs(SyncFromMacs f, string device) => Write(f, File("from-macs", device));
+    public void SaveFromMacs(SyncFromMacs f, string device) { Claim(device); Write(f, File("from-macs", device)); }
     public SyncDeviceInfo? Info(string device) => Read<SyncDeviceInfo>(File("device", device));
-    public void SaveInfo(SyncDeviceInfo i, string device) => Write(i, File("device", device));
+    public void SaveInfo(SyncDeviceInfo i, string device) { Claim(device); Write(i, File("device", device)); }
 
-    public SyncPublished Published(string device)
+    public SyncPublished Published(string device) => PublishedIn(Folder(device, Me));
+
+    SyncPublished PublishedIn(string folder)
     {
-        var p = Read<SyncPublished>(File("published", device)) ?? new SyncPublished();
+        var p = Read<SyncPublished>(FileIn(folder, "published")) ?? new SyncPublished();
         foreach (var e in p.Entries.Values) if (e.Value?.Setting is { } s) s.Value = ManifestCoder.Canonical(s.Value);
         return p;
     }
@@ -463,6 +503,7 @@ public sealed class SyncStore(string root)
     public void Publish(Dictionary<string, SyncEntry> entries, string device)
     {
         if (entries.Count == 0) return;
+        Claim(device);
         var file = Published(device);
         foreach (var (id, e) in entries) file.Entries[id] = e;
         Write(file, File("published", device));
@@ -488,9 +529,9 @@ public sealed class SyncStore(string root)
         {
             if ((info.Os == "macos") != macs || info.Os is not ("macos" or "windows")) continue;
             if (!info.HasIdentity || !trusted.Contains(DeviceIds.Normalize(info.DeviceId!)!)) continue;
-            published[folder] = Published(folder);
+            published[folder] = PublishedIn(folder);
         }
-        return SyncEngine.Merge(published, SnapshotStore.FolderName(me));
+        return SyncEngine.Merge(published, Folder(me, Me));
     }
 
     /// This PC's files and other PCs' to send to a paired computer (Macs' are theirs to
@@ -498,7 +539,7 @@ public sealed class SyncStore(string root)
     public SyncBundle Bundle() => new()
     {
         Devices = Devices().Where(d => d.Info.Os == "windows")
-            .Select(d => new SyncBundle.Device { Info = d.Info, Published = Published(d.Folder) }).ToList(),
+            .Select(d => new SyncBundle.Device { Info = d.Info, Published = PublishedIn(d.Folder) }).ToList(),
     };
 
     /// Takes in what a paired computer sent: its files and those it has from other
@@ -510,14 +551,15 @@ public sealed class SyncStore(string root)
         foreach (var d in bundle.Devices)
         {
             if (!d.Info.HasIdentity || DeviceIds.Normalize(d.Info.DeviceId!) is not { } id || id == DeviceIds.Normalize(me) || !trusted.Contains(id)) continue;
-            var have = Read<SyncPublished>(File("published", d.Info.Name));
-            var haveInfo = Info(d.Info.Name);
+            var folder = Folder(d.Info.Name, id);
+            var have = Read<SyncPublished>(FileIn(folder, "published"));
+            var haveInfo = Read<SyncDeviceInfo>(FileIn(folder, "device"));
             if (haveInfo?.DeviceId is { } haveId && DeviceIds.Normalize(haveId) != id) continue; // another computer with the same name
             static DateTimeOffset Newest(SyncPublished? p) => p?.Entries.Values.Select(e => e.UpdatedAt).DefaultIfEmpty(DateTimeOffset.MinValue).Max() ?? DateTimeOffset.MinValue;
             var newer = Newest(d.Published) > Newest(have);
             if (have is not null && !newer && SyncDates.Parse(haveInfo?.LastSync) >= SyncDates.Parse(d.Info.LastSync)) continue;
-            Write(d.Info, File("device", d.Info.Name));
-            if (have is null || newer) Write(d.Published, File("published", d.Info.Name));
+            Write(d.Info, FileIn(folder, "device"));
+            if (have is null || newer) Write(d.Published, FileIn(folder, "published"));
             changed++;
         }
         return changed;

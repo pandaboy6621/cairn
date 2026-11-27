@@ -156,6 +156,48 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public void TwoPCsWithOneNameKeepTheirOwnFolders()
+    {
+        var first = SyncIdentity.LoadOrCreate(Path.Combine(root, "first"));
+        var clone = SyncIdentity.LoadOrCreate(Path.Combine(root, "clone"));
+        var a = new SyncStore(root, first.DeviceId);
+        var b = new SyncStore(root, clone.DeviceId);
+        var at = DateTimeOffset.Parse("2027-02-01T10:00:00Z");
+        a.Publish(new() { ["package:winget:Git.Git"] = SyncEntry.Make(new SyncValue { Package = new PackageItem { Id = "Git.Git", Kind = "winget" } }, at, "pc") }, "pc");
+        b.Publish(new() { ["package:winget:Example.Tool"] = SyncEntry.Make(new SyncValue { Package = new PackageItem { Id = "Example.Tool", Kind = "winget" } }, at, "pc") }, "pc");
+        foreach (var (store, id) in new[] { (a, first), (b, clone) })
+        {
+            SyncRun.SaveInfo(store, new Device { Name = "pc", Os = "windows" }, id, at);
+            store.SaveConfig(new SyncConfig { Enabled = true }, "pc");
+        }
+
+        Assert.Equal("pc", a.Folder("pc", first.DeviceId));
+        Assert.Equal("pc-" + clone.DeviceId[..5].ToLowerInvariant(), b.Folder("pc", clone.DeviceId));
+        Assert.Equal(new[] { "package:winget:Git.Git" }, a.Published("pc").Entries.Keys);
+        Assert.Equal(new[] { "package:winget:Example.Tool" }, b.Published("pc").Entries.Keys);
+        Assert.Equal(first.DeviceId, a.Owner("pc"));
+        var trust = new SyncTrust();
+        foreach (var r in a.Requests(new SyncTrust(), first.DeviceId)) trust.Trust(r, at);
+        Assert.Equal(new[] { "package:winget:Example.Tool" }, a.Group("pc", trust.Ids, macs: false).Keys); // sees the clone, not itself
+    }
+
+    [Fact]
+    public void HonoursAMacsFolderClaim()
+    {
+        // The Mac writes owner.yaml (a bare device ID) with a folder's first file.
+        var mac = DeviceIds.FromPublicKey(new byte[32]);
+        var dir = Path.Combine(root, "sync", "devices", "studio");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, SyncStore.OwnerFile), mac + "\n");
+        var pc = SyncIdentity.LoadOrCreate(Path.Combine(root, "pc"));
+        var store = new SyncStore(root, pc.DeviceId);
+        Assert.Equal(mac, store.Owner("studio"));
+        store.SaveConfig(new SyncConfig { Enabled = true }, "studio"); // a PC also named "studio"
+        Assert.Equal(mac + "\n", File.ReadAllText(Path.Combine(dir, SyncStore.OwnerFile))); // the claim is untouched
+        Assert.True(File.Exists(Path.Combine(root, "sync", "devices", "studio-" + pc.DeviceId[..5].ToLowerInvariant(), "config.yaml")));
+    }
+
+    [Fact]
     public void ConfigScopesAndDefaults()
     {
         var c = new SyncConfig();

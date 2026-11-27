@@ -32,11 +32,12 @@ public partial class App : Application
             var m = Scanner.ScanThisPC(out _);
             var result = AutoBackup.Run(m, new SnapshotStore(folder));
             // Sync on: publish this PC's changes too. Incoming ones wait for the user.
-            var sync = new SyncStore(folder);
+            var identity = SyncIdentity.LoadOrCreate(SyncIdentity.DefaultPath);
+            var sync = new SyncStore(folder, identity.DeviceId);
             if (sync.Config(m.Device.Name).Enabled)
             {
                 var secrets = VaultStore.ReadSecrets(VaultStore.DeviceSecretsPath(folder, m.Device.Name));
-                var plan = SyncRun.Publish(sync, m, secrets, SyncIdentity.LoadOrCreate(SyncIdentity.DefaultPath), SyncTrust.Load(SyncTrust.DefaultPath), DateTimeOffset.UtcNow);
+                var plan = SyncRun.Publish(sync, m, secrets, identity, SyncTrust.Load(SyncTrust.DefaultPath), DateTimeOffset.UtcNow);
                 if (plan.Outgoing.Count > 0) result += $" Synced {plan.Outgoing.Count} change{(plan.Outgoing.Count == 1 ? "" : "s")}.";
             }
             return result;

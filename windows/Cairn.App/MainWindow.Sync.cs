@@ -20,7 +20,7 @@ public sealed partial class MainWindow
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn", "Sync")
         : settings.SyncFolder is { Length: > 0 } f ? f : Folder;
 
-    SyncStore SyncFolder => new(SyncRoot);
+    SyncStore SyncFolder => new(SyncRoot, Identity.DeviceId);
 
     /// The vault for synced secrets: the sync folder's if it has one, else the backup folder's.
     string SyncVaultFolder => VaultStore.Exists(SyncRoot) ? SyncRoot : Folder;
