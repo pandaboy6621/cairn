@@ -140,6 +140,10 @@ public struct RestorePlan: Equatable, Sendable {
         let haveFonts = Dictionary(current.fonts.map { ($0.file.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
         var fonts: [FontItem] = []
         for f in backup.fonts where f.include {
+            guard f.isSafe else {
+                steps.append(.pending(category: "fonts", id: f.file, reason: "its name in the backup isn't a plain font file name, so restore skips it"))
+                continue
+            }
             guard let have = haveFonts[f.file.lowercased()] else { fonts.append(f); continue }
             if have.sha256 != f.sha256 {
                 steps.append(.pending(category: "fonts", id: f.file,

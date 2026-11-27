@@ -27,7 +27,7 @@ public struct LaunchServicesDefaultApps: DefaultAppsSystem {
         let found: CFString?
         switch handler.kind {
         case .urlScheme:
-            found = LSCopyDefaultHandlerForURLScheme(handler.target as CFString)?.takeRetainedValue()
+            found = Self.ls.handler(forScheme: handler.target as CFString)
         case .contentType:
             found = LSCopyDefaultRoleHandlerForContentType(handler.target as CFString, Self.role(handler.role))?.takeRetainedValue()
         }
@@ -65,11 +65,14 @@ public struct LaunchServicesDefaultApps: DefaultAppsSystem {
 }
 
 private protocol LaunchServicesCalls: Sendable {
+    func handler(forScheme scheme: CFString) -> CFString?
     func setScheme(_ scheme: CFString, _ bundle: CFString) -> OSStatus
     func setContentType(_ type: CFString, _ role: LSRolesMask, _ bundle: CFString) -> OSStatus
 }
 
 private struct DeprecatedLaunchServices: LaunchServicesCalls {
+    @available(macOS, deprecated: 10.15)
+    func handler(forScheme scheme: CFString) -> CFString? { LSCopyDefaultHandlerForURLScheme(scheme)?.takeRetainedValue() }
     @available(macOS, deprecated: 12.0)
     func setScheme(_ scheme: CFString, _ bundle: CFString) -> OSStatus { LSSetDefaultHandlerForURLScheme(scheme, bundle) }
     @available(macOS, deprecated: 12.0)

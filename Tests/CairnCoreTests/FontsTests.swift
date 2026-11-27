@@ -5,6 +5,9 @@ import Testing
 /// Fonts: listed in the manifest, kept once in the backup's `fonts` folder, installed
 /// on restore without replacing a font that's already there. Fonts here are made-up bytes.
 @Suite struct FontsTests {
+    /// A made-up 64-character hash.
+    static func hash(_ c: Character) -> String { String(repeating: c, count: 64) }
+
     static func temp(_ name: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("cairn-fonts-\(name)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -71,9 +74,9 @@ import Testing
     }
 
     @Test func restoreAddsMissingFontsAndLeavesOthersAlone() throws {
-        let a = FontItem(file: "A.ttf", name: "A", sha256: "aa", size: 1)
-        let b = FontItem(file: "B.otf", name: "B", sha256: "bb", size: 1)
-        let c = FontItem(file: "C.ttf", name: "C", sha256: "cc", size: 1)
+        let a = FontItem(file: "A.ttf", name: "A", sha256: Self.hash("a"), size: 1)
+        let b = FontItem(file: "B.otf", name: "B", sha256: Self.hash("b"), size: 1)
+        let c = FontItem(file: "C.ttf", name: "C", sha256: Self.hash("c"), size: 1)
         var backup = Samples.manifest, current = Samples.manifest
         backup.fonts = [a, b, c]
         current.fonts = [a, FontItem(file: "b.otf", name: "B", sha256: "other", size: 1)]
@@ -84,19 +87,31 @@ import Testing
         #expect(plan.render().contains("+ C (C.ttf)"))
     }
 
+    @Test func restoreSkipsFontNamesThatAreNotPlainFileNames() {
+        let bad = ["../../.zshrc", "Sub/Font.ttf", ".hidden.ttf", "C:evil.ttf", "notes.txt"]
+        var backup = Samples.manifest
+        backup.fonts = bad.map { FontItem(file: $0, name: $0, sha256: Self.hash("a"), size: 1) }
+            + [FontItem(file: "Good.ttf", name: "Good", sha256: "../../etc/passwd", size: 1)]
+        #expect(backup.fonts.allSatisfy { !$0.isSafe })
+        #expect(FontItem(file: "Good-Regular.ttf", name: "Good", sha256: Self.hash("a"), size: 1).isSafe)
+        let plan = RestorePlan.make(backup: backup, current: Samples.manifest)
+        #expect(!plan.changes.contains { if case .fonts = $0 { return true } else { return false } })
+        #expect(plan.pending.count == 6)
+    }
+
     #if os(macOS)
     @Test func installsIntoTheFontsFolderWithoutReplacing() throws {
         let backupFonts = try Self.temp("backup")
         let destination = try Self.temp("dest")
-        let new = FontItem(file: "New.ttf", name: "New", sha256: "11", size: 3)
-        let there = FontItem(file: "There.ttf", name: "There", sha256: "22", size: 3)
+        let new = FontItem(file: "New.ttf", name: "New", sha256: Self.hash("1"), size: 3)
+        let there = FontItem(file: "There.ttf", name: "There", sha256: Self.hash("2"), size: 3)
         try Data("new".utf8).write(to: backupFonts.appendingPathComponent(new.storedName))
         try Data("bkp".utf8).write(to: backupFonts.appendingPathComponent(there.storedName))
         try Data("own".utf8).write(to: destination.appendingPathComponent("There.ttf"))
         var restorer = MacRestorer(runner: FixtureRunner(policy: .restore))
         restorer.fontsFolder = backupFonts
         restorer.fontsDestination = destination.path
-        let missing = FontItem(file: "Gone.ttf", name: "Gone", sha256: "33", size: 1)
+        let missing = FontItem(file: "Gone.ttf", name: "Gone", sha256: Self.hash("3"), size: 1)
         let report = restorer.apply(RestorePlan(steps: [.fonts([new, there, missing])]))
         #expect(try String(contentsOf: destination.appendingPathComponent("New.ttf"), encoding: .utf8) == "new")
         #expect(try String(contentsOf: destination.appendingPathComponent("There.ttf"), encoding: .utf8) == "own")
@@ -107,8 +122,8 @@ import Testing
 
     @Test func checklistListsFonts() throws {
         var m = Samples.manifest
-        m.fonts = [FontItem(file: "Test-Regular.ttf", name: "Test Regular", sha256: "aa", size: 2048, source: "/x"),
-                   FontItem(file: "Old.dfont", name: "Old", sha256: "bb", size: 10)]
+        m.fonts = [FontItem(file: "Test-Regular.ttf", name: "Test Regular", sha256: Self.hash("a"), size: 2048, source: "/x"),
+                   FontItem(file: "Old.dfont", name: "Old", sha256: Self.hash("b"), size: 10)]
         var list = Checklist(manifest: m)
         #expect(ChecklistCategory.fonts.isScanned)
         #expect(list.count(in: .fonts).total == 2)

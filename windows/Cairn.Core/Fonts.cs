@@ -23,6 +23,14 @@ public sealed class FontItem
     [YamlIgnore] public string StoredName => Extension.Length == 0 ? Sha256 : $"{Sha256}.{Extension}";
     /// TrueType and OpenType work everywhere; Mac-only formats (`.dfont`) don't.
     [YamlIgnore] public bool IsPortable => Extension is "ttf" or "otf" or "ttc" or "otc";
+    /// Whether the file name and hash are safe to use as paths: a plain font file name
+    /// (no folders, no `..`, not hidden) and a 64-character lowercase hex hash. A backup on
+    /// a shared NAS could be edited, so setup skips anything else.
+    [YamlIgnore] public bool IsSafe =>
+        File.Length is > 0 and <= 255 && !File.StartsWith('.') && File.IndexOfAny(new[] { '/', '\\', ':', '\0' }) < 0
+        && File.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
+        && Extension is "ttf" or "otf" or "ttc" or "otc" or "dfont"
+        && Sha256.Length == 64 && Sha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 /// The backup folder's shared font copies.

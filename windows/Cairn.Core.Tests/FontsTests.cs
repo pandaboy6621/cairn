@@ -61,7 +61,7 @@ public sealed class FontsTests : IDisposable
             - file: Old.dfont
               include: true
               name: Old
-              sha256: bb
+              sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
               size: 10
             """;
         var m = ManifestCoder.Decode(mac);
@@ -108,9 +108,9 @@ public sealed class FontsTests : IDisposable
     {
         var backupFonts = Path.Combine(dir, "backup", "fonts");
         Directory.CreateDirectory(backupFonts);
-        var add = new FontItem { File = "New.ttf", Name = "New", Sha256 = "11" };
-        var have = new FontItem { File = "Have.ttf", Name = "Have", Sha256 = "22" };
-        var gone = new FontItem { File = "Gone.ttf", Name = "Gone", Sha256 = "33" };
+        var add = new FontItem { File = "New.ttf", Name = "New", Sha256 = new string('1', 64) };
+        var have = new FontItem { File = "Have.ttf", Name = "Have", Sha256 = new string('2', 64) };
+        var gone = new FontItem { File = "Gone.ttf", Name = "Gone", Sha256 = new string('3', 64) };
         File.WriteAllText(Path.Combine(backupFonts, add.StoredName), "new");
         File.WriteAllText(Path.Combine(backupFonts, have.StoredName), "backup copy");
         PutFont("Have.ttf", "mine");
@@ -129,4 +129,21 @@ public sealed class FontsTests : IDisposable
         Assert.Equal(new[] { installed }, actions.FontsAdded);
         Assert.Equal(new[] { gone.Name + " (Gone.ttf)" }, failed);
     }
+
+    [Fact]
+    public void SkipsFontNamesThatAreNotPlainFileNames()
+    {
+        var hash = new string('a', 64);
+        var m = new Manifest { Device = new Device { Name = "test-mac", Os = "macos" } };
+        foreach (var name in new[] { @"..\..\evil.ttf", "../../evil.ttf", "Sub/Font.ttf", ".hidden.ttf", "C:evil.ttf", "notes.txt" })
+            m.Fonts.Add(new FontItem { File = name, Name = name, Sha256 = hash });
+        m.Fonts.Add(new FontItem { File = "Good.ttf", Name = "Good", Sha256 = @"..\..\x" });
+        Assert.All(m.Fonts, f => Assert.False(f.IsSafe));
+        Assert.True(new FontItem { File = "Good-Regular.ttf", Sha256 = hash }.IsSafe);
+        var plan = SetupPlan.Make(m);
+        Assert.Empty(plan.Steps.OfType<SetupStep.Font>());
+        Assert.Contains(plan.NotCarried, n => n.Contains("7 fonts with a name that isn't a plain font file name"));
+        Assert.DoesNotContain(plan.NotCarried, n => n.Contains("Mac-only font"));
+    }
+
 }

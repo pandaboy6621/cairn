@@ -132,6 +132,7 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
 
     StepStatus CheckFont(SetupStep.Font f)
     {
+        if (!f.Item.IsSafe) return new(f, StepState.NotFound, "not a plain font file name");
         if (File.Exists(FontTarget(f))) return new(f, StepState.Done, "already installed");
         return FontSource(f) is { } src && File.Exists(src) ? new(f, StepState.ToDo, "would install") : new(f, StepState.NotFound, "not in the backup");
     }
@@ -141,6 +142,7 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
     /// A font that's already there is never replaced.
     bool InstallFont(SetupStep.Font f, Action<string> log)
     {
+        if (!f.Item.IsSafe) { log($"{f.Item.File}: not a plain font file name"); return false; }
         var target = FontTarget(f);
         if (File.Exists(target)) { log($"{f.Item.Name}: already installed"); return true; }
         if (FontSource(f) is not { } src || !File.Exists(src)) { log($"{f.Item.Name}: not in the backup"); return false; }

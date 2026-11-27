@@ -35,6 +35,17 @@ public struct FontItem: Codable, Equatable, Sendable {
         a.file == b.file && a.name == b.name && a.sha256 == b.sha256 && a.size == b.size && a.include == b.include
     }
 
+    /// Whether the manifest's file name and hash are safe to use as paths: a plain
+    /// font file name (no folders, no `..`, not hidden) and a 64-character hex hash.
+    /// A backup on a shared NAS could be edited, so restore skips anything else.
+    public var isSafe: Bool {
+        let ext = (file as NSString).pathExtension.lowercased()
+        return !file.isEmpty && file.count <= 255 && !file.hasPrefix(".")
+            && !file.contains("/") && !file.contains("\\") && !file.contains(":") && !file.contains("\0")
+            && FontsScannerExtensions.all.contains(ext)
+            && sha256.count == 64 && sha256.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+    }
+
     /// The copy's name in the backup's `fonts` folder.
     public var storedName: String {
         let ext = (file as NSString).pathExtension.lowercased()
@@ -46,6 +57,11 @@ public struct FontItem: Codable, Equatable, Sendable {
     public var isPortable: Bool {
         ["ttf", "otf", "ttc", "otc"].contains((file as NSString).pathExtension.lowercased())
     }
+}
+
+/// Font file extensions Cairn backs up.
+enum FontsScannerExtensions {
+    static let all: Set<String> = ["ttf", "otf", "ttc", "otc", "dfont"]
 }
 
 /// The backup folder's shared font copies.

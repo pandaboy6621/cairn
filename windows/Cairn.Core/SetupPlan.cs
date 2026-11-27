@@ -88,8 +88,10 @@ public sealed class SetupPlan
             if (f.Redacted > 0) plan.ByHand.Add($"{f.Path}: {f.Redacted} line{(f.Redacted == 1 ? "" : "s")} that looked like secrets were never backed up (look for \"# cairn: removed\")");
         }
 
-        foreach (var f in backup.Fonts.Where(f => f.Include && f.IsPortable)) plan.Steps.Add(new SetupStep.Font(f));
-        var macFonts = backup.Fonts.Where(f => f.Include && !f.IsPortable).Select(f => f.File).OrderBy(x => x).ToList();
+        foreach (var f in backup.Fonts.Where(f => f.Include && f.IsPortable && f.IsSafe)) plan.Steps.Add(new SetupStep.Font(f));
+        var unsafeFonts = backup.Fonts.Where(f => f.Include && !f.IsSafe).Select(f => f.File).OrderBy(x => x).ToList();
+        if (unsafeFonts.Count > 0) plan.NotCarried.Add($"{unsafeFonts.Count} font{(unsafeFonts.Count == 1 ? "" : "s")} with a name that isn't a plain font file name, skipped: {string.Join(", ", unsafeFonts)}");
+        var macFonts = backup.Fonts.Where(f => f.Include && f.IsSafe && !f.IsPortable).Select(f => f.File).OrderBy(x => x).ToList();
         if (macFonts.Count > 0) plan.NotCarried.Add($"{macFonts.Count} Mac-only font{(macFonts.Count == 1 ? "" : "s")}: {string.Join(", ", macFonts)}");
 
         foreach (var share in backup.Shares.Where(s => s.Include))

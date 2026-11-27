@@ -9,7 +9,7 @@ public struct FontsScanner: SetupScanning {
     public var folder: String
     /// Fonts bigger than this are left out (a warning says so).
     public static let maxBytes = 50 * 1024 * 1024
-    static let extensions: Set<String> = ["ttf", "otf", "ttc", "otc", "dfont"]
+    static let extensions = FontsScannerExtensions.all
 
     public init(home: String = NSHomeDirectory()) {
         folder = home + "/Library/Fonts"

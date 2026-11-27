@@ -648,6 +648,7 @@ extension MacRestorer {
         let fm = FileManager.default
         var done: [String] = [], notes: [String] = []
         for f in fonts {
+            guard f.isSafe else { notes.append("\(f.file): not a plain font file name"); continue }
             let source = folder.appendingPathComponent(f.storedName)
             let target = URL(fileURLWithPath: fontsDestination).appendingPathComponent(f.file)
             guard fm.fileExists(atPath: source.path) else { notes.append("\(f.file): not in the backup"); continue }
