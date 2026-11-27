@@ -272,6 +272,7 @@ final class RestoreRun {
         case .appStore: return "App Store apps"
         case .setting, .defaultApps: return "Writing settings"
         case .dotfiles: return "Developer config"
+        case .fonts: return "Fonts"
         case .dock, .wallpaper: return "Dock and wallpaper"
         case .wifi, .secrets: return "Restoring secrets"
         case .pending: return nil
@@ -291,6 +292,7 @@ final class RestoreRun {
         case .wifi(let n): return "Saving \(n.count) Wi-Fi network\(n.count == 1 ? "" : "s")"
         case .secrets(let s): return "Restoring \(s.count) secret\(s.count == 1 ? "" : "s")"
         case .dotfiles(let f): return "Writing \(f.count) config file\(f.count == 1 ? "" : "s")"
+        case .fonts(let f): return "Installing \(f.count) font\(f.count == 1 ? "" : "s")"
         case .pending(let category, let id, _): return "Noting \(category) \(id) for later"
         }
     }
@@ -307,7 +309,8 @@ final class RestoreRun {
         var groups: [String] = []
         for g in steps.compactMap(group(of:)) where !groups.contains(g) { groups.append(g) }
         progress(.planned(groups))
-        let restorer = MacRestorer(runner: ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout, control: control))
+        var restorer = MacRestorer(runner: ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout, control: control))
+        restorer.fontsFolder = FontStore.folder(near: url)
         let report = restorer.apply(plan, backup: url.standardized.path, secrets: secrets, unlock: {
             if let knownKey { return knownKey }
             if skipSecrets { throw VaultError.skippedByUser }

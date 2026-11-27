@@ -70,7 +70,8 @@ struct Restore: ParsableCommand {
                                     savedSecrets: Set(secrets.secrets.keys),
                                     environment: MacRestorer.detectEnvironment())
         print(plan.render(), terminator: "")
-        let restorer = MacRestorer()
+        var restorer = MacRestorer()
+        restorer.fontsFolder = FontStore.folder(near: source)
         for case .dock(let layout, _) in plan.changes {
             let missing = restorer.dockTiles(layout.apps).missing.filter { $0.hasPrefix("/") }
             if !missing.isEmpty {

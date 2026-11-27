@@ -135,6 +135,8 @@ public struct SnapshotStore: Sendable {
     /// device (`device` and `created` don't count as changes). `force` writes anyway.
     public func save(_ manifest: Manifest, excluded: [String], trigger: SnapshotInfo.Trigger,
                      at date: Date = Date(), force: Bool = false, secrets: SecretsFile = SecretsFile()) throws -> SaveResult {
+        // Where the scan found each font: the round trip below drops it.
+        let fontSources = manifest.fonts
         // Compare what will be on disk: a YAML round trip can change a value's
         // type (1.0 → 1) without changing the setup.
         let manifest = try ManifestCoder.decode(ManifestCoder.encode(manifest))
@@ -151,6 +153,8 @@ public struct SnapshotStore: Sendable {
         }
 
         let fm = FileManager.default
+        // Font files first, so a snapshot never names a font the folder lacks.
+        try FontStore.store(fontSources, in: root)
         let dir = deviceURL(device)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         var id = Self.id(for: date)

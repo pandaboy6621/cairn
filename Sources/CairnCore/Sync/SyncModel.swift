@@ -339,6 +339,7 @@ public enum SyncItems {
         if id.hasPrefix("layout:") { return .lookAndLayout }
         if id.hasPrefix("share:") { return .networkShares }
         if id.hasPrefix("dotfile:") { return .developer }
+        if id.hasPrefix("font:") { return .fonts }
         if id.hasPrefix("sensitive:") { return .sensitive }
         return .systemSettings
     }

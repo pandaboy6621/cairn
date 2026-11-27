@@ -8,7 +8,7 @@ public struct ScanReport: Sendable {
 /// Runs the selected scanners and assembles a manifest. Read-only.
 public struct SetupScanner: Sendable {
     public enum Source: String, CaseIterable, Sendable {
-        case brew, mas, dock, displays, defaults, shares, dotfiles, wifi, ssh, tokens, vpn
+        case brew, mas, dock, displays, defaults, shares, dotfiles, fonts, wifi, ssh, tokens, vpn
         // Linux
         case apt, flatpak, snap, gnome
 
@@ -36,6 +36,7 @@ public struct SetupScanner: Sendable {
             case .defaults: return "preferences"
             case .shares: return "network shares"
             case .dotfiles: return "shell, git and SSH config"
+            case .fonts: return "fonts"
             case .wifi: return "Wi-Fi networks"
             case .ssh: return "SSH keys"
             case .tokens: return "credential files"
@@ -111,6 +112,7 @@ public struct SetupScanner: Sendable {
                 manifest.settings += found.settings
                 manifest.shares += found.shares
                 manifest.dotfiles += found.dotfiles
+                manifest.fonts += found.fonts
                 manifest.sensitive += found.sensitive
                 if let dock = found.dock { manifest.layout.dock = dock }
                 if let displays = found.displays { manifest.layout.displays = displays }
@@ -136,6 +138,7 @@ public struct SetupScanner: Sendable {
         case .defaults: return DefaultsScanner(extraDomains: extraDomains, isSandboxed: isSandboxed)
         case .shares: return NetworkSharesScanner()
         case .dotfiles: return DotfilesScanner(home: home)
+        case .fonts: return FontsScanner(home: home)
         case .wifi: return WiFiScanner()
         case .ssh: return SSHKeyScanner(home: home)
         case .tokens: return CredentialFilesScanner(home: home)

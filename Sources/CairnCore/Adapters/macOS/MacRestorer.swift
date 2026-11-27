@@ -17,6 +17,10 @@ public struct MacRestorer: Sendable {
     public var sharePasswords: SharePasswordSystem
     public var credentialFiles: CredentialFileSystem
     public var dotfiles: DotfileFileSystem
+    /// The backup's font copies (`FontStore.folder(near:)`); nil leaves fonts for later.
+    public var fontsFolder: URL?
+    /// Where fonts are installed: this user's fonts folder.
+    public var fontsDestination: String = NSHomeDirectory() + "/Library/Fonts"
 
     public init(
         runner: CommandRunner = ProcessRunner(policy: .restore, stallTimeout: MacRestorer.stallTimeout),
@@ -342,6 +346,14 @@ public struct MacRestorer: Sendable {
                     : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
                 report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .dotfiles(done)))
 
+            case .fonts(let fonts):
+                progress?("Installing \(fonts.count) font\(fonts.count == 1 ? "" : "s")")
+                let (done, notes) = installFonts(fonts)
+                let outcome: RestoreReport.Outcome = done.isEmpty
+                    ? (notes.isEmpty ? .skipped("nothing to install") : .failed(notes.joined(separator: "; ")))
+                    : notes.isEmpty ? .applied : .partial(notes.joined(separator: "; "))
+                report.entries.append(.init(step: step, outcome: outcome, written: done.isEmpty ? nil : .fonts(done)))
+
             case .wallpaper(let w, _):
                 let (applied, notes) = applyWallpaper(w)
                 let outcome: RestoreReport.Outcome = applied.isEmpty ? .skipped(notes.joined(separator: "; "))
@@ -626,6 +638,29 @@ enum PlistXML {
         s.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+}
+extension MacRestorer {
+    /// Copies each font from the backup into the user's fonts folder. A font already
+    /// there is never replaced. macOS picks new files up on its own.
+    func installFonts(_ fonts: [FontItem]) -> (done: [String], notes: [String]) {
+        guard let folder = fontsFolder else { return ([], ["the backup's fonts folder wasn't found"]) }
+        let fm = FileManager.default
+        var done: [String] = [], notes: [String] = []
+        for f in fonts {
+            let source = folder.appendingPathComponent(f.storedName)
+            let target = URL(fileURLWithPath: fontsDestination).appendingPathComponent(f.file)
+            guard fm.fileExists(atPath: source.path) else { notes.append("\(f.file): not in the backup"); continue }
+            guard !fm.fileExists(atPath: target.path) else { continue }
+            do {
+                try fm.createDirectory(atPath: fontsDestination, withIntermediateDirectories: true)
+                try fm.copyItem(at: source, to: target)
+                done.append(f.file)
+            } catch {
+                notes.append("\(f.file): \(error.localizedDescription)")
+            }
+        }
+        return (done, notes)
     }
 }
 #endif

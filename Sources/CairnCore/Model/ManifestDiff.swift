@@ -61,6 +61,12 @@ public struct ManifestDiff: Equatable, Sendable {
                 if a.include != b.include { parts.append(Change(id: "\(a.path) include", from: "\(a.include)", to: "\(b.include)")) }
                 return parts
             },
+            keyed("fonts", old.fonts, new.fonts, id: \.file) { a, b in
+                var parts: [Change] = []
+                if a.sha256 != b.sha256 { parts.append(Change(id: a.file, from: "\(a.size) bytes", to: "\(b.size) bytes")) }
+                if a.include != b.include { parts.append(Change(id: "\(a.file) include", from: "\(a.include)", to: "\(b.include)")) }
+                return parts
+            },
             keyed("sensitive", old.sensitive, new.sensitive, id: \.ref) { a, b in
                 a.include != b.include ? [Change(id: "\(a.ref) include", from: "\(a.include)", to: "\(b.include)")] : []
             },

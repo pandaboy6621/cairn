@@ -50,6 +50,7 @@ public struct BackupComparison: Equatable, Sendable {
             + (m.layout.wallpaper?.include == true ? 1 : 0)
             + m.shares.filter(\.include).count
             + m.dotfiles.filter(\.include).count
+            + m.fonts.filter(\.include).count
     }
 
     /// Change ids look like "dock.autohide" or "dock.autohide include"; one item may

@@ -11,6 +11,7 @@ public struct ScanContribution: Sendable {
     public var wallpaper: WallpaperLayout?
     public var shares: [ShareItem] = []
     public var dotfiles: [DotfileItem] = []
+    public var fonts: [FontItem] = []
     public var sensitive: [SensitiveRef] = []
     public var warnings: [String] = []
 

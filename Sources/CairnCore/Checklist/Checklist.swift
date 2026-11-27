@@ -38,7 +38,7 @@ public enum ChecklistCategory: String, CaseIterable, Identifiable, Sendable {
     /// Categories with no scanner yet. They show as "not scanned yet".
     public var isScanned: Bool {
         switch self {
-        case .fonts, .sensitive: return false
+        case .sensitive: return false
         default: return true
         }
     }
@@ -197,6 +197,7 @@ public struct Checklist: Sendable {
         }
         m.shares = source.shares.filter { checked.contains(Self.id(share: $0)) }.map { var s = $0; s.include = true; return s }
         m.dotfiles = source.dotfiles.filter { checked.contains(Self.id(dotfile: $0)) }.map { var d = $0; d.include = true; return d }
+        m.fonts = source.fonts.filter { checked.contains(Self.id(font: $0)) }.map { var f = $0; f.include = true; return f }
         m.sensitive = sensitiveUnlocked ? source.sensitive.filter { checked.contains(Self.id(sensitive: $0)) } : []
         return m
     }
@@ -213,6 +214,7 @@ public struct Checklist: Sendable {
     public static func ref(sensitiveID id: String) -> String { String(id.dropFirst("sensitive:".count)) }
     static func id(share s: ShareItem) -> String { "share:\(s.url)" }
     static func id(dotfile d: DotfileItem) -> String { "dotfile:\(d.path)" }
+    static func id(font f: FontItem) -> String { "font:\(f.file)" }
 
     static func buildItems(_ m: Manifest) -> [ChecklistItem] {
         var out: [ChecklistItem] = []
@@ -271,6 +273,11 @@ public struct Checklist: Sendable {
                 out.append(ChecklistItem(id: id(dotfile: d), category: .developer, group: kind.title,
                                          title: d.path, detail: detail, isChecked: d.include))
             }
+        }
+        for f in m.fonts {
+            out.append(ChecklistItem(id: id(font: f), category: .fonts, group: f.isPortable ? "Fonts" : "Mac-only fonts",
+                                     title: f.name, detail: "\(f.file) · \(ByteCountFormatter.string(fromByteCount: Int64(f.size), countStyle: .file))",
+                                     isChecked: f.include))
         }
         for s in m.sensitive {
             let groups = [WiFiPasswords.type: "Wi-Fi networks", SSHKeyScanner.type: "SSH keys",

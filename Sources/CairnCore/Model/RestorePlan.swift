@@ -17,6 +17,8 @@ public struct RestorePlan: Equatable, Sendable {
         case setting(SettingItem, current: SettingValue?)
         /// Write shell, git and SSH config files (keeping any file replaced).
         case dotfiles([DotfileChange])
+        /// Install fonts this machine doesn't have (never replaces one it has).
+        case fonts([FontItem])
         /// Rebuild the Dock in this order.
         case dock(DockLayout, current: [String])
         /// Set these default apps (only the ones this machine doesn't have yet).
@@ -38,6 +40,7 @@ public struct RestorePlan: Equatable, Sendable {
             case .setting(let s, _): return s.key
             case .dock: return "dock"
             case .dotfiles: return "developer config"
+            case .fonts: return "fonts"
             case .defaultApps: return "default apps"
             case .wallpaper: return "wallpaper"
             case .wifi: return "wi-fi"
@@ -134,6 +137,17 @@ public struct RestorePlan: Equatable, Sendable {
         }
         if !files.isEmpty { steps.append(.dotfiles(files)) }
 
+        let haveFonts = Dictionary(current.fonts.map { ($0.file.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        var fonts: [FontItem] = []
+        for f in backup.fonts where f.include {
+            guard let have = haveFonts[f.file.lowercased()] else { fonts.append(f); continue }
+            if have.sha256 != f.sha256 {
+                steps.append(.pending(category: "fonts", id: f.file,
+                                      reason: "a different version is already installed, so restore leaves it alone"))
+            }
+        }
+        if !fonts.isEmpty { steps.append(.fonts(fonts)) }
+
         if let dock = backup.layout.dock, dock.include, dock.apps != (current.layout.dock?.apps ?? []) {
             steps.append(.dock(dock, current: current.layout.dock?.apps ?? []))
         }
@@ -215,6 +229,9 @@ public struct RestorePlan: Equatable, Sendable {
             case .secrets(let items):
                 out += "secrets (\(items.count) to restore)\n"
                 for i in items { out += "  + \(i.summary)\n" }
+            case .fonts(let fonts):
+                out += "fonts (\(fonts.count) to install)\n"
+                for f in fonts { out += "  + \(f.name) (\(f.file))\n" }
             case .dotfiles(let files):
                 out += "developer config (\(files.count) file\(files.count == 1 ? "" : "s") to write)\n"
                 for f in files { out += "  \(f.current == nil ? "+" : "~") \(f.summary)\n" }
@@ -296,6 +313,8 @@ public struct RestoreReport: Equatable, Sendable {
         case secrets([String])
         /// Config files written, by path (`~/.zshrc`).
         case dotfiles([String])
+        /// Font files installed, by file name.
+        case fonts([String])
         /// Package uids that `brew` reported installed.
         case packages([String])
         /// App Store ids that `mas` reported installed.
@@ -403,6 +422,12 @@ public enum RestoreVerification {
                 return wrong.isEmpty
                     ? Result(id: e.step.id, status: .verified, detail: "\(paths.count) file\(paths.count == 1 ? "" : "s") match the backup" + note)
                     : Result(id: e.step.id, status: .mismatch, detail: "differ after restore: " + wrong.joined(separator: ", "))
+            case .fonts(let files)?:
+                let got = Set(after.fonts.map { $0.file.lowercased() })
+                let missing = files.filter { !got.contains($0.lowercased()) }
+                return missing.isEmpty
+                    ? Result(id: e.step.id, status: .verified, detail: "\(files.count) installed" + note)
+                    : Result(id: e.step.id, status: .mismatch, detail: "not found after install: " + missing.prefix(5).joined(separator: ", "))
             case .appStore(let want)?:
                 let got = Set(after.apps.map(\.id))
                 let missing = want.filter { !got.contains($0) }
