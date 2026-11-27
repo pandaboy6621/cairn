@@ -29,8 +29,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\Cairn.ico" />
-    <Content Include="Assets\Cairn.png" />
+    <!-- Copied next to Cairn.exe: the window loads them from there. -->
+    <Content Include="Assets\Cairn.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Cairn.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
