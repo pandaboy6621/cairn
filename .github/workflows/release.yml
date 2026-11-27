@@ -86,6 +86,8 @@ jobs:
 
           **Windows:** unzip the Windows-x64 zip anywhere and run Cairn.exe. It isn't code-signed yet, so
           SmartScreen warns the first time (More info, then Run anyway). It's added a few minutes after the Mac app.
+          If there's no Run anyway button, run this in PowerShell (pointed at the folder you unzipped into) and try again:
+          \`Get-ChildItem -Recurse "\$env:USERPROFILE\\Apps\\Cairn" | Unblock-File\`
           EOF
           # The Windows build may have created the release first.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

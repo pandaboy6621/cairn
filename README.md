@@ -113,7 +113,7 @@ set up a Windows or Linux PC.
 Cairn's manifest describes what you want, not how one OS stores it, so one backup works on all three.
 
 **Windows app** (download the `Windows-x64` zip from the [latest release](https://github.com/pandaboy6621/cairn/releases/latest),
-unzip, run `Cairn.exe`):
+unzip, run `Cairn.exe`; see [Getting started](#-getting-started) if Windows blocks it):
 
 - **Back up a PC:** winget and Microsoft Store programs, Windows settings, taskbar pins in order, and Git
   and SSH config, into the same snapshot folders as the Mac app (one NAS share can hold both). Automatic
@@ -189,8 +189,22 @@ for the Mac and `Cairn.exe` for Windows. Neither is signed yet, so each system w
    This only removes the "downloaded from the internet" mark from Cairn.app; it doesn't change any
    system security setting. Do this only for a copy you downloaded from this repository's releases.
 
-**Windows install:** unzip `Cairn-<version>-Windows-x64.zip` anywhere and run `Cairn.exe`. When
-SmartScreen warns, choose More info → Run anyway.
+**Windows install:**
+
+1. Unzip `Cairn-<version>-Windows-x64.zip` into a folder of its own, such as `C:\Users\<you>\Apps\Cairn`.
+   Use Extract All, not the zip's preview window (Cairn.exe needs the files next to it).
+2. Run `Cairn.exe`. When SmartScreen says "Windows protected your PC", choose More info → Run anyway.
+3. If there's no Run anyway button, or Windows blocks the app's files, clear the downloaded-file mark
+   in PowerShell and run it again. Point it at the folder you unzipped into:
+
+   ```powershell
+   Get-ChildItem -Recurse "$env:USERPROFILE\Apps\Cairn" | Unblock-File
+   ```
+
+   Or unblock the zip before unzipping it: right-click it → Properties → tick Unblock → OK. Like the
+   Mac command, this only removes the "downloaded from the internet" mark from Cairn's files. If Smart
+   App Control is on, it blocks unsigned apps outright and there's no way past it for one app; Cairn
+   will run there once releases are code-signed.
 
 **Or build it yourself.** You'll need macOS 14 or later on Apple Silicon, and Swift 5.9 or later (the Command Line Tools are
 enough; you don't need Xcode). Optional, for scanning: Homebrew and `mas` (`brew install mas`).
