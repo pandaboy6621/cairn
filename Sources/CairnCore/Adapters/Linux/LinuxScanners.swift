@@ -15,7 +15,7 @@ import Foundation
 /// - anything another installed package depends on (restoring that one brings it back),
 /// - installer extras by name: language packs, dictionaries, input methods, boot
 ///   loader, kernel, Ubuntu's metapackages, and bare libraries.
-/// What apt's history shows the user asked for (`apt install x`) is kept anyway,
+/// What apt's history shows the user asked for (`sudo apt install x`) is kept anyway,
 /// unless every Debian system has it.
 public struct AptScanner: SetupScanning {
     /// Where Ubuntu's (pre-26.04) installer recorded the packages it put on the disk.
@@ -121,14 +121,19 @@ public struct AptScanner: SetupScanning {
         })
     }
 
-    /// Package names the user asked apt for: `Commandline: apt install x y`.
-    /// Local files (`./app.deb`) and options are skipped.
+    /// Package names the user asked apt for: `Commandline: apt install x y` in an
+    /// entry with a `Requested-By:` line. The installer's own runs have none, and
+    /// reinstalls (fixing something) aren't asking for it. Local files
+    /// (`./app.deb`) and options are skipped.
     static func requested(history: String) -> Set<String> {
         var found = Set<String>()
-        for line in history.split(whereSeparator: \.isNewline) where line.hasPrefix("Commandline:") {
+        for entry in history.components(separatedBy: "\n\n") {
+            let lines = entry.split(whereSeparator: \.isNewline)
+            guard lines.contains(where: { $0.hasPrefix("Requested-By:") }),
+                  let line = lines.first(where: { $0.hasPrefix("Commandline:") }) else { continue }
             let words = line.dropFirst("Commandline:".count).split(separator: " ").map(String.init)
             guard let program = words.first, ["apt", "apt-get", "aptitude"].contains(program.split(separator: "/").last.map(String.init) ?? ""),
-                  let verb = words.firstIndex(where: { $0 == "install" || $0 == "reinstall" }) else { continue }
+                  let verb = words.firstIndex(of: "install"), !words.contains("--reinstall") else { continue }
             for w in words[(verb + 1)...] where !w.hasPrefix("-") && !w.contains("/") && !w.hasSuffix(".deb") {
                 let name = w.split(separator: "=").first.map(String.init) ?? w
                 if let n = names(name).first { found.insert(n) }

@@ -70,7 +70,7 @@ import Testing
         End-Date: 2026-11-15  09:00:10
 
         """.write(to: logs.appendingPathComponent("history.log"), atomically: true, encoding: .utf8)
-        try "Commandline: apt-get install curl\n".write(to: logs.appendingPathComponent("history.log.1"), atomically: true, encoding: .utf8)
+        try "Start-Date: 2026-11-16\nCommandline: apt-get install curl\nRequested-By: someone (1000)\n".write(to: logs.appendingPathComponent("history.log.1"), atomically: true, encoding: .utf8)
 
         let r = FixtureRunner()
         r.stub(Command("apt-mark", ["showmanual"]), stdout: manual + "\n")
@@ -90,14 +90,38 @@ import Testing
 
     @Test func aptHistoryAndDependencyParsing() {
         #expect(AptScanner.dependencyNames(", libc6 (>= 2.34), perl:any | perl-base, ") == ["libc6", "perl", "perl-base"])
+        // Trimmed from a real 26.04 history.log: the installer's runs have no Requested-By.
         let history = """
+        Start-Date: 2026-11-14  04:20:00
+        Commandline: apt-get --yes -oDebug::pkgDepCache::AutoInstall=yes install accountsservice language-pack-en mythes-en-us
+        Install: mythes-en-us:amd64 (2.1-8)
+        End-Date: 2026-11-14  04:21:00
+
+        Start-Date: 2026-11-14  04:22:00
+        Commandline: apt-get --quiet --assume-yes install efibootmgr grub-efi-amd64 shim-signed
+        End-Date: 2026-11-14  04:23:00
+
+        Start-Date: 2026-11-15  10:00:00
+        Commandline: apt install --reinstall shim-signed grub-efi-amd64-signed
+        Requested-By: someone (1000)
+        End-Date: 2026-11-15  10:01:00
+
+        Start-Date: 2026-11-15  11:00:00
         Commandline: /usr/bin/apt-get -o Dpkg::Options::=--force-confdef install --no-install-recommends gh=2.45.0 hugo:amd64
+        Requested-By: someone (1000)
+
+        Start-Date: 2026-11-15  12:00:00
         Commandline: apt install ./claude-desktop_1.0_amd64.deb
+        Requested-By: someone (1000)
+
+        Start-Date: 2026-11-15  13:00:00
         Commandline: apt remove nano
-        Commandline: packagekit role='install-packages'
-        Commandline: apt reinstall git
+        Requested-By: someone (1000)
+
+        Start-Date: 2026-11-15  14:00:00
+        Commandline: aptdaemon role='role-commit-packages' sender=':1.139'
         """
-        #expect(AptScanner.requested(history: history) == ["gh", "hugo", "git"])
+        #expect(AptScanner.requested(history: history) == ["gh", "hugo"])
         #expect(AptScanner.isRotatedHistory("history.log.1") && AptScanner.isRotatedHistory("history.log.12.gz"))
         #expect(!AptScanner.isRotatedHistory("history.log") && !AptScanner.isRotatedHistory("history.log.gz") && !AptScanner.isRotatedHistory("term.log.1.gz"))
     }
