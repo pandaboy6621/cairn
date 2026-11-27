@@ -70,6 +70,22 @@ public struct CommandPolicy: Sendable {
         }
     }
 
+    /// Updating Cairn itself: unzipping a downloaded update and checking its code
+    /// signature, both inside a temporary folder. Nothing else.
+    public static let update = CommandPolicy { command in
+        let args = command.arguments
+        guard !args.contains(where: { $0.contains("..") }) else { return false }
+        switch command.program {
+        case "ditto":
+            return args.count == 4 && args[0] == "-x" && args[1] == "-k"
+                && args[2].hasSuffix("/update.zip") && args[3].hasSuffix("/unpacked")
+        case "codesign":
+            return args.count == 4 && args[0...2] == ["--verify", "--deep", "--strict"] && args[3].hasSuffix("/unpacked/Cairn.app")
+        default:
+            return false
+        }
+    }
+
     /// Restore: everything `readOnly` allows, plus writing one preference key at a
     /// time, restarting the few processes that cache preferences, and loading or
     /// unloading Cairn's own LaunchAgents.

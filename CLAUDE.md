@@ -91,6 +91,9 @@ Each category expands into individual items with their own checkboxes, a search 
 - Installs and removals: a watcher (Applications folders, Homebrew Cellar/Caskroom) triggers a quick brew/mas rescan. An app or package installed or removed here is held (not published) until the user picks "add to/remove from other Macs" or "this Mac only". Other Macs get a notification per change when they check in (every 15 min, or on the watcher) and install or uninstall only after the user taps it. Uninstall goes only through `CommandPolicy.uninstall` (`brew uninstall --formula|--cask <name>`) or moves an App Store app (with a receipt) to the Trash.
 - NAS-hosted manifest as source of truth, plus optional direct device-to-device over Bonjour with an encrypted channel. Last-write-wins per key with a conflict view.
 
+## Updates
+- Cairn updates itself from this repo's GitHub Releases (`Updates`, `AppUpdater`, `UpdateController`; `cairn update [--apply]`). An update installs only if the zip matches the release's `.sha256`, unpacks to `Cairn.app` with bundle id `dev.cairn.Cairn` and the release's version, and passes `codesign --verify --deep --strict`; the swap is atomic. Only an app inside an Applications folder updates itself; dev builds only check. Unzip and verify go through `CommandPolicy.update`.
+
 ## Milestones
 1. Manifest schema + `cairn scan` and `cairn diff` for Homebrew, MAS, Dock, `defaults` (read-only, unencrypted).
 2. SwiftUI checklist UI over a live scan, export unencrypted manifest.

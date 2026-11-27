@@ -7,6 +7,8 @@ struct SettingsView: View {
         TabView {
             BackupSettings()
                 .tabItem { Label("Backups", systemImage: "externaldrive") }
+            UpdateSettings()
+                .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
         }
         .frame(width: 520)
     }
@@ -111,5 +113,53 @@ private struct BackupSettings: View {
         guard model.findBackupsAutomatically else { return "Restore only uses files you choose or drop on it." }
         let n = model.foundBackups.count
         return n == 0 ? "No backups in this folder yet." : "\(n) backup\(n == 1 ? "" : "s") found. The newest is offered on the Restore card."
+    }
+}
+
+private struct UpdateSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var updates = model.updates
+        Form {
+            Section {
+                LabeledContent("Version", value: Cairn.version)
+                HStack {
+                    Text(status).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(updates.menuTitle.replacingOccurrences(of: "…", with: "")) { updates.menuAction() }
+                        .disabled(updates.phase == .checking || isInstalling)
+                }
+            }
+            Section {
+                Toggle("Check for updates automatically", isOn: $updates.checksAutomatically)
+                Toggle("Install updates automatically", isOn: $updates.installsAutomatically)
+                    .disabled(!updates.checksAutomatically || !updates.canInstall)
+            } footer: {
+                Text(updates.canInstall
+                     ? "Cairn checks GitHub a minute after it opens and every 6 hours. An update is installed only if it matches its checksum and code signature, never while a restore, scan or backup is running. If no window is open Cairn restarts on its own; otherwise it asks."
+                     : "This copy of Cairn isn't in an Applications folder, so it only checks. Move it to Applications to install updates automatically.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var isInstalling: Bool {
+        if case .installing = model.updates.phase { return true } else { return false }
+    }
+
+    private var status: String {
+        switch model.updates.phase {
+        case .checking: return "Checking…"
+        case .upToDate: return "Cairn is up to date."
+        case .available(let u): return "Cairn \(u.version) is available."
+        case .installing(let u): return "Installing Cairn \(u.version)…"
+        case .ready(let u): return "Cairn \(u.version) is installed. Restart to finish."
+        case .failed(let why): return why
+        case .idle:
+            guard let last = model.updates.lastChecked else { return "Not checked yet." }
+            return "Last checked " + last.formatted(.relative(presentation: .named)) + "."
+        }
     }
 }

@@ -82,6 +82,9 @@ jobs:
           If macOS says it's damaged, or Privacy & Security shows no Open Anyway button, run this in Terminal and open it again:
           \`xattr -dr com.apple.quarantine /Applications/Cairn.app\`
 
+          From 0.2.3 on, Cairn updates itself (Settings → Updates), and **Cairn → Check for Updates…** checks on demand.
+          Coming from 0.2.2 or earlier, install this one by hand once.
+
           The \`cairn\` command-line tool is inside the app: \`Cairn.app/Contents/MacOS/cairn\`.
 
           **Windows:** unzip the Windows-x64 zip anywhere and run Cairn.exe. It isn't code-signed yet, so

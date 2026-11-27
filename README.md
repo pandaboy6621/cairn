@@ -96,6 +96,11 @@ set up a Windows or Linux PC.
 - **Native Mac app.** Home dashboard, a checklist for every category with search and item counts,
   presets (Minimal, Developer, Everything), drag and drop, and a Settings window.
 - **Full CLI.** Everything the app does, `cairn` does too, so it's scriptable.
+- **Keeps itself up to date.** Cairn checks GitHub Releases a minute after it opens and every 6 hours,
+  and installs a new version on its own (Settings → Updates turns either off). An update is installed
+  only if it matches the release's checksum, bundle id, version and code signature, and never during a
+  restore, scan or backup. **Cairn → Check for Updates…** (also in the menu bar icon) checks on demand.
+  The Windows app does the same.
 - **Safe by design.** Scanning is read-only and runs through a command allowlist. Secrets are never logged.
 
 ## 🗺️ Roadmap
@@ -288,6 +293,9 @@ cairn sync resolve <id> --share          # an app installed/removed here: ask th
 cairn sync resolve <id> --uninstall      # an app another Mac removed: shows the removal; --apply runs it
 cairn sync devices
 cairn export windows --out ~/Desktop    # or linux: a setup kit for a PC (from the newest snapshot)
+
+cairn update            # is there a newer Cairn? (dry run)
+cairn update --apply    # download, check, and install it over this Cairn.app
 ```
 
 While developing, use `swift run cairn …` and `swift run CairnApp`.

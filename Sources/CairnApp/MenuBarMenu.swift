@@ -34,6 +34,8 @@ struct MenuBarMenu: View {
             openWindow(id: CairnMainApp.mainWindowID)
             NSApp.activate(ignoringOtherApps: true)
         }
+        Button(model.updates.menuTitle) { model.updates.menuAction() }
+            .disabled(model.updates.phase == .checking)
         SettingsLink { Text("Settings…") }
             .keyboardShortcut(",")
 

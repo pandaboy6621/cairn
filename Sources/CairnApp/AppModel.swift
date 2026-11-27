@@ -103,6 +103,8 @@ final class AppModel {
     let loginItem = LoginItem()
     /// Sync between this Mac and others using the same backup folder.
     let sync = SyncFlow()
+    /// Cairn's own updates.
+    let updates = UpdateController()
 
     /// The app's single model, for the debug snapshot hook.
     static weak var current: AppModel?
@@ -134,7 +136,12 @@ final class AppModel {
         #else
         let snapshotting = false
         #endif
+        updates.isBusy = { [weak self] in
+            guard let self else { return false }
+            return self.restore.isRunning || self.isScanning || self.isQuickBackingUp
+        }
         if !snapshotting {
+            updates.start()
             softwareWatcher = SoftwareWatcher { [weak self] in self?.checkIn() }
             softwareWatcher?.start()
         }

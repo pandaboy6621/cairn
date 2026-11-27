@@ -28,6 +28,10 @@ struct CairnMainApp: App {
         }
         .defaultSize(width: 1120, height: 740)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button(model.updates.menuTitle) { model.updates.menuAction() }
+                    .disabled(model.updates.phase == .checking)
+            }
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .newItem) {
                 Button("Scan Again") { model.scan() }

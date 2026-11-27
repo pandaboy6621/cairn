@@ -4,7 +4,8 @@ import Foundation
 
 #if os(macOS)
 private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, AutoBackup.self, Restore.self,
-                                                Dock.self, Displays.self, VaultCommand.self, SyncCommand.self, Export.self]
+                                                Dock.self, Displays.self, VaultCommand.self, SyncCommand.self, Export.self,
+                                                UpdateCommand.self]
 #else
 // Linux: backing up and exporting. Restore, sync, the vault and the Mac layout commands are macOS-only for now.
 private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, Export.self]
