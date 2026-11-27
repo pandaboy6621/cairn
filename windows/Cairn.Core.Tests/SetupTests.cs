@@ -50,7 +50,8 @@ public sealed class SetupTests : IDisposable
         var share = Assert.Single(plan.Steps.OfType<SetupStep.Share>());
         Assert.Equal((@"\\nas.example.test\media", (string?)null, "test"), (share.Unc, share.Drive, share.User));
         Assert.Contains(plan.ByHand, b => b.Contains("Microsoft Word"));
-        Assert.Contains(plan.NotCarried, n => n.StartsWith("Secrets"));
+        var wifi = Assert.Single(plan.Steps.OfType<SetupStep.Secret>());
+        Assert.Equal(("wifi", "Example", "Wi-Fi password for Example"), (wifi.Type, wifi.Name, wifi.Text));
         Assert.DoesNotContain(plan.Steps, s => s.Text.Contains("obscure-tool")); // unticked in the backup
     }
 
@@ -117,7 +118,8 @@ public sealed class SetupTests : IDisposable
         File.WriteAllText(Path.Combine(home, ".ssh", "config"), "Host pc-only\n  HostName 192.0.2.1\n");
 
         var log = new List<string>();
-        var failed = setup.Apply(SetupPlan.Make(Mac()).Steps, log.Add);
+        // Secrets have their own test; this backup has none saved (Preview would untick it).
+        var failed = setup.Apply(SetupPlan.Make(Mac()).Steps.Where(s => s is not SetupStep.Secret).ToList(), log.Add);
 
         Assert.Empty(failed);
         Assert.Equal(3, runner.Ran.Count(r => r.StartsWith("winget install"))); // Firefox twice, Git once
@@ -152,6 +154,43 @@ public sealed class SetupTests : IDisposable
         Assert.Empty(failed);
         Assert.Equal(new[] { @"\\nas.example.test\photos P: test" }, actions.Mapped);
         Assert.Equal(new[] { missing.Text }, setup.Skipped); // the user closed Windows' password box
+    }
+
+    [Fact]
+    public void SetsUpSecretsFromTheVault()
+    {
+        string? profile = null;
+        var (setup, runner, _, _) = Make((exe, args) =>
+        {
+            if (exe == "netsh" && args[1] == "add") profile = File.ReadAllText(args[3]["filename=".Length..]);
+            return new CommandResult(0, exe == "netsh" && args[1] == "show" ? "User profiles\n-------------\n    All User Profile     : Already Here\n" : "", "");
+        });
+        var (_, _, key) = Vault.Create("test password only", iterations: 1_000);
+        var wifi = new SetupStep.Secret("wifi", "vault://wifi/Test Network", "Test Network");
+        var here = new SetupStep.Secret("wifi", "vault://wifi/Already Here", "Already Here");
+        var ssh = new SetupStep.Secret("ssh", "vault://ssh/id_test", "id_test");
+        var missing = new SetupStep.Secret("ssh", "vault://ssh/id_missing", "id_missing");
+        foreach (var (r, v) in new[] { (wifi.Ref, "test wifi pass & more"), (here.Ref, "x"), (ssh.Ref, "TEST KEY") })
+            setup.Secrets.Secrets[r] = key.Seal(System.Text.Encoding.UTF8.GetBytes(v), r);
+
+        Assert.Equal("would add (needs the vault password)", setup.Check(wifi).Note);
+        Assert.Equal(StepState.Done, setup.Check(here).State);
+        Assert.Equal(StepState.NotFound, setup.Check(missing).State);
+        Assert.Equal(new[] { wifi.Text, ssh.Text }, setup.Apply(new SetupStep[] { wifi, ssh }, _ => { })); // still locked
+
+        setup.Key = key;
+        var log = new List<string>();
+        Assert.Empty(setup.Apply(new SetupStep[] { wifi, here, ssh }, log.Add));
+        Assert.Contains("<keyMaterial>test wifi pass &amp; more</keyMaterial>", profile);
+        Assert.Contains("<name>Test Network</name>", profile);
+        Assert.Equal("TEST KEY", File.ReadAllText(Path.Combine(home, ".ssh", "id_test")));
+        Assert.Empty(Directory.GetDirectories(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn"), "scratch-*"));
+        Assert.DoesNotContain(log, l => l.Contains("test wifi pass") || l.Contains("TEST KEY")); // never logged
+        // An existing key is never replaced.
+        File.WriteAllText(Path.Combine(home, ".ssh", "id_test"), "MINE");
+        Assert.Empty(setup.Apply(new SetupStep[] { ssh }, _ => { }));
+        Assert.Equal("MINE", File.ReadAllText(Path.Combine(home, ".ssh", "id_test")));
+        key.Dispose();
     }
 
     [Fact]

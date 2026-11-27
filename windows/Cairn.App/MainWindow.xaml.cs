@@ -29,6 +29,7 @@ public sealed partial class MainWindow : Window
         new("taskbar", "Taskbar", "", Rgb(0xA855F7), "taskbar pins"),
         new("config", "Config files", "", Rgb(0x6366F1), "config files"),
         new("shares", "Network drives", "", Rgb(0x06B6D4), "mapped network drives"),
+        new("secrets", "Secrets", "", Rgb(0xEF4444), "saved Wi-Fi networks or SSH keys"),
     };
 
     static Color Rgb(uint hex, byte alpha = 255) => Color.FromArgb(alpha, (byte)(hex >> 16), (byte)(hex >> 8), (byte)hex);
@@ -598,6 +599,15 @@ public sealed partial class MainWindow : Window
                 Category = "shares", Group = "Mapped drives", Title = SetupPlan.Unc(sh.Url), Item = sh, Glyph = "", Tint = Categories[4].Tint,
                 Detail = string.Join(" · ", new[] { sh.Drive, sh.Username is { } u ? $"as {u}" : null }.OfType<string>()),
             });
+        foreach (var sr in m.Sensitive.Where(x => WindowsSecrets.Wifi(x.Ref) is not null || WindowsSecrets.SshFile(x.Ref) is not null))
+        {
+            var isWifi = WindowsSecrets.Wifi(sr.Ref) is not null;
+            backupEntries.Add(new Entry
+            {
+                Category = "secrets", Group = isWifi ? "Wi-Fi networks" : "SSH keys", Title = SecretTitle(sr), Detail = "", Item = sr,
+                Glyph = isWifi ? "" : "", Tint = Categories[5].Tint,
+            });
+        }
         foreach (var d in m.Dotfiles)
             backupEntries.Add(new Entry
             {
@@ -606,20 +616,35 @@ public sealed partial class MainWindow : Window
                 Detail = d.Redacted > 0 ? $"{d.Redacted} secret-looking line{(d.Redacted == 1 ? "" : "s")} left out" : "",
             });
 
+        // Last time's choices, the same way automatic backups apply them.
+        LoadDeviceSecrets();
+        BackupChoices.Apply(m, excluded, Captured);
         pages.Clear();
         foreach (var c in Categories)
         {
             var entries = backupEntries.Where(e => e.Category == c.Key).ToList();
             var panel = new StackPanel();
-            var groups = BuildGroups(panel, entries, SelectionChanged);
-            foreach (var e in entries) e.Box.IsChecked = !excluded.Contains(ItemId(e.Item));
+            var groups = BuildGroups(panel, entries, () => { if (c.Key == "secrets") BuildSecretsBar(); SelectionChanged(); });
+            foreach (var e in entries) e.Box.IsChecked = Included(e.Item);
             foreach (var g in groups) RefreshGroup(g);
+            if (c.Key == "secrets")
+            {
+                (secretsBar.Parent as Panel)?.Children.Remove(secretsBar);
+                panel.Children.Insert(0, secretsBar);
+            }
             pages[c.Key] = (panel, groups, entries);
         }
+        RefreshSecretRows();
         SelectionSummary.Visibility = Visibility.Visible;
         SelectionChanged();
         if (CategoryPage.Visibility == Visibility.Visible) ShowCategory(current);
     }
+
+    static bool Included(object item) => item switch
+    {
+        PackageItem p => p.Include, SettingItem s => s.Include, OrderedApps t => t.Include, DotfileItem d => d.Include,
+        ShareItem sh => sh.Include, SensitiveRef r => r.Include, _ => true,
+    };
 
     void SelectionChanged()
     {
@@ -648,7 +673,7 @@ public sealed partial class MainWindow : Window
         CategoryTitle.Text = c.Title;
         CategoryHeader.Background = Gradient(WithAlpha(c.Tint, 30), WithAlpha(c.Tint, 5));
         SearchBox.Text = "";
-        if (pages.TryGetValue(c.Key, out var page) && page.Entries.Count > 0)
+        if (pages.TryGetValue(c.Key, out var page) && (page.Entries.Count > 0 || c.Key == "secrets"))
         {
             foreach (var e in page.Entries) e.Row.Visibility = Visibility.Visible;
             foreach (var g in page.Groups) g.Card.Visibility = Visibility.Visible;
@@ -723,9 +748,15 @@ public sealed partial class MainWindow : Window
                 case SettingItem s: s.Include = on; break;
                 case OrderedApps t: t.Include = on; break;
                 case DotfileItem d: d.Include = on; break;
+                case ShareItem sh: sh.Include = on; break;
+                case SensitiveRef sr: sr.Include = on && Captured.Contains(sr.Ref); break;
             }
         }
-        var excluded = backupEntries.Where(r => r.Box.IsChecked != true).Select(r => ItemId(r.Item)).ToList();
+        // A secret that was never saved isn't "unticked by the user": leave it out of the record.
+        var captured = Captured;
+        var excluded = backupEntries.Where(r => r.Box.IsChecked != true && (r.Item is not SensitiveRef sr || captured.Contains(sr.Ref)))
+            .Select(r => ItemId(r.Item)).ToList();
+        var secrets = SnapshotStore.SecretsFor(scanned, deviceSecrets);
         var folder = Folder;
         var m = scanned;
         BackupButton.IsEnabled = backupNow.IsEnabled = false;
@@ -733,7 +764,7 @@ public sealed partial class MainWindow : Window
         SetStatus(false, "Saving…");
         try
         {
-            var result = await Task.Run(() => new SnapshotStore(folder).Save(m, excluded, "manual"));
+            var result = await Task.Run(() => new SnapshotStore(folder).Save(m, excluded, "manual", secrets: secrets));
             SetStatus(false, result is SaveResult.Saved s
                 ? $"Backed up: {s.Snapshot.Info.Summary}."
                 : "Nothing changed since the last backup, so nothing new was saved.");
@@ -748,8 +779,9 @@ public sealed partial class MainWindow : Window
 
     // MARK: Set up
 
-    sealed record BackupChoice(string Label, Func<Manifest> Load)
+    sealed record BackupChoice(string Label, string Path)
     {
+        public Manifest Load() => ManifestCoder.Read(Path);
         public override string ToString() => Label;
     }
 
@@ -768,7 +800,7 @@ public sealed partial class MainWindow : Window
             {
                 var snap = s;
                 var when = s.Info.CreatedDate.ToLocalTime().ToString("d MMM yyyy, HH:mm");
-                BackupPicker.Items.Add(new BackupChoice($"{s.Info.Device}, {when} ({s.Info.Summary})", () => ManifestCoder.Read(snap.ManifestPath)));
+                BackupPicker.Items.Add(new BackupChoice($"{s.Info.Device}, {when} ({s.Info.Summary})", snap.ManifestPath));
             }
             latestBackup = snapshots.FirstOrDefault(s => s.Info.Device == Environment.MachineName);
             foundBackups = snapshots;
@@ -796,7 +828,7 @@ public sealed partial class MainWindow : Window
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         if (await picker.PickSingleFileAsync() is { } file)
         {
-            var choice = new BackupChoice(file.Name, () => ManifestCoder.Read(file.Path));
+            var choice = new BackupChoice(file.Name, file.Path);
             BackupPicker.Items.Insert(0, choice);
             BackupPicker.SelectedItem = choice;
         }
@@ -808,6 +840,13 @@ public sealed partial class MainWindow : Window
         try
         {
             var backup = choice.Load();
+            chosenBackup = choice.Path;
+            // Another backup may have another vault: forget a key unlocked just for the last one.
+            if (setup is not null)
+            {
+                if (!ReferenceEquals(setup.Key, vaultKey)) setup.Key?.Dispose();
+                setup.Key = null;
+            }
             plan = SetupPlan.Make(backup);
             setupEntries = plan.Steps.Select(s => StepEntry(s)).ToList();
             var panel = new StackPanel();
@@ -865,6 +904,7 @@ public sealed partial class MainWindow : Window
         SetStatus(true, "Checking this PC. Nothing changes.");
         setup ??= Setup.ForThisPC();
         var s = setup;
+        PrepareSecrets(s);
         foreach (var x in setupEntries) x.Note.Text = "";
         var rows = setupEntries.Where(r => r.Box.IsChecked == true).ToList();
         foreach (var r in rows) r.Note.Text = "checking…";
@@ -914,6 +954,10 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        PrepareSecrets(setup);
+        if (steps.Any(x => x is SetupStep.Secret) && setup.Key is null && chosenBackup is not null)
+            setup.Key = await AskToUnlock(VaultFolderNear(chosenBackup),
+                "This backup's Wi-Fi passwords and SSH keys are encrypted. Enter its vault password to set them up, or cancel to skip them.");
 
         PreviewButton.IsEnabled = ApplyButton.IsEnabled = BackupPicker.IsEnabled = false;
         SkipButton.Visibility = StopButton.Visibility = Visibility.Visible;
@@ -956,6 +1000,25 @@ public sealed partial class MainWindow : Window
     }
 
     CancellationTokenSource? stopping;
+    string? chosenBackup;
+
+    /// The vault for a backup: beside it or a few folders up (a snapshot sits at
+    /// snapshots/<device>/<id>/manifest.yaml), else the backup folder's.
+    string VaultFolderNear(string manifest)
+    {
+        var dir = Path.GetDirectoryName(manifest);
+        for (var i = 0; i < 4 && dir is not null; i++, dir = Path.GetDirectoryName(dir))
+            if (VaultStore.Exists(dir)) return dir;
+        return Folder;
+    }
+
+    /// The backup's encrypted secrets, and the vault key if it's already unlocked here.
+    void PrepareSecrets(Setup s)
+    {
+        if (chosenBackup is null) return;
+        s.Secrets = VaultStore.ReadSecrets(Path.Combine(Path.GetDirectoryName(chosenBackup)!, VaultStore.SecretsFileName));
+        if (s.Key is null && vaultKey is not null && VaultFolderNear(chosenBackup) == Folder) s.Key = vaultKey;
+    }
 
     void Skip_Click(object sender, RoutedEventArgs e)
     {

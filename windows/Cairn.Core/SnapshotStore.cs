@@ -57,6 +57,21 @@ public sealed class SnapshotStore(string root)
 
     string DeviceFolder(string device) => Path.Combine(SnapshotsFolder, FolderName(device));
 
+    /// The encrypted secrets saved with a snapshot (empty if none).
+    public SecretsFile SecretsOf(Snapshot s) => VaultStore.ReadSecrets(Path.Combine(s.Folder, VaultStore.SecretsFileName));
+
+    /// The device's saved secrets for the refs this manifest includes.
+    public static SecretsFile SecretsFor(Manifest m, SecretsFile all)
+    {
+        var refs = m.Sensitive.Where(s => s.Include).Select(s => s.Ref).ToHashSet(StringComparer.Ordinal);
+        var file = new SecretsFile();
+        foreach (var (r, sealedData) in all.Secrets) if (refs.Contains(r)) file.Secrets[r] = sealedData;
+        return file;
+    }
+
+    static int ChangedSecrets(SecretsFile a, SecretsFile b) =>
+        a.Secrets.Keys.Union(b.Secrets.Keys).Count(k => !Equals(a.Secrets.GetValueOrDefault(k), b.Secrets.GetValueOrDefault(k)));
+
     /// Newest first, for one device or all of them.
     public List<Snapshot> List(string? device = null)
     {
@@ -87,8 +102,12 @@ public sealed class SnapshotStore(string root)
 
     /// Writes `m` as a new snapshot unless it matches this device's latest one (when
     /// it was taken doesn't count). `force` writes anyway.
-    public SaveResult Save(Manifest m, IEnumerable<string> excluded, string trigger, DateTimeOffset? at = null, bool force = false)
+    /// `secrets` (already encrypted) is written beside the manifest as `secrets.yaml`; a
+    /// changed secret counts as a change.
+    public SaveResult Save(Manifest m, IEnumerable<string> excluded, string trigger, DateTimeOffset? at = null, bool force = false,
+        SecretsFile? secrets = null)
     {
+        secrets ??= new SecretsFile();
         var date = at ?? DateTimeOffset.UtcNow;
         m.Created = Manifest.FormatDate(date);
         m = ManifestCoder.Decode(ManifestCoder.Encode(m)); // compare what will be on disk
@@ -98,8 +117,12 @@ public sealed class SnapshotStore(string root)
         if (previous is not null)
         {
             var diff = ManifestDiff.Between(ManifestOf(previous), m);
-            if (diff.Count == 0 && !force) return new SaveResult.Unchanged(previous);
-            summary = diff.Count == 0 ? "no changes" : ManifestDiff.Summary(diff);
+            var changedSecrets = ChangedSecrets(SecretsOf(previous), secrets);
+            if (diff.Count == 0 && changedSecrets == 0 && !force) return new SaveResult.Unchanged(previous);
+            var parts = new List<string>();
+            if (diff.Count > 0) parts.Add(ManifestDiff.Summary(diff));
+            if (changedSecrets > 0) parts.Add($"~{changedSecrets} secret{(changedSecrets == 1 ? "" : "s")}");
+            summary = parts.Count == 0 ? "no changes" : string.Join(", ", parts);
         }
 
         var dir = DeviceFolder(device);
@@ -121,6 +144,7 @@ public sealed class SnapshotStore(string root)
         {
             File.WriteAllText(Path.Combine(temp, ManifestName), ManifestCoder.Encode(m), new System.Text.UTF8Encoding(false));
             File.WriteAllText(Path.Combine(temp, InfoName), Writer.Serialize(info), new System.Text.UTF8Encoding(false));
+            if (secrets.Secrets.Count > 0) VaultStore.WriteSecrets(secrets, Path.Combine(temp, VaultStore.SecretsFileName));
             var final = Path.Combine(dir, id);
             Directory.Move(temp, final);
             return new SaveResult.Saved(new Snapshot(info, final));

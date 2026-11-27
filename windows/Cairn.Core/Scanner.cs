@@ -22,6 +22,7 @@ public sealed class Scanner(ICommandRunner runner, IUserRegistry registry, HomeF
             Settings = WindowsSettings.Scan(registry),
             Dotfiles = ConfigFiles(),
             Shares = NetworkDrives.Scan(registry),
+            Sensitive = WindowsSecrets.Scan(runner, home),
         };
         var pins = Taskbar();
         if (pins.Count > 0) m.Layout.Taskbar = new OrderedApps { Apps = pins };

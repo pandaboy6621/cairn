@@ -86,6 +86,11 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
     /// How long to wait before trying failed installs again.
     public TimeSpan RetryPause { get; init; } = TimeSpan.FromSeconds(20);
     public bool NeedsRestart { get; private set; }
+
+    /// The unlocked vault, for secrets; null while it's locked.
+    public VaultKey? Key { get; set; }
+    /// The backup's encrypted secrets (its `secrets.yaml`).
+    public SecretsFile Secrets { get; set; } = new();
     public bool NeedsSignOut { get; private set; }
 
     // MARK: Preview
@@ -97,6 +102,7 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
             ? new(step, StepState.Done, "already set") : new(step, StepState.ToDo, "would set"),
         SetupStep.Taskbar t => CheckTaskbar(t),
         SetupStep.Config c => CheckConfig(c),
+        SetupStep.Secret s => CheckSecret(s),
         SetupStep.Share s => NetworkDrives.Mapped(registry).TryGetValue(s.Unc, out var d)
             ? new(step, StepState.Done, $"already mapped as {d}")
             : new(step, StepState.ToDo, s.Drive is null ? "would map" : $"would map as {s.Drive}"),
@@ -114,6 +120,60 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
         if (name.Success && runner.Run("winget", "list", "--name", name.Groups[1].Value, "--exact", "--accept-source-agreements", "--disable-interactivity").Ok)
             return new(i, StepState.Done, $"already installed (as {name.Groups[1].Value})");
         return new(i, StepState.ToDo, "would install");
+    }
+
+    StepStatus CheckSecret(SetupStep.Secret s)
+    {
+        if (!Secrets.Secrets.ContainsKey(s.Ref)) return new(s, StepState.NotFound, "not saved in the backup");
+        if (s.Type == WindowsSecrets.WifiType)
+        {
+            var wlan = runner.Run("netsh", "wlan", "show", "profiles");
+            if (wlan.Ok && WindowsSecrets.ParseProfiles(wlan.Output).Contains(s.Name)) return new(s, StepState.Done, "already saved on this PC");
+        }
+        else if (home.Exists(".ssh/" + s.Name)) return new(s, StepState.Done, "one by this name is already here (kept)");
+        return new(s, StepState.ToDo, Key is null ? "would add (needs the vault password)" : "would add");
+    }
+
+    bool ApplySecret(SetupStep.Secret s, Action<string> log)
+    {
+        var status = CheckSecret(s);
+        if (status.State == StepState.Done) { log($"{s.Text}: {status.Note}"); return true; }
+        if (status.State == StepState.NotFound) { log($"{s.Text}: not saved in the backup"); return false; }
+        if (Key is null) { log($"{s.Text}: unlock the vault first"); return false; }
+        byte[] secret;
+        try { secret = Key.Open(Secrets.Secrets[s.Ref], s.Ref); }
+        catch (VaultException e) { log(e.Message); return false; }
+        try
+        {
+            if (s.Type == WindowsSecrets.SshType)
+            {
+                var path = home.Full(".ssh/" + s.Name);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                // CreateNew: never replaces a key that's there.
+                using (var f = new FileStream(path, FileMode.CreateNew, FileAccess.Write)) f.Write(secret);
+                log($"Wrote SSH key ~\\.ssh\\{s.Name}");
+                return true;
+            }
+            var xml = WindowsSecrets.ProfileXml(s.Name, secret.Length == 0 ? null : Encoding.UTF8.GetString(secret));
+            var dir = WindowsSecrets.ScratchFolder();
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, "profile.xml");
+            try
+            {
+                File.WriteAllText(file, xml, new UTF8Encoding(false));
+                var r = runner.Run("netsh", "wlan", "add", "profile", $"filename={file}", "user=current");
+                if (r.Ok) { log($"Saved the Wi-Fi network {s.Name}"); return true; }
+                log($"Couldn't add the Wi-Fi network {s.Name}: {(r.Output + r.Error).Trim().Split('\n')[0]}");
+                return false;
+            }
+            finally
+            {
+                WindowsSecrets.Shred(file);
+                try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+            }
+        }
+        catch (IOException e) { log($"{s.Text}: {e.Message}"); return false; }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(secret); }
     }
 
     StepStatus CheckTaskbar(SetupStep.Taskbar t)
@@ -191,6 +251,9 @@ public sealed class Setup(ICommandRunner runner, IUserRegistry registry, HomeFol
                     break;
                 case SetupStep.Config c:
                     if (!WriteConfig(c, log)) failed.Add(c.Text);
+                    break;
+                case SetupStep.Secret sec:
+                    if (!ApplySecret(sec, log)) failed.Add(sec.Text);
                     break;
             }
             done++;

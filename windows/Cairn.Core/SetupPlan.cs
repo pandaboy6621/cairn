@@ -8,6 +8,8 @@ public abstract record SetupStep(string Id, string Group, string Text)
     public sealed record Taskbar(List<string> Apps) : SetupStep("taskbar", "Taskbar", "Pin " + string.Join(", ", Apps));
     public sealed record Share(string Url, string Unc, string? Drive, string? User)
         : SetupStep($"share:{Url}", "Network drives", Drive is null ? Unc : $"{Unc} ({Drive})");
+    public sealed record Secret(string Type, string Ref, string Name)
+        : SetupStep($"sensitive:{Ref}", "Secrets", Type == WindowsSecrets.WifiType ? $"Wi-Fi password for {Name}" : $"SSH key {Name}");
     public sealed record Config(string Target, string Content, bool KeepHosts, int Commented, string Label)
         : SetupStep($"config:{Target}", "Config files", Label);
 }
@@ -80,8 +82,14 @@ public sealed class SetupPlan
             }
             plan.Steps.Add(new SetupStep.Share(share.Url, Unc(share.Url), share.Drive, share.Username));
         }
-        if (backup.Sensitive.Any(s => s.Include))
-            plan.NotCarried.Add("Secrets (Wi-Fi, SSH keys, passwords): they stay encrypted in the backup");
+        foreach (var s in backup.Sensitive.Where(s => s.Include))
+        {
+            if (WindowsSecrets.Wifi(s.Ref) is { } ssid) plan.Steps.Add(new SetupStep.Secret(WindowsSecrets.WifiType, s.Ref, ssid));
+            else if (WindowsSecrets.SshFile(s.Ref) is { } file) plan.Steps.Add(new SetupStep.Secret(WindowsSecrets.SshType, s.Ref, file));
+        }
+        var others = backup.Sensitive.Where(s => s.Include && s.Type is not (WindowsSecrets.WifiType or WindowsSecrets.SshType))
+            .GroupBy(s => s.Type).Select(g => $"{g.Count()} {g.Key}").ToList();
+        if (others.Count > 0) plan.NotCarried.Add($"Secrets Cairn for Windows can't set up yet ({string.Join(", ", others)}): they stay encrypted in the backup");
         return plan;
     }
 

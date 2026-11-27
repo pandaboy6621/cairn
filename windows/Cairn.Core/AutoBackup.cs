@@ -12,15 +12,20 @@ public static class BackupChoices
         PackageItem p => $"package:{p.Uid}",
         SettingItem s => $"setting:{s.Key}",
         OrderedApps => "taskbar",
-        DotfileItem d => $"config:{d.Path}",
+        DotfileItem d => $"dotfile:{d.Path}", // the Mac app's name for these
         ShareItem s => $"share:{s.Url}",
+        SensitiveRef s => $"sensitive:{s.Ref}",
         _ => "",
     };
 
-    /// Unticks what `excluded` names.
-    public static void Apply(Manifest m, IReadOnlyCollection<string> excluded)
+    /// Unticks what `excluded` names. Secrets are ticked once they're saved in the vault
+    /// (`captured`), unless excluded, as on the Mac.
+    public static void Apply(Manifest m, IReadOnlyCollection<string> excluded, IReadOnlySet<string>? captured = null)
     {
         var set = excluded.ToHashSet(StringComparer.Ordinal);
+        // Older Windows backups called config files `config:`.
+        foreach (var e in excluded.Where(e => e.StartsWith("config:", StringComparison.Ordinal))) set.Add("dotfile:" + e[7..]);
+        foreach (var s in m.Sensitive) s.Include = captured?.Contains(s.Ref) == true && !set.Contains(ItemId(s));
         foreach (var p in m.Packages) p.Include = !set.Contains(ItemId(p));
         foreach (var s in m.Settings) s.Include = !set.Contains(ItemId(s));
         foreach (var d in m.Dotfiles) d.Include = !set.Contains(ItemId(d));
@@ -45,8 +50,9 @@ public static class AutoBackup
     public static string Run(Manifest scanned, SnapshotStore store, DateTimeOffset? at = null)
     {
         var excluded = store.Latest(scanned.Device.Name)?.Info.Excluded ?? new List<string>();
-        BackupChoices.Apply(scanned, excluded);
-        return store.Save(scanned, excluded, "auto", at) switch
+        var secrets = VaultStore.Exists(store.Root) ? VaultStore.ReadSecrets(VaultStore.DeviceSecretsPath(store.Root, scanned.Device.Name)) : new SecretsFile();
+        BackupChoices.Apply(scanned, excluded, secrets.Secrets.Keys.ToHashSet());
+        return store.Save(scanned, excluded, "auto", at, secrets: SnapshotStore.SecretsFor(scanned, secrets)) switch
         {
             SaveResult.Saved s => $"Backed up: {s.Snapshot.Info.Summary}.",
             _ => "Nothing changed.",

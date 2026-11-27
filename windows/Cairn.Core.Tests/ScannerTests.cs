@@ -80,7 +80,7 @@ public sealed class ScannerTests : IDisposable
         Assert.Equal(new[] { "~/.gitconfig", "~/.ssh/config" }, m.Dotfiles.Select(d => d.Path));
         Assert.Empty(scanner.Warnings);
         // Scanning only reads.
-        Assert.Equal(new[] { "winget", "winget" }, runner.Ran.Select(r => r.Split(' ')[0]));
+        Assert.Equal(new[] { "winget", "winget", "netsh" }, runner.Ran.Select(r => r.Split(' ')[0]));
         Assert.StartsWith("winget export -o", runner.Ran[0]);
         Assert.StartsWith("winget list", runner.Ran[1]);
         Assert.Equal("Mozilla Firefox (x64 en-US)", scanner.Names["Mozilla.Firefox"]);
