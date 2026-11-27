@@ -19,10 +19,10 @@ public partial class App : Application
             return;
         }
         // The new version, unzipped next to this folder, finishing an update.
-        var args = Environment.GetCommandLineArgs().Skip(1).ToList();
-        if (args.IndexOf(UpdateInstall.FinishFlag) is var at and >= 0)
+        var cli = Environment.GetCommandLineArgs().Skip(1).ToList();
+        if (cli.IndexOf(UpdateInstall.FinishFlag) is var at and >= 0)
         {
-            FinishUpdate(args, at);
+            FinishUpdate(cli, at);
             Exit();
             return;
         }
