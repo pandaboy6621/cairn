@@ -2,6 +2,9 @@
 # uploads the app as a zip: Actions → this run → Artifacts → Cairn-Windows-x64.
 # Unzip it anywhere and run Cairn.exe; nothing else to install.
 #
+# A version tag (v*) also adds the zip to that GitHub Release, next to the Mac
+# app (release.yml publishes the notes).
+#
 # The app isn't code-signed yet, so Windows SmartScreen warns on first run
 # ("More info" → "Run anyway").
 name: Windows
@@ -9,6 +12,7 @@ name: Windows
 on:
   push:
     branches: [main]
+    tags: ["v*"] # path filters don't apply to tags
     paths:
       - "windows/**"
       - "Tests/CairnCoreTests/Fixtures/*-manifest.yaml"
@@ -19,7 +23,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # only used on tags, to add the zip to the release
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -62,3 +66,23 @@ jobs:
           name: Cairn-Windows-x64
           path: publish/Cairn
           if-no-files-found: error
+
+      - name: Add to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: .
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $name = "Cairn-$($tag.TrimStart('v'))-Windows-x64.zip"
+          Compress-Archive -Path publish/Cairn -DestinationPath $name
+          "$((Get-FileHash $name -Algorithm SHA256).Hash.ToLower())  $name" | Out-File "$name.sha256" -Encoding ascii -NoNewline
+          # Whichever build finishes first creates the release; release.yml writes the notes.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "Cairn $tag" --notes "Cairn $tag. Notes follow when the Mac build finishes." --verify-tag
+            if ($LASTEXITCODE -ne 0) { Start-Sleep -Seconds 20 } # the Mac build created it at the same moment
+          }
+          gh release upload $tag $name "$name.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "couldn't upload to the release" }

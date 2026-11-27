@@ -1,4 +1,5 @@
 # Builds Cairn.app on a GitHub macOS runner and publishes a GitHub Release.
+# The same tag runs windows.yml, which adds the Windows app to the release.
 #
 # Release: bump `Cairn.version` in Sources/CairnCore/Cairn.swift, commit, then
 #   git tag v0.1.0 && git push origin v0.1.0
@@ -80,7 +81,16 @@ jobs:
           This build is ad-hoc signed, not yet notarized, so macOS asks before opening it.
 
           The \`cairn\` command-line tool is inside the app: \`Cairn.app/Contents/MacOS/cairn\`.
+
+          **Windows:** unzip the Windows-x64 zip anywhere and run Cairn.exe. It isn't code-signed yet, so
+          SmartScreen warns the first time (More info, then Run anyway). It's added a few minutes after the Mac app.
           EOF
-          gh release create "$GITHUB_REF_NAME" \
-            "${{ steps.package.outputs.zip }}" "${{ steps.package.outputs.sha }}" \
-            --title "Cairn $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          # The Windows build may have created the release first.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${{ steps.package.outputs.zip }}" "${{ steps.package.outputs.sha }}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "Cairn $GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "${{ steps.package.outputs.zip }}" "${{ steps.package.outputs.sha }}" \
+              --title "Cairn $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          fi
