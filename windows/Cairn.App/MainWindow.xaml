@@ -252,6 +252,54 @@
                         </Grid>
                     </Grid>
 
+                    <!-- Settings -->
+                    <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed">
+                        <StackPanel MaxWidth="820" Padding="32,28,32,28" Spacing="16">
+                            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" />
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="Backup folder" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock x:Name="SettingsFolderText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="A folder on this PC or a NAS share. Your Macs and PCs can all back up into the same folder." />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button Content="Choose…" Click="ChooseFolder_Click" />
+                                        <Button Content="Open" Click="OpenFolder_Click" />
+                                        <Button x:Name="DefaultFolderButton" Content="Use default" Click="DefaultFolder_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <Grid>
+                                        <TextBlock Text="Back up automatically" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="AutoToggle" HorizontalAlignment="Right" MinWidth="0"
+                                                      OnContent="On" OffContent="Off" Toggled="AutoToggle_Toggled" />
+                                    </Grid>
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Cairn checks in the background, even with this window closed, and saves a new snapshot only when something changed. It keeps what you unticked left out. It uses Windows Task Scheduler and runs only while you're signed in." />
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <TextBlock Text="Check every" VerticalAlignment="Center" />
+                                        <ComboBox x:Name="IntervalPicker" MinWidth="160" SelectionChanged="Interval_SelectionChanged" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="AutoStatus" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    <HyperlinkButton Content="Show the automatic backup log" Padding="0" Click="ShowLog_Click" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="About Cairn" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock x:Name="VersionText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Cairn backs up a computer's setup (programs, settings, taskbar, Git and SSH config), never your files, and sets up a new Mac or PC from it." />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
                     <!-- Status bar -->
                     <Grid Grid.Row="1" Padding="24,10,24,10" ColumnSpacing="8"
                           BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">

@@ -21,10 +21,11 @@ public sealed partial class MainWindow : Window
 
     static readonly Category Home = new("home", "Home", "", Rgb(0x14B8A6), "");
     static readonly Category SetUp = new("setup", "Set up this PC", "", Rgb(0x3B82F6), "");
+    static readonly Category Prefs = new("prefs", "Settings", "", Rgb(0x6B7280), "");
     static readonly Category[] Categories =
     {
         new("programs", "Programs", "", Rgb(0xF59E0B), "programs"),
-        new("settings", "Settings", "", Rgb(0x64748B), "settings"),
+        new("settings", "System settings", "", Rgb(0x64748B), "settings"),
         new("taskbar", "Taskbar", "", Rgb(0xA855F7), "taskbar pins"),
         new("config", "Config files", "", Rgb(0x6366F1), "config files"),
     };
@@ -116,6 +117,7 @@ public sealed partial class MainWindow : Window
 
         BuildSidebar();
         BuildStats();
+        ShowSettings();
         Sidebar.SelectedIndex = 0;
         Scan();
         LoadBackups();
@@ -155,6 +157,8 @@ public sealed partial class MainWindow : Window
             Content = new TextBlock { Text = "Back up", Style = TextStyle("CaptionTextBlockStyle"), FontWeight = FontWeights.SemiBold, Foreground = Res("TextFillColorSecondaryBrush") },
         });
         foreach (var c in Categories) Sidebar.Items.Add(Item(c, true));
+        Sidebar.Items.Add(new ListViewItem { IsEnabled = false, IsHitTestVisible = false, MinHeight = 12, Height = 12 });
+        Sidebar.Items.Add(Item(Prefs, false));
     }
 
     readonly Dictionary<string, TextBlock> statValues = new();
@@ -164,7 +168,7 @@ public sealed partial class MainWindow : Window
         var tiles = new (Category Target, string Label, string Glyph, Color Tint)[]
         {
             (Categories[0], "Programs", Categories[0].Glyph, Categories[0].Tint),
-            (Categories[1], "Settings", Categories[1].Glyph, Categories[1].Tint),
+            (Categories[1], "System settings", Categories[1].Glyph, Categories[1].Tint),
             (Categories[3], "Config files", Categories[3].Glyph, Categories[3].Tint),
             (Categories[0], "Selected", "", Rgb(0x22C55E)),
         };
@@ -203,8 +207,9 @@ public sealed partial class MainWindow : Window
         current = c;
         HomePage.Visibility = c == Home ? Visibility.Visible : Visibility.Collapsed;
         SetupPage.Visibility = c == SetUp ? Visibility.Visible : Visibility.Collapsed;
-        CategoryPage.Visibility = c != Home && c != SetUp ? Visibility.Visible : Visibility.Collapsed;
-        BackupActions.Visibility = c == SetUp ? Visibility.Collapsed : Visibility.Visible;
+        SettingsPage.Visibility = c == Prefs ? Visibility.Visible : Visibility.Collapsed;
+        CategoryPage.Visibility = Categories.Contains(c) ? Visibility.Visible : Visibility.Collapsed;
+        BackupActions.Visibility = c == SetUp || c == Prefs ? Visibility.Collapsed : Visibility.Visible;
         SetupActions.Visibility = c == SetUp ? Visibility.Visible : Visibility.Collapsed;
         StatusText.Text = c == SetUp ? setupStatus : backupStatus;
         if (CategoryPage.Visibility == Visibility.Visible) ShowCategory(c);
@@ -239,12 +244,25 @@ public sealed partial class MainWindow : Window
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         if (await picker.PickSingleFolderAsync() is { } folder)
         {
-            settings.BackupFolder = folder.Path;
-            settings.Save();
-            FolderText.Text = folder.Path;
+            UseFolder(folder.Path);
             UpdateBackupCard();
             LoadBackups();
         }
+    }
+
+    void UseFolder(string path)
+    {
+        settings.BackupFolder = path;
+        settings.Save();
+        FolderText.Text = SettingsFolderText.Text = path;
+        DefaultFolderButton.IsEnabled = path != AppSettings.DefaultBackupFolder;
+    }
+
+    void DefaultFolder_Click(object sender, RoutedEventArgs e)
+    {
+        UseFolder(AppSettings.DefaultBackupFolder);
+        UpdateBackupCard();
+        LoadBackups();
     }
 
     void OpenFolder_Click(object sender, RoutedEventArgs e)
@@ -261,6 +279,100 @@ public sealed partial class MainWindow : Window
     }
 
     void GoToSetup_Click(object sender, RoutedEventArgs e) => Select(SetUp);
+
+    // MARK: Settings page
+
+    bool showingSettings;
+
+    void ShowSettings()
+    {
+        showingSettings = true;
+        SettingsFolderText.Text = Folder;
+        DefaultFolderButton.IsEnabled = Folder != AppSettings.DefaultBackupFolder;
+        IntervalPicker.Items.Clear();
+        foreach (var (minutes, label) in AutoBackup.Intervals) IntervalPicker.Items.Add(new ComboBoxItem { Content = label, Tag = minutes });
+        var chosen = settings.AutoBackupMinutes > 0 ? settings.AutoBackupMinutes : 60;
+        IntervalPicker.SelectedItem = IntervalPicker.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (int)i.Tag == chosen) ?? IntervalPicker.Items[1];
+        AutoToggle.IsOn = settings.AutoBackupMinutes > 0;
+        IntervalPicker.IsEnabled = AutoToggle.IsOn;
+        VersionText.Text = $"Version {typeof(MainWindow).Assembly.GetName().Version?.ToString(3)} · {WindowsTitle}";
+        showingSettings = false;
+        UpdateAutoStatus();
+        // Cairn was moved or updated since the task was made: point the task here.
+        if (settings.AutoBackupMinutes > 0 && settings.AutoBackupExe != Environment.ProcessPath) _ = ScheduleBackups(settings.AutoBackupMinutes);
+    }
+
+    int SelectedInterval => IntervalPicker.SelectedItem is ComboBoxItem { Tag: int m } ? m : 60;
+
+    void UpdateAutoStatus()
+    {
+        var last = AutoBackup.LastLine(AutoBackup.LogPath);
+        AutoStatus.Text = settings.AutoBackupMinutes > 0
+            ? $"On: checks {AutoBackup.Every(settings.AutoBackupMinutes)}. " + (last is null ? "It hasn't run yet." : $"Last run: {last}")
+            : "Off. Cairn backs up only when you click Back up now.";
+    }
+
+    async void AutoToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (showingSettings) return;
+        IntervalPicker.IsEnabled = AutoToggle.IsOn;
+        string? failed;
+        if (AutoToggle.IsOn) failed = await ScheduleBackups(SelectedInterval);
+        else
+        {
+            failed = await Task.Run(() => new ScheduledBackup(new ProcessRunner()).Disable());
+            if (failed is null) { settings.AutoBackupMinutes = 0; settings.Save(); }
+            else failed = $"Couldn't turn automatic backups off: {failed}";
+        }
+        if (failed is not null) { AutoStatus.Text = failed; return; }
+        UpdateAutoStatus();
+        UpdateBackupCard();
+    }
+
+    async void Interval_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (showingSettings || !AutoToggle.IsOn) return;
+        if (await ScheduleBackups(SelectedInterval) is { } failed) { AutoStatus.Text = failed; return; }
+        UpdateAutoStatus();
+        UpdateBackupCard();
+    }
+
+    /// Creates (or replaces) the Task Scheduler entry. On failure, turns the toggle
+    /// back off and returns why.
+    async Task<string?> ScheduleBackups(int minutes)
+    {
+        var exe = Environment.ProcessPath ?? "";
+        string? error;
+        if (exe.StartsWith(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase))
+            error = "Cairn is running from inside the zip. Unzip it to a folder you'll keep (like Documents), run it from there, and turn this on again.";
+        else
+        {
+            var user = $@"{Environment.UserDomainName}\{Environment.UserName}";
+            error = await Task.Run(() => new ScheduledBackup(new ProcessRunner()).Enable(exe, minutes, user));
+            if (error is not null) error = $"Couldn't turn on automatic backups: {error}";
+        }
+        if (error is null)
+        {
+            settings.AutoBackupMinutes = minutes;
+            settings.AutoBackupExe = exe;
+            settings.Save();
+            return null;
+        }
+        showingSettings = true;
+        AutoToggle.IsOn = false;
+        IntervalPicker.IsEnabled = false;
+        showingSettings = false;
+        settings.AutoBackupMinutes = 0;
+        settings.Save();
+        AutoStatus.Text = error;
+        return error;
+    }
+
+    void ShowLog_Click(object sender, RoutedEventArgs e)
+    {
+        if (!File.Exists(AutoBackup.LogPath)) { AutoStatus.Text = "Automatic backups haven't run yet."; return; }
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AutoBackup.LogPath) { UseShellExecute = true });
+    }
 
     // MARK: Checklist rows
 
@@ -406,14 +518,7 @@ public sealed partial class MainWindow : Window
     readonly Dictionary<string, (StackPanel Panel, List<GroupView> Groups, List<Entry> Entries)> pages = new();
     List<Entry> backupEntries = new();
 
-    static string ItemId(object item) => item switch
-    {
-        PackageItem p => $"package:{p.Uid}",
-        SettingItem s => $"setting:{s.Key}",
-        OrderedApps => "taskbar",
-        DotfileItem d => $"config:{d.Path}",
-        _ => "",
-    };
+    static string ItemId(object item) => BackupChoices.ItemId(item);
 
     string ProgramName(string wingetId) => names.TryGetValue(wingetId, out var n) ? ProgramNames.Clean(n) : ProgramNames.FromId(wingetId);
 
@@ -524,11 +629,11 @@ public sealed partial class MainWindow : Window
         if (scanned is { } m)
         {
             statValues["Programs"].Text = m.Packages.Count.ToString();
-            statValues["Settings"].Text = m.Settings.Count.ToString();
+            statValues["System settings"].Text = m.Settings.Count.ToString();
             statValues["Config files"].Text = m.Dotfiles.Count.ToString();
             statValues["Selected"].Text = on.ToString();
         }
-        if (current != Home && current != SetUp) UpdateCategoryHeader(current);
+        if (Categories.Contains(current)) UpdateCategoryHeader(current);
         UpdateBackupCard();
     }
 
@@ -598,6 +703,7 @@ public sealed partial class MainWindow : Window
         BackupCardDetail.Text = latestBackup is { } last
             ? $"Last backup of this PC {Ago(last.Info.CreatedDate)} ({last.Info.Summary})."
             : "No backup of this PC yet. A backup is a small file you can set up another PC or Mac from.";
+        if (settings.AutoBackupMinutes > 0) BackupCardDetail.Text += $" Backs up automatically {AutoBackup.Every(settings.AutoBackupMinutes)} when something changed.";
     }
 
     static string Ago(DateTimeOffset when)

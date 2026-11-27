@@ -8,6 +8,12 @@ public sealed class AppSettings
     /// A local folder or a NAS share (\\server\share\Cairn, or a mapped drive).
     public string BackupFolder { get; set; } = DefaultBackupFolder;
 
+    /// How often automatic backups run, in minutes; 0 when they're off.
+    public int AutoBackupMinutes { get; set; }
+
+    /// The Cairn.exe the scheduled task runs. If Cairn moves, the task is pointed at the new place.
+    public string? AutoBackupExe { get; set; }
+
     public static string DefaultBackupFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cairn", "Backups");
 
