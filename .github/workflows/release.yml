@@ -79,6 +79,8 @@ jobs:
 
           **Install:** unzip, move Cairn.app to Applications, then right-click it and choose Open the first time.
           This build is ad-hoc signed, not yet notarized, so macOS asks before opening it.
+          If macOS says it's damaged, or Privacy & Security shows no Open Anyway button, run this in Terminal and open it again:
+          \`xattr -dr com.apple.quarantine /Applications/Cairn.app\`
 
           The \`cairn\` command-line tool is inside the app: \`Cairn.app/Contents/MacOS/cairn\`.
 

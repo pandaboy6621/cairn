@@ -173,8 +173,24 @@ you can read and diff it.
 ## 🚀 Getting started
 
 **Download:** the [latest release](https://github.com/pandaboy6621/cairn/releases/latest) has `Cairn.app`
-for the Mac and `Cairn.exe` for Windows. Neither is signed yet: on the Mac, right-click Cairn.app and
-choose Open the first time; on Windows, choose More info → Run anyway.
+for the Mac and `Cairn.exe` for Windows. Neither is signed yet, so each system warns the first time.
+
+**Mac install:**
+
+1. Unzip `Cairn-<version>-macOS.zip` and move `Cairn.app` to Applications.
+2. Right-click Cairn.app and choose Open. If macOS says the app is damaged, or it won't open and
+   System Settings → Privacy & Security has no Open Anyway button, clear the download quarantine flag
+   in Terminal and open it again:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Cairn.app
+   ```
+
+   This only removes the "downloaded from the internet" mark from Cairn.app; it doesn't change any
+   system security setting. Do this only for a copy you downloaded from this repository's releases.
+
+**Windows install:** unzip `Cairn-<version>-Windows-x64.zip` anywhere and run `Cairn.exe`. When
+SmartScreen warns, choose More info → Run anyway.
 
 **Or build it yourself.** You'll need macOS 14 or later on Apple Silicon, and Swift 5.9 or later (the Command Line Tools are
 enough; you don't need Xcode). Optional, for scanning: Homebrew and `mas` (`brew install mas`).
