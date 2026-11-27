@@ -269,6 +269,27 @@
                             </Border>
 
                             <Border Style="{StaticResource CairnCard}">
+                                <StackPanel Spacing="10">
+                                    <Grid>
+                                        <TextBlock Text="Check for updates automatically" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="UpdateCheckToggle" HorizontalAlignment="Right" MinWidth="0"
+                                                      OnContent="On" OffContent="Off" Toggled="UpdateCheckToggle_Toggled" />
+                                    </Grid>
+                                    <Grid>
+                                        <TextBlock Text="Install updates automatically" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="UpdateInstallToggle" HorizontalAlignment="Right" MinWidth="0"
+                                                      OnContent="On" OffContent="Off" Toggled="UpdateInstallToggle_Toggled" />
+                                    </Grid>
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Cairn looks for a new release on GitHub a minute after it opens and every 6 hours after that. It checks each download against its published checksum and never installs during a backup or set-up. If this window is open, it asks before restarting." />
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <Button x:Name="UpdateCheckButton" Content="Check Now" Click="CheckUpdates_Click" VerticalAlignment="Top" />
+                                        <TextBlock x:Name="UpdateStatus" TextWrapping="Wrap" MaxWidth="560" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CairnCard}">
                                 <StackPanel Spacing="6">
                                     <TextBlock Text="About Cairn" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                     <TextBlock x:Name="VersionText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

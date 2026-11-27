@@ -18,14 +18,14 @@ public sealed partial class MainWindow
         // Mac app keeps running in the menu bar.
         AppWindow.Closing += (_, e) =>
         {
-            if (quitting || tray?.Visible != true) { tray?.Dispose(); return; }
+            if (quitting || tray?.Visible != true) { tray?.Dispose(); InstallOnQuit(); return; }
             e.Cancel = true;
             AppWindow.Hide();
         };
     }
 
     TrayState TrayNow() => new(latestBackup?.Info.CreatedDate, backupStatus, busy > 0,
-        settings.AutoBackupMinutes > 0, OpensAtSignIn, DateTimeOffset.Now);
+        settings.AutoBackupMinutes > 0, OpensAtSignIn, DateTimeOffset.Now, updateFound?.Version);
 
     void RunTrayCommand(TrayMenu.Command c)
     {
@@ -37,6 +37,7 @@ public sealed partial class MainWindow
             case TrayMenu.Command.OpenFolder: OpenFolder_Click(this, new RoutedEventArgs()); break;
             case TrayMenu.Command.OpenCairn: OpenWindow(); break;
             case TrayMenu.Command.Settings: OpenWindow(); Select(Prefs); break;
+            case TrayMenu.Command.CheckForUpdates: OpenWindow(); _ = CheckNow(); break;
             case TrayMenu.Command.HideIcon: TrayToggle.IsOn = false; OpenWindow(); break; // never leave Cairn running unseen
             case TrayMenu.Command.Quit: Quit(); break;
         }
@@ -51,6 +52,7 @@ public sealed partial class MainWindow
     void Quit()
     {
         quitting = true;
+        InstallOnQuit();
         tray?.Dispose();
         Application.Current.Exit();
     }

@@ -1,12 +1,12 @@
 namespace Cairn.Core;
 
 /// What the tray menu needs to know, like the Mac's menu bar menu.
-public sealed record TrayState(DateTimeOffset? LastBackup, string? Status, bool Busy, bool AutoBackup, bool OpenAtSignIn, DateTimeOffset Now);
+public sealed record TrayState(DateTimeOffset? LastBackup, string? Status, bool Busy, bool AutoBackup, bool OpenAtSignIn, DateTimeOffset Now, string? UpdateVersion = null);
 
 /// The tray icon's menu, the Windows twin of the Mac's menu bar menu (MenuBarMenu.swift).
 public static class TrayMenu
 {
-    public enum Command { None, BackUpNow, AutoBackup, OpenAtSignIn, OpenFolder, OpenCairn, Settings, HideIcon, Quit }
+    public enum Command { None, BackUpNow, AutoBackup, OpenAtSignIn, OpenFolder, OpenCairn, Settings, CheckForUpdates, HideIcon, Quit }
 
     /// One line: text only (a note), a command, or a separator (null text).
     public sealed record Item(string? Text, Command Command = Command.None, bool Enabled = true, bool Checked = false);
@@ -22,6 +22,7 @@ public static class TrayMenu
         items.Add(new("Open backup folder", Command.OpenFolder));
         items.Add(new("Open Cairn", Command.OpenCairn));
         items.Add(new("Settings", Command.Settings));
+        items.Add(new(s.UpdateVersion is { } v ? $"Install Cairn {v}…" : "Check for Updates…", Command.CheckForUpdates));
         items.Add(new(null));
         items.Add(new("Hide this icon", Command.HideIcon));
         items.Add(new("Quit Cairn", Command.Quit));
@@ -31,13 +32,18 @@ public static class TrayMenu
     public static string LastBackupLine(DateTimeOffset? last, DateTimeOffset now)
     {
         if (last is not { } when) return "No backups yet";
+        return "Last backup " + Ago(when, now);
+    }
+
+    /// "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago".
+    public static string Ago(DateTimeOffset when, DateTimeOffset now)
+    {
         var span = now - when;
-        var ago = span.TotalMinutes < 1 ? "just now"
+        return span.TotalMinutes < 1 ? "just now"
             : span.TotalHours < 1 ? $"{(int)span.TotalMinutes} min ago"
             : span.TotalDays < 1 ? $"{(int)span.TotalHours} h ago"
             : span.TotalDays < 2 ? "yesterday"
             : $"{(int)span.TotalDays} days ago";
-        return "Last backup " + ago;
     }
 
     /// Menus are one line: keep the first sentence, at most 60 characters.
