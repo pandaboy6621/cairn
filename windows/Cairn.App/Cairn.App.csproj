@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <Content Include="Assets\Cairn.ico" />
+    <Content Include="Assets\Cairn.png" />
   </ItemGroup>
 
   <ItemGroup>

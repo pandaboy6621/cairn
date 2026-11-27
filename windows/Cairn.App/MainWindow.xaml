@@ -8,134 +8,275 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <NavigationView x:Name="Nav" PaneDisplayMode="Top" IsBackButtonVisible="Collapsed"
-                    IsSettingsVisible="False" SelectionChanged="Nav_SelectionChanged">
-        <NavigationView.MenuItems>
-            <NavigationViewItem x:Name="BackupTab" Content="Back up" Tag="backup" Icon="Save" />
-            <NavigationViewItem Content="Set up" Tag="setup" Icon="Download" />
-        </NavigationView.MenuItems>
+    <!-- Laid out like the Mac app: this PC and the categories on the left, the page on
+         the right. Rows, tiles and cards are built in MainWindow.xaml.cs. -->
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <Grid Padding="24,12,24,20">
-            <!-- Back up: scan this PC, untick what to leave out, save a snapshot. -->
-            <Grid x:Name="BackupPage" RowSpacing="12">
+        <!-- Title bar (drawn by us, so Mica runs right to the top). -->
+        <StackPanel x:Name="TitleBar" Orientation="Horizontal" Spacing="10" Padding="16,0,0,0" VerticalAlignment="Center">
+            <Image x:Name="TitleIcon" Width="18" Height="18" />
+            <TextBlock Text="Cairn" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="264" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar -->
+            <Grid Padding="8,0,8,8">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <StackPanel Spacing="4">
-                    <TextBlock Text="Back up this PC" Style="{StaticResource TitleTextBlockStyle}" />
-                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Text="Cairn saves this PC's setup (programs, settings, taskbar, Git and SSH config), never your files. Scan, untick anything you don't want, then back up. A new snapshot is only saved when something changed." />
-                </StackPanel>
-                <Grid Grid.Row="1" ColumnSpacing="8">
+
+                <Grid Padding="10,4,10,14" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="Backup folder" VerticalAlignment="Center" />
-                    <TextBox x:Name="FolderBox" Grid.Column="1" LostFocus="FolderBox_LostFocus"
-                             PlaceholderText="A folder on this PC, or a NAS share like \\nas\backups\Cairn" />
-                    <Button Grid.Column="2" Content="Choose…" Click="ChooseFolder_Click" />
+                    <ContentPresenter x:Name="DeviceTile" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="DeviceName" Style="{StaticResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="DeviceDetail" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <ProgressRing x:Name="DeviceBusy" Grid.Column="2" Width="20" Height="20" IsActive="False" />
                 </Grid>
-                <Border Grid.Row="2" BorderThickness="1" CornerRadius="8"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <ScrollViewer Padding="16,8,16,8">
-                        <StackPanel x:Name="BackupList">
-                            <TextBlock Margin="0,8" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Text="Click Scan this PC to see what Cairn would back up." />
+
+                <ListView x:Name="Sidebar" Grid.Row="1" SelectionMode="Single" SelectionChanged="Sidebar_SelectionChanged" />
+
+                <Border x:Name="SelectionSummary" Grid.Row="2" Padding="12" Margin="4,0" CornerRadius="8"
+                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" Visibility="Collapsed">
+                    <StackPanel Spacing="8">
+                        <Grid>
+                            <TextBlock Text="Selected for backup" Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
+                            <TextBlock x:Name="SelectionText" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Grid>
+                        <ProgressBar x:Name="SelectionBar" Maximum="1" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Page -->
+            <Border Grid.Column="1" CornerRadius="8,0,0,0" BorderThickness="1,1,0,0"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Home -->
+                    <ScrollViewer x:Name="HomePage">
+                        <StackPanel MaxWidth="1100" Padding="32,28,32,28" Spacing="24">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Your PC's setup" Style="{StaticResource TitleTextBlockStyle}" />
+                                <TextBlock x:Name="HomeSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <Grid x:Name="StatsRow" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                            </Grid>
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Style="{StaticResource CairnCard}">
+                                    <StackPanel Spacing="14">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <ContentPresenter x:Name="BackupCardTile" />
+                                            <TextBlock Text="Back up" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <StackPanel Spacing="2">
+                                            <TextBlock x:Name="BackupCardStatus" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Not scanned yet" />
+                                            <TextBlock x:Name="BackupCardDetail" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button x:Name="BackupNowButton" Content="Back up now" HorizontalAlignment="Stretch"
+                                                    Style="{StaticResource AccentButtonStyle}" IsEnabled="False" Click="Backup_Click" />
+                                            <Button Grid.Column="1" ToolTipService.ToolTip="Open the backup folder" Click="OpenFolder_Click">
+                                                <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                                            </Button>
+                                        </Grid>
+                                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Saves to" Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock x:Name="FolderText" TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="Change…" VerticalAlignment="Center" Click="ChooseFolder_Click" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource CairnCard}">
+                                    <StackPanel Spacing="14">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <ContentPresenter x:Name="SetupCardTile" />
+                                            <TextBlock Text="Set up" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <StackPanel Spacing="2">
+                                            <TextBlock x:Name="SetupCardStatus" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Looking for backups…" />
+                                            <TextBlock x:Name="SetupCardDetail" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       Text="Set this PC up from a Mac's or another PC's backup. You see every change before anything happens." />
+                                        </StackPanel>
+                                        <Button Content="Set up from a backup" HorizontalAlignment="Stretch" Click="GoToSetup_Click" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                       Text="Cairn saves your setup (programs, settings, taskbar, Git and SSH config), never your files. A new snapshot is only saved when something changed, and lines that look like passwords or tokens are left out." />
                         </StackPanel>
                     </ScrollViewer>
-                </Border>
-                <Grid Grid.Row="3" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <ProgressRing x:Name="BackupBusy" IsActive="False" Width="18" Height="18" />
-                        <TextBlock x:Name="BackupStatus" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    </StackPanel>
-                    <Button x:Name="ScanButton" Grid.Column="1" Content="Scan this PC" Click="Scan_Click" />
-                    <Button x:Name="BackupButton" Grid.Column="2" Content="Back up" IsEnabled="False"
-                            Style="{StaticResource AccentButtonStyle}" Click="Backup_Click" />
-                </Grid>
-            </Grid>
 
-            <!-- Set up: pick a backup, tick what to set up, preview, then set up. -->
-            <Grid x:Name="SetupPage" RowSpacing="12" Visibility="Collapsed">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <StackPanel Spacing="4">
-                    <TextBlock Text="Set up this PC" Style="{StaticResource TitleTextBlockStyle}" />
-                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Text="Pick a backup from a Mac or another PC. Preview shows what would change without changing anything; Set up makes the changes." />
-                </StackPanel>
-                <Grid Grid.Row="1" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Backup" VerticalAlignment="Center" />
-                    <ComboBox x:Name="BackupPicker" Grid.Column="1" HorizontalAlignment="Stretch"
-                              PlaceholderText="No backups in the backup folder yet" SelectionChanged="BackupPicker_SelectionChanged" />
-                    <Button Grid.Column="2" Content="Refresh" Click="RefreshBackups_Click" />
-                    <Button Grid.Column="3" Content="Open file…" Click="OpenBackup_Click" />
-                </Grid>
-                <Grid Grid.Row="2" ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="3*" />
-                        <ColumnDefinition Width="2*" />
-                    </Grid.ColumnDefinitions>
-                    <Border BorderThickness="1" CornerRadius="8"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                        <ScrollViewer Padding="16,8,16,8">
-                            <StackPanel x:Name="SetupList" />
-                        </ScrollViewer>
-                    </Border>
-                    <Border Grid.Column="1" BorderThickness="1" CornerRadius="8"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                        <ScrollViewer Padding="16,8,16,8">
-                            <StackPanel Spacing="6">
-                                <TextBlock Text="Do by hand" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                <TextBlock x:Name="ByHandText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                                <TextBlock Text="Not carried over" Margin="0,8,0,0" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                <TextBlock x:Name="NotCarriedText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <!-- A category: Programs, Settings, Taskbar, Config files -->
+                    <Grid x:Name="CategoryPage" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid x:Name="CategoryHeader" Padding="24,18,24,18" ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter x:Name="CategoryTile" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock x:Name="CategoryTitle" Style="{StaticResource SubtitleTextBlockStyle}" />
+                                <TextBlock x:Name="CategorySubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </StackPanel>
-                        </ScrollViewer>
-                    </Border>
+                            <AutoSuggestBox x:Name="SearchBox" Grid.Column="2" Width="240" VerticalAlignment="Center"
+                                            PlaceholderText="Search" QueryIcon="Find" TextChanged="Search_TextChanged" />
+                            <Button x:Name="SelectAllButton" Grid.Column="3" VerticalAlignment="Center" Click="SelectAll_Click" />
+                        </Grid>
+                        <ScrollViewer x:Name="CategoryScroller" Grid.Row="1" Padding="24,4,24,24" />
+                    </Grid>
+
+                    <!-- Set up this PC from a backup -->
+                    <Grid x:Name="SetupPage" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid x:Name="SetupHeader" Padding="24,18,24,18" ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter x:Name="SetupTile" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock Text="Set up this PC" Style="{StaticResource SubtitleTextBlockStyle}" />
+                                <TextBlock x:Name="SetupSubtitle" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Text="Pick a backup from a Mac or another PC. Preview shows what would change; nothing changes until you click Set up." />
+                            </StackPanel>
+                        </Grid>
+                        <Grid Grid.Row="1" Margin="24,0,24,12" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="From" VerticalAlignment="Center" />
+                            <ComboBox x:Name="BackupPicker" Grid.Column="1" HorizontalAlignment="Stretch"
+                                      PlaceholderText="No backups in the backup folder yet" SelectionChanged="BackupPicker_SelectionChanged" />
+                            <Button Grid.Column="2" ToolTipService.ToolTip="Look for backups again" Click="RefreshBackups_Click">
+                                <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                            </Button>
+                            <Button Grid.Column="3" Content="Open file…" Click="OpenBackup_Click" />
+                        </Grid>
+                        <Grid Grid.Row="2" Padding="24,0,24,24" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3*" />
+                                <ColumnDefinition Width="2*" />
+                            </Grid.ColumnDefinitions>
+                            <ScrollViewer x:Name="SetupScroller">
+                                <TextBlock Margin="0,24" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Text="Pick a backup to see what it would set up." />
+                            </ScrollViewer>
+                            <ScrollViewer Grid.Column="1">
+                                <StackPanel Spacing="12">
+                                    <Border Style="{StaticResource CairnCard}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Do by hand" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="ByHandText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Nothing yet." />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource CairnCard}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Not carried over" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="NotCarriedText" TextWrapping="Wrap"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Nothing yet." />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border x:Name="LogCard" Style="{StaticResource CairnCard}" Visibility="Collapsed">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="What happened" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBox x:Name="SetupLog" Height="220" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                                     FontFamily="Cascadia Mono, Consolas" FontSize="12"
+                                                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+
+                    <!-- Status bar -->
+                    <Grid Grid.Row="1" Padding="24,10,24,10" ColumnSpacing="8"
+                          BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <ProgressRing x:Name="Busy" IsActive="False" Width="16" Height="16" />
+                            <TextBlock x:Name="StatusText" TextWrapping="Wrap" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel x:Name="BackupActions" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="ScanButton" Content="Scan again" Click="Scan_Click" />
+                            <Button x:Name="BackupButton" Content="Back up now" IsEnabled="False"
+                                    Style="{StaticResource AccentButtonStyle}" Click="Backup_Click" />
+                        </StackPanel>
+                        <StackPanel x:Name="SetupActions" Grid.Column="1" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                            <Button x:Name="PreviewButton" Content="Preview" IsEnabled="False" Click="Preview_Click" />
+                            <Button x:Name="ApplyButton" Content="Set up" IsEnabled="False"
+                                    Style="{StaticResource AccentButtonStyle}" Click="Apply_Click" />
+                        </StackPanel>
+                    </Grid>
                 </Grid>
-                <TextBox x:Name="SetupLog" Grid.Row="3" Height="120" IsReadOnly="True" TextWrapping="Wrap"
-                         AcceptsReturn="True" FontFamily="Consolas" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         PlaceholderText="What Set up does shows here." />
-                <Grid Grid.Row="4" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <ProgressRing x:Name="SetupBusy" IsActive="False" Width="18" Height="18" />
-                        <TextBlock x:Name="SetupStatus" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    </StackPanel>
-                    <Button x:Name="PreviewButton" Grid.Column="1" Content="Preview" IsEnabled="False" Click="Preview_Click" />
-                    <Button x:Name="ApplyButton" Grid.Column="2" Content="Set up" IsEnabled="False"
-                            Style="{StaticResource AccentButtonStyle}" Click="Apply_Click" />
-                </Grid>
-            </Grid>
+            </Border>
         </Grid>
-    </NavigationView>
+    </Grid>
 </Window>
