@@ -505,6 +505,9 @@ final class SyncFlow {
 
     private func saveTrust() {
         do { try local.saveTrust(trust) } catch { self.error = error.localizedDescription }
+        // A Mac paired again comes back to the list.
+        let names = Set(trust.devices.map(\.name))
+        if !hidden.isDisjoint(with: names) { hidden.subtract(names) }
         refreshRequests()
         refreshMachines()
         if let lastScan { preview(scan: lastScan) }
@@ -547,6 +550,29 @@ final class SyncFlow {
     func forget(_ machine: Machine) {
         saved[machine.name] = nil
         refreshMachines()
+    }
+
+    /// Macs removed from the list by name (ones without a device ID, say, known
+    /// only from their backups). Removed Macs with an ID are ignored in `trust`.
+    private var hidden: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: Self.hiddenKey) }
+    }
+    static let hiddenKey = "syncHiddenMachines"
+
+    /// The trash button: unpairs the Mac, stops syncing with it, and takes it off
+    /// the list. Its files in the sync folder and its backups are left alone, and
+    /// pairing with it again (by ID, or accepting it) brings it back.
+    func remove(_ machine: Machine) {
+        guard !machine.isThisMac else { return }
+        saved[machine.name] = nil
+        hidden.insert(machine.name)
+        if let id = machine.deviceID {
+            trust.ignore(id)
+            saveTrust()
+        } else {
+            refreshMachines()
+        }
     }
 
     private func found(_ peers: [SyncPeer]) {
@@ -599,7 +625,10 @@ final class SyncFlow {
         for (name, m) in byName {
             if let id = m.deviceID, trust.isTrusted(id) { byName[name]?.paired = true }
         }
-        machines = byName.values.sorted {
+        let hidden = self.hidden
+        machines = byName.values.filter { m in
+            m.isThisMac || m.paired || !(hidden.contains(m.name) || (m.deviceID.map(trust.isIgnored) ?? false))
+        }.sorted {
             if $0.isThisMac != $1.isThisMac { return $0.isThisMac }
             if $0.paired != $1.paired { return $0.paired }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending

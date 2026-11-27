@@ -731,7 +731,7 @@ private struct MachineRow: View {
                     .controlSize(.small)
                     .help("Compare its latest backup with this Mac. Nothing changes unless you restore.")
             }
-            if hasActions {
+            if !machine.isThisMac {
                 Menu {
                     actions
                 } label: {
@@ -740,28 +740,55 @@ private struct MachineRow: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Unpair or remove this Mac")
+                .help("More for this Mac")
+                Button {
+                    confirmingRemove.wrappedValue = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Remove this Mac")
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .contextMenu { actions }
+        .confirmationDialog("Remove \(machine.name)?", isPresented: confirmingRemove.projectedValue) {
+            Button("Remove", role: .destructive) { model.sync.remove(machine) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(machine.paired
+                 ? "This Mac stops syncing with it and it leaves the list. Nothing is deleted from either Mac or the backup folder. Pair again any time to bring it back."
+                 : "It leaves the list. Nothing is deleted from either Mac or the backup folder. Pair with it any time to bring it back.")
+        }
     }
+
+    // Plain State, not @State: the Command Line Tools lack SwiftUI's macro plugin.
+    private let confirmingRemove = State(initialValue: false)
 
     private var canUnpair: Bool { !machine.isThisMac && machine.paired && machine.deviceID != nil }
     private var canForget: Bool { !machine.isThisMac && machine.lastSeen != nil }
-    private var hasActions: Bool { canUnpair || canForget || (!machine.isThisMac && machine.latestBackup != nil) }
-
     @ViewBuilder private var actions: some View {
         if let url = machine.latestBackup {
+            Button("View Setup") { model.previewRestore(url) }
             Button("Show Latest Backup in Finder") { model.showInFinder(url) }
         }
+        if let id = machine.deviceID {
+            Button("Copy Device ID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(id.description, forType: .string)
+            }
+        }
+        if canUnpair || canForget || !machine.isThisMac { Divider() }
         if canUnpair, let id = machine.deviceID {
-            Divider()
-            Button("Unpair", role: .destructive) { model.sync.unpair(id) }
+            Button("Unpair") { model.sync.unpair(id) }
         }
         if canForget {
-            Button("Forget This Mac", role: .destructive) { model.sync.forget(machine) }
+            Button("Forget Last Seen") { model.sync.forget(machine) }
+        }
+        if !machine.isThisMac {
+            Button("Remove This Mac…", role: .destructive) { confirmingRemove.wrappedValue = true }
         }
     }
 
