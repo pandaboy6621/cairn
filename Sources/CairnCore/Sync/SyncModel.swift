@@ -74,14 +74,21 @@ public struct SyncConfig: Codable, Equatable, Sendable {
     public var categories: [String: SyncScope]
     /// Single-item choices, keyed by checklist id (e.g. `package:cask:vlc`).
     public var items: [String: SyncScope]
+    /// Ask before an app or package installed or removed here goes out to the
+    /// other Macs. Nil (configs saved before this existed) means yes.
+    public var askSoftware: Bool?
 
     public init(enabled: Bool = false, preset: SyncPreset = .portable,
-                categories: [String: SyncScope] = [:], items: [String: SyncScope] = [:]) {
+                categories: [String: SyncScope] = [:], items: [String: SyncScope] = [:], askSoftware: Bool? = nil) {
         self.enabled = enabled
         self.preset = preset
         self.categories = categories
         self.items = items
+        self.askSoftware = askSoftware
     }
+
+    /// See `askSoftware`.
+    public var asksBeforeSharingSoftware: Bool { askSoftware ?? true }
 
     /// An item's choice wins, then its category's, then the preset's.
     public func scope(for id: String, in category: ChecklistCategory) -> SyncScope {

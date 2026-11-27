@@ -88,6 +88,7 @@ Each category expands into individual items with their own checkboxes, a search 
 
 ## Sync (later milestone, not v1)
 - Device groups with per-item scope: synced, this device only, ignored.
+- Installs and removals: a watcher (Applications folders, Homebrew Cellar/Caskroom) triggers a quick brew/mas rescan. An app or package installed or removed here is held (not published) until the user picks "add to/remove from other Macs" or "this Mac only". Other Macs get a notification per change when they check in (every 15 min, or on the watcher) and install or uninstall only after the user taps it. Uninstall goes only through `CommandPolicy.uninstall` (`brew uninstall --formula|--cask <name>`) or moves an App Store app (with a receipt) to the Trash.
 - NAS-hosted manifest as source of truth, plus optional direct device-to-device over Bonjour with an encrypted channel. Last-write-wins per key with a conflict view.
 
 ## Milestones

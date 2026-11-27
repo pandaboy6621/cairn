@@ -107,6 +107,17 @@ public struct CommandPolicy: Sendable {
         }
     }
 
+    /// Everything `readOnly` allows, plus uninstalling one Homebrew formula or cask
+    /// by name. Only used after the user confirmed that one removal.
+    public static let uninstall = CommandPolicy { command in
+        if readOnly.allows(command) { return true }
+        let args = command.arguments
+        guard command.program == "brew", args.count == 3, args[0] == "uninstall",
+              ["--formula", "--cask"].contains(args[1]) else { return false }
+        let name = args[2]
+        return !name.isEmpty && !name.hasPrefix("-") && !name.hasPrefix("/") && !name.contains("..")
+    }
+
     /// Everything `readOnly` allows, plus loading and unloading Cairn's own user
     /// LaunchAgents (and no others) in the user's GUI session.
     public static let agents = CommandPolicy { command in

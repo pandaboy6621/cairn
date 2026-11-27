@@ -74,6 +74,16 @@ set up a Windows or Linux PC.
 - **Post-restore checklist.** Anything macOS insists you approve by hand (privacy permissions, iCloud,
   display rotation, share passwords) is listed for you instead of being forced.
 
+### Sync
+
+- **Through a NAS folder or straight between Macs.** Pair Macs with a code, then choose what syncs:
+  a preset, whole categories, or single items.
+- **Installs and removals, with your say-so.** Cairn notices when you install or remove an app or
+  Homebrew package. It asks whether your other Macs should get the change too. When they check in,
+  each one shows a notification ("Studio Mac installed VLC: Install / Not on This Mac", or "Uninstall /
+  Keep It"), and nothing is installed or removed without that click. Uninstalls use `brew uninstall`, or
+  move an App Store app to the Trash.
+
 ### Use it your way
 
 - **Native Mac app.** Home dashboard, a checklist for every category with search and item counts,
@@ -213,6 +223,8 @@ cairn sync now                           # publish this Mac's changes, list ones
 cairn sync now --apply                   # also bring those in (shown first, then checked)
 cairn sync scope layout:dock synced      # a category or one item: synced, this-mac, ignored, default
 cairn sync resolve <id> --theirs --apply # settle a conflict (or --mine, --skip)
+cairn sync resolve <id> --share          # an app installed/removed here: ask the other Macs (or --keep-here)
+cairn sync resolve <id> --uninstall      # an app another Mac removed: shows the removal; --apply runs it
 cairn sync devices
 cairn export windows --out ~/Desktop    # or linux: a setup kit for a PC (from the newest snapshot)
 ```

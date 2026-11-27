@@ -65,6 +65,19 @@ final class SyncFlow {
 
     /// Opens the main window (set by the app), so a pairing request is seen.
     @ObservationIgnored var showWindow: (() -> Void)?
+    /// Rescans what's installed and syncs (set by the app). The check-in timer
+    /// and the install watcher use it; without it, a sync uses the last scan.
+    @ObservationIgnored var checkIn: (() -> Void)?
+    /// Run once the next plan is in (a notification answered before the first one).
+    @ObservationIgnored var whenPlanned: [@MainActor () -> Void] = []
+
+    private func planned(_ plan: SyncPlan) {
+        self.plan = plan
+        SyncNotifier.shared.post(plan)
+        let waiting = whenPlanned
+        whenPlanned = []
+        waiting.forEach { $0() }
+    }
 
     @ObservationIgnored private let local = SyncLocal()
     @ObservationIgnored private var identity: SyncIdentity?
@@ -84,7 +97,14 @@ final class SyncFlow {
     var store: SyncStore? { root.map { SyncStore(root: $0) } }
 
     var pendingCount: Int {
-        (plan?.incoming.count ?? 0) + (plan?.conflicts.count ?? 0) + requests.count + (pairRequest == nil ? 0 : 1)
+        (plan?.incoming.count ?? 0) + (plan?.conflicts.count ?? 0) + (plan?.asks.count ?? 0)
+            + (plan?.removedElsewhere.count ?? 0) + requests.count + (pairRequest == nil ? 0 : 1)
+    }
+
+    /// Ask before an app or package installed or removed here goes to the other Macs.
+    var askSoftware: Bool {
+        get { config.asksBeforeSharingSoftware }
+        set { config.askSoftware = newValue; save() }
     }
 
     // MARK: Loading
@@ -123,7 +143,7 @@ final class SyncFlow {
             let plan = await Task.detached(priority: .utility) { () -> SyncPlan in
                 run.plan(local: scan, secrets: VaultStore.readSecrets(in: backupFolder, device: scan.device.name))
             }.value
-            if !isSyncing { self.plan = plan }
+            if !isSyncing { planned(plan) }
         }
     }
 
@@ -292,7 +312,7 @@ final class SyncFlow {
             isSyncing = false
             switch result {
             case .success(let (plan, notes)):
-                self.plan = plan
+                planned(plan)
                 lastSync = Date()
                 if !notes.isEmpty { error = "Couldn't reach " + notes.joined(separator: "; ") }
             case .failure(let e):
@@ -354,12 +374,68 @@ final class SyncFlow {
         guard let store, let device else { return }
         try? store.saveBase(SyncEngine.skip(item, base: store.base(device: device.name)), device: device.name)
         plan?.incoming.removeAll { $0.id == item.id }
+        SyncNotifier.shared.withdraw(.incomingAdd, id: item.id)
     }
 
     func dismissRemoval(_ item: SyncIncoming) {
         guard let store, let device else { return }
         try? store.saveBase(SyncEngine.dismissRemoval(item.id, base: store.base(device: device.name)), device: device.name)
         plan?.removedElsewhere.removeAll { $0.id == item.id }
+        SyncNotifier.shared.withdraw(.incomingRemove, id: item.id)
+    }
+
+    // MARK: Installs and removals
+
+    /// "Ask my other Macs": publishes an install or removal made here.
+    func share(_ ask: SyncAsk) {
+        guard let store, let device else { return }
+        let (base, outgoing) = SyncEngine.share(ask, base: store.base(device: device.name), device: device.name, now: Date())
+        do {
+            try store.publish(outgoing, device: device.name)
+            try store.saveBase(base, device: device.name)
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        plan?.asks.removeAll { $0.id == ask.id }
+        SyncNotifier.shared.withdraw(ask.isRemoval ? .askRemove : .askAdd, id: ask.id)
+    }
+
+    /// "This Mac only": the other Macs aren't told.
+    func keepHere(_ ask: SyncAsk) {
+        guard let store, let device else { return }
+        try? store.saveBase(SyncEngine.keepHere(ask, base: store.base(device: device.name)), device: device.name)
+        plan?.asks.removeAll { $0.id == ask.id }
+        SyncNotifier.shared.withdraw(ask.isRemoval ? .askRemove : .askAdd, id: ask.id)
+    }
+
+    /// What uninstalling something another Mac removed would do here, if Cairn can.
+    func removal(for item: SyncIncoming) -> SoftwareRemoval? {
+        item.current.flatMap { SoftwareRemover().removal(for: $0) }
+    }
+
+    var removing: Set<String> = []
+
+    /// Uninstalls an app or package another Mac removed (the user confirmed it).
+    func uninstall(_ item: SyncIncoming, then: (@MainActor () -> Void)? = nil) {
+        guard let removal = removal(for: item), !removing.contains(item.id) else { return }
+        removing.insert(item.id)
+        Task {
+            let failure = await Task.detached(priority: .userInitiated) { () -> String? in
+                do { try SoftwareRemover().remove(removal); return nil }
+                catch SoftwareRemoverError.notInstalled { return nil } // already gone: that's the goal
+                catch { return error.localizedDescription }
+            }.value
+            removing.remove(item.id)
+            if let failure {
+                self.error = "Couldn't remove \(item.title): \(failure)"
+                SyncNotifier.shared.report("Couldn't remove \(item.title)", failure)
+            } else {
+                dismissRemoval(item)
+                SyncNotifier.shared.report("Removed \(item.title)", "Removed on this Mac, as on \(item.entry.device).")
+            }
+            then?()
+        }
     }
 
     func keepMine(_ conflict: SyncConflict) {
@@ -565,12 +641,13 @@ final class SyncFlow {
                               deviceID: identity.deviceID, announce: true)
             }
         }
-        if mode == .direct {
-            timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self, let scan = self.lastScan else { return }
-                    self.syncNow(scan: scan)
-                }
+        // Check in every 15 minutes (both modes), so changes from other Macs are
+        // seen and asked about even while the window is closed.
+        timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if let checkIn = self.checkIn { checkIn() }
+                else if let scan = self.lastScan { self.syncNow(scan: scan) }
             }
         }
     }

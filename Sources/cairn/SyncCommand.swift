@@ -16,8 +16,11 @@ struct SyncCommand: ParsableCommand {
             (`cairn sync id`, then `cairn sync pair <ID>` on the other Mac).
             Each item is synced, kept on this Mac only, or ignored: choose a preset
             (portable, everything, nothing), then change categories or single items.
-            Sync never removes anything, and changes from other Macs are only applied
-            with --apply, after the plan is shown.
+            Apps and packages installed or removed here wait for you to say whether the
+            other Macs should be asked too (`cairn sync resolve <id> --share` or
+            `--keep-here`). Changes from other Macs are only applied with --apply,
+            after the plan is shown, and an app removed elsewhere is only uninstalled
+            here with `cairn sync resolve <id> --uninstall --apply`.
             """,
         subcommands: [Status.self, On.self, Off.self, Now.self, Scope.self, Resolve.self, Devices.self, Folder.self,
                       Mode.self, ID.self, Pair.self, Requests.self, Accept.self, Ignore.self, Unpair.self],
@@ -90,10 +93,15 @@ struct SyncCommand: ParsableCommand {
             for c in plan.conflicts { out += "  ! \(c.title): \(c.theirs.device) changed it too  [\(c.id)]\n" }
             out += "  Use `cairn sync resolve <id> --theirs` or `--mine`.\n"
         }
+        if !plan.asks.isEmpty {
+            out += "Installed or removed here, not yet shared (\(plan.asks.count)):\n"
+            for a in plan.asks { out += "  ? \(a.title) \(a.isRemoval ? "removed" : "installed")  [\(a.id)]\n" }
+            out += "  Ask your other Macs to do the same with `cairn sync resolve <id> --share`, or `--keep-here`.\n"
+        }
         if !plan.removedElsewhere.isEmpty {
-            out += "Removed on another Mac (left as is here; sync never removes):\n"
+            out += "Removed on another Mac (left as is here until you say):\n"
             for r in plan.removedElsewhere { out += "  · \(r.title) on \(r.entry.device)  [\(r.id)]\n" }
-            out += "  Remove them here yourself if you like; `cairn sync resolve <id> --skip` stops listing one.\n"
+            out += "  `cairn sync resolve <id> --uninstall` shows what removing one here would do; `--skip` keeps it.\n"
         }
         return out.isEmpty ? "In sync.\n" : out
     }
@@ -303,7 +311,10 @@ struct SyncCommand: ParsableCommand {
                 --mine keeps this Mac's value (already published). --theirs brings in the
                 other Mac's value (with --apply). --skip stops offering an incoming change
                 until that item changes again elsewhere, or stops listing an item another
-                Mac removed.
+                Mac removed. --uninstall removes an app or package another Mac removed
+                (shown first; with --apply it runs). --share asks the other Macs to install
+                or remove what was installed or removed here; --keep-here keeps it to
+                this Mac.
                 """
         )
         @OptionGroup var options: Options
@@ -312,15 +323,48 @@ struct SyncCommand: ParsableCommand {
         @Flag(name: .long) var mine = false
         @Flag(name: .long) var theirs = false
         @Flag(name: .long) var skip = false
-        @Flag(name: .long, help: "With --theirs: actually change this Mac.")
+        @Flag(name: .long) var uninstall = false
+        @Flag(name: .long) var share = false
+        @Flag(name: .long) var keepHere = false
+        @Flag(name: .long, help: "With --theirs or --uninstall: actually change this Mac.")
         var apply = false
         @Flag(name: .long, help: "Read the vault password from stdin.")
         var passwordStdin = false
 
         func run() throws {
-            guard [mine, theirs, skip].filter({ $0 }).count == 1 else { throw ValidationError("Pick one of --mine, --theirs, or --skip.") }
+            guard [mine, theirs, skip, uninstall, share, keepHere].filter({ $0 }).count == 1 else {
+                throw ValidationError("Pick one of --mine, --theirs, --skip, --uninstall, --share, or --keep-here.")
+            }
             let p = try SyncCommand.prepare(options)
             let store = p.run.store, device = p.scan.device.name
+            if share || keepHere {
+                guard let ask = p.plan.asks.first(where: { $0.id == id }) else { throw ValidationError("Nothing installed or removed here is waiting for \(id).") }
+                if share {
+                    let (base, out) = SyncEngine.share(ask, base: store.base(device: device), device: device, now: Date())
+                    try store.publish(out, device: device)
+                    try store.saveBase(base, device: device)
+                    print("Shared: your other Macs will be asked to \(ask.isRemoval ? "remove" : "install") \(ask.title).")
+                } else {
+                    try store.saveBase(SyncEngine.keepHere(ask, base: store.base(device: device)), device: device)
+                    print("Kept to this Mac: \(ask.title).")
+                }
+                return
+            }
+            if uninstall {
+                guard let r = p.plan.removedElsewhere.first(where: { $0.id == id }), let value = r.current else {
+                    throw ValidationError("\(id) wasn't removed on another Mac (see `cairn sync now`).")
+                }
+                let remover = SoftwareRemover()
+                guard let removal = remover.removal(for: value) else {
+                    throw ValidationError("Cairn can only remove Homebrew formulae and casks and App Store apps; remove \(r.title) yourself.")
+                }
+                print("To remove \(r.title) (removed on \(r.entry.device)): \(removal.summary)")
+                guard apply else { stderr("Dry run: nothing changed on this Mac. Add --apply to remove it."); return }
+                try remover.remove(removal)
+                try store.saveBase(SyncEngine.dismissRemoval(id, base: store.base(device: device)), device: device)
+                print("Removed \(r.title).")
+                return
+            }
             if skip, p.plan.removedElsewhere.contains(where: { $0.id == id }) {
                 try store.saveBase(SyncEngine.dismissRemoval(id, base: store.base(device: device)), device: device)
                 print("Stopped listing \(id) as removed elsewhere.")

@@ -24,6 +24,8 @@ import Yams
     }
 
     static let on = SyncConfig(enabled: true)
+    /// Installs and removals go out without asking first.
+    static let unasked = SyncConfig(enabled: true, askSoftware: false)
 
     func plan(_ m: Manifest, group: [String: SyncEntry] = [:], base: SyncBase = SyncBase(),
               config: SyncConfig = SyncTests.on, at time: Date = SyncTests.at(1)) -> SyncPlan {
@@ -87,7 +89,7 @@ import Yams
         let before = Self.mac("a")
         let base = synced(before)
         // Here: a new package.
-        let mine = plan(Self.mac("a", packages: ["jq", "wget"]), base: base)
+        let mine = plan(Self.mac("a", packages: ["jq", "wget"]), base: base, config: Self.unasked)
         #expect(Set(mine.outgoing.keys) == ["package:formula:wget"])
         // There: autohide turned off on b.
         let theirs = SyncEntry(value: SyncValue(setting: Self.setting("dock.autohide", false)), updated: Self.at(1), device: "b")
@@ -159,7 +161,7 @@ import Yams
 
     @Test func removalsGoOutButNeverUninstallElsewhere() {
         let base = synced(Self.mac("a", packages: ["jq", "wget"]))
-        let p = plan(Self.mac("a", packages: ["jq"]), base: base)
+        let p = plan(Self.mac("a", packages: ["jq"]), base: base, config: Self.unasked)
         #expect(p.outgoing["package:formula:wget"]?.removed == true)
         // On b, which has wget: noted, not incoming.
         let bBase = synced(Self.mac("b", packages: ["jq", "wget"]))

@@ -20,6 +20,19 @@ public struct SyncConflict: Equatable, Sendable, Identifiable {
     public var theirs: SyncEntry
 }
 
+/// An app or package installed or removed on this Mac, waiting for the user to
+/// say whether the other Macs should be asked to do the same. Until then it
+/// isn't published (see `SyncConfig.askSoftware`).
+public struct SyncAsk: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var category: ChecklistCategory
+    public var title: String
+    /// What this Mac has now; nil when it was removed here.
+    public var value: SyncValue?
+
+    public var isRemoval: Bool { value == nil }
+}
+
 /// What one sync would do. Publishing only writes this Mac's files in the
 /// backup folder; incoming changes touch the Mac only through restore's Apply.
 public struct SyncPlan: Equatable, Sendable {
@@ -31,10 +44,13 @@ public struct SyncPlan: Equatable, Sendable {
     public var conflicts: [SyncConflict] = []
     /// Items another Mac removed. Sync never uninstalls or deletes, so these are only noted.
     public var removedElsewhere: [SyncIncoming] = []
+    /// Apps and packages installed or removed here, held back until the user
+    /// says whether the other Macs should get the change.
+    public var asks: [SyncAsk] = []
     /// The base to save once `outgoing` is published.
     public var base: SyncBase
 
-    public var isEmpty: Bool { outgoing.isEmpty && incoming.isEmpty && conflicts.isEmpty }
+    public var isEmpty: Bool { outgoing.isEmpty && incoming.isEmpty && conflicts.isEmpty && asks.isEmpty }
 }
 
 public enum SyncEngine {
@@ -104,6 +120,11 @@ public enum SyncEngine {
                 plan.base.seen[id] = theirs.updated
                 plan.outgoing[id] = SyncEntry(value: mine?.value, removed: mine == nil, updated: now, device: device)
                 plan.base.local[id] = localHash
+            } else if changedHere, config.asksBeforeSharingSoftware, SyncEngine.asksFirst(id),
+                      (mine == nil) != (base.local[id] == nil) {
+                // Installed or removed here: held (not published, base unchanged)
+                // until the user answers, so it's asked again next sync.
+                plan.asks.append(SyncAsk(id: id, category: category, title: title, value: mine?.value))
             } else if changedHere {
                 plan.outgoing[id] = SyncEntry(value: mine?.value, removed: mine == nil, updated: now, device: device)
                 plan.base.local[id] = localHash
@@ -136,6 +157,27 @@ public enum SyncEngine {
         }
         plan.base.lastSync = now
         return plan
+    }
+
+    /// Apps and App Store apps, formulae and casks: the things an install or
+    /// uninstall changes. (Taps follow their packages without asking.)
+    public static func asksFirst(_ id: String) -> Bool {
+        id.hasPrefix("app:") || id.hasPrefix("package:formula:") || id.hasPrefix("package:cask:")
+    }
+
+    /// "Yes, tell the other Macs": publishes the install or removal now.
+    public static func share(_ ask: SyncAsk, base: SyncBase, device: String, now: Date) -> (base: SyncBase, outgoing: [String: SyncEntry]) {
+        var base = base
+        base.local[ask.id] = ask.value?.hash
+        return (base, [ask.id: SyncEntry(value: ask.value, removed: ask.value == nil, updated: now, device: device)])
+    }
+
+    /// "Only this Mac": takes the change in without publishing it. The other Macs
+    /// keep what they have; a later change here (or elsewhere) syncs as usual.
+    public static func keepHere(_ ask: SyncAsk, base: SyncBase) -> SyncBase {
+        var base = base
+        base.local[ask.id] = ask.value?.hash
+        return base
     }
 
     /// The user has seen that another Mac removed this; stop listing it.

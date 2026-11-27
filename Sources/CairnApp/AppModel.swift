@@ -106,6 +106,8 @@ final class AppModel {
 
     /// The app's single model, for the debug snapshot hook.
     static weak var current: AppModel?
+    /// Notices installs and removals while Cairn runs (sync on only).
+    @ObservationIgnored private var softwareWatcher: SoftwareWatcher?
 
     private let defaults = UserDefaults.standard
 
@@ -124,6 +126,18 @@ final class AppModel {
         }
         #endif
         AppModel.current = self
+        SyncNotifier.shared.setUp()
+        SyncNotifier.shared.handle = { [weak self] kind, id, action in self?.answer(kind, id: id, action: action) }
+        sync.checkIn = { [weak self] in self?.checkIn() }
+        #if DEBUG
+        let snapshotting = ProcessInfo.processInfo.environment["CAIRN_SNAPSHOT"] != nil
+        #else
+        let snapshotting = false
+        #endif
+        if !snapshotting {
+            softwareWatcher = SoftwareWatcher { [weak self] in self?.checkIn() }
+            softwareWatcher?.start()
+        }
         lastBackupDate = defaults.object(forKey: "lastBackupDate") as? Date
         lastBackupName = defaults.string(forKey: "lastBackupName")
         lastBackupURL = defaults.string(forKey: "lastBackupPath").map { URL(fileURLWithPath: $0) }
@@ -146,6 +160,63 @@ final class AppModel {
             guard let self, let source = self.checklist?.source else { return }
             self.sync.syncNow(scan: source)
         }
+    }
+
+    /// Rereads what's installed (Homebrew and the App Store only, which is quick)
+    /// and syncs, so an install or removal here is asked about and other Macs'
+    /// changes come in. The rest of the last scan is reused.
+    func checkIn() {
+        guard sync.isOn, !isScanning, !restore.isRunning, var current = checklist?.source else { return }
+        Task {
+            let fresh = await Task.detached(priority: .utility) { SetupScanner().scan([.brew, .mas]).manifest }.value
+            current.packages = fresh.packages
+            current.apps = fresh.apps
+            sync.syncNow(scan: current.normalized())
+        }
+    }
+
+    /// A button pressed on an install or removal notification.
+    func answer(_ kind: SyncNotifier.Kind, id: String, action: SyncNotifier.Action) {
+        let act = { @MainActor [weak self] in
+            guard let self, let plan = self.sync.plan else { return }
+            switch (kind, action) {
+            case (.askAdd, .share), (.askRemove, .share):
+                if let ask = plan.asks.first(where: { $0.id == id }) { self.sync.share(ask) }
+            case (.askAdd, .keep), (.askRemove, .keep):
+                if let ask = plan.asks.first(where: { $0.id == id }) { self.sync.keepHere(ask) }
+            case (.incomingAdd, .install):
+                if let item = plan.incoming.first(where: { $0.id == id }) { self.install(item) }
+            case (.incomingAdd, .skip):
+                if let item = plan.incoming.first(where: { $0.id == id }) { self.sync.skip(item) }
+            case (.incomingRemove, .uninstall):
+                if let item = plan.removedElsewhere.first(where: { $0.id == id }) {
+                    self.sync.uninstall(item) { [weak self] in self?.scan() }
+                }
+            case (.incomingRemove, .keep), (.incomingRemoveByHand, .keep):
+                if let item = plan.removedElsewhere.first(where: { $0.id == id }) { self.sync.dismissRemoval(item) }
+            default:
+                self.selection = .sync
+                self.sync.showWindow?()
+            }
+        }
+        if sync.plan == nil { sync.whenPlanned.append(act) } else { act() }
+    }
+
+    /// Installs one app or package another Mac installed (the user said yes).
+    /// Homebrew packages go through restore, shown in the restore sheet; App
+    /// Store apps open in the App Store (installing them needs the user).
+    func install(_ item: SyncIncoming) {
+        if let app = item.entry.value?.app {
+            if let url = URL(string: "macappstore://apps.apple.com/app/id\(app.id)") { NSWorkspace.shared.open(url) }
+            return
+        }
+        guard !restore.isRunning else {
+            errorMessage = "A restore is running. Install \(item.title) once it's done."
+            return
+        }
+        reviewIncoming([item])
+        sync.showWindow?()
+        if let preview = restorePreview, showingRestorePreview { restore.start(preview, model: self) }
     }
 
     /// Opens the restore sheet on incoming sync changes.

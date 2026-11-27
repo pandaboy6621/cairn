@@ -16,7 +16,7 @@ struct SyncView: View {
                     SyncFolderOffline()
                 } else if sync.isOn {
                     if !sync.requests.isEmpty { SyncRequests() }
-                    if let plan = sync.plan, !(plan.incoming.isEmpty && plan.conflicts.isEmpty && plan.removedElsewhere.isEmpty) {
+                    if let plan = sync.plan, !(plan.incoming.isEmpty && plan.conflicts.isEmpty && plan.removedElsewhere.isEmpty && plan.asks.isEmpty) {
                         SyncChanges(plan: plan)
                     }
                     SyncConnection()
@@ -392,10 +392,34 @@ private struct SyncChoices: View {
             }
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.45)))
 
+            AppChangeOptions()
+
             Label("To choose single items, right-click them in the checklist. Synced items show \(Image(systemName: "arrow.triangle.2.circlepath")).",
                   systemImage: "cursorarrow.click.2")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Asking before installs and removals travel, and notifications about them.
+private struct AppChangeOptions: View {
+    @Environment(AppModel.self) private var model
+    // Plain State, not @State: the Command Line Tools lack SwiftUI's macro plugin.
+    private let notify = State(initialValue: SyncNotifier.shared.enabled)
+
+    var body: some View {
+        let sync = model.sync
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Ask before apps installed or removed here go to my other Macs",
+                   isOn: Binding(get: { sync.askSoftware }, set: { sync.askSoftware = $0 }))
+            Toggle("Notify me about app installs and removals", isOn: Binding(
+                get: { notify.wrappedValue },
+                set: { notify.wrappedValue = $0; SyncNotifier.shared.enabled = $0 }))
+            Text("Your other Macs always ask before installing or removing anything.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .toggleStyle(.checkbox)
+        .padding(.top, 4)
     }
 }
 
@@ -480,6 +504,27 @@ private struct SyncChanges: View {
     var body: some View {
         let sync = model.sync
         VStack(alignment: .leading, spacing: 12) {
+            if !plan.asks.isEmpty {
+                HStack {
+                    Text("Installed or removed on this Mac").font(.title3.weight(.semibold))
+                    Text("\(plan.asks.count)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Text("Your other Macs haven't been told yet. If you share a change, each Mac asks before installing or removing anything.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ChangeList {
+                    ForEach(plan.asks) { ask in
+                        ChangeRow(category: ask.category, title: ask.title,
+                                  detail: ask.isRemoval ? "Removed here" : "Installed here") {
+                            HStack(spacing: 6) {
+                                Button(ask.isRemoval ? "Remove from Other Macs" : "Add to Other Macs") { sync.share(ask) }
+                                    .buttonStyle(.borderedProminent).tint(.purple)
+                                Button("This Mac Only") { sync.keepHere(ask) }
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                }
+            }
             if !plan.incoming.isEmpty {
                 HStack {
                     Text("From your other Macs").font(.title3.weight(.semibold))
@@ -497,9 +542,16 @@ private struct SyncChanges: View {
                     ForEach(plan.incoming) { item in
                         ChangeRow(category: item.category, title: item.title,
                                   detail: "\(item.current == nil ? "New" : "Changed") on \(item.entry.device) · \(item.entry.updated.formatted(.relative(presentation: .named)))") {
-                            Button("Skip") { sync.skip(item) }
-                                .buttonStyle(.borderless)
-                                .help("Keep this Mac as it is. Offered again if it changes on another Mac.")
+                            HStack(spacing: 8) {
+                                if item.current == nil, SyncEngine.asksFirst(item.id) {
+                                    Button(item.entry.value?.app != nil ? "Open in App Store" : "Install") { model.install(item) }
+                                        .controlSize(.small)
+                                        .help(SyncNotifier.installText(item.entry.value))
+                                }
+                                Button("Skip") { sync.skip(item) }
+                                    .buttonStyle(.borderless)
+                                    .help("Keep this Mac as it is. Offered again if it changes on another Mac.")
+                            }
                         }
                     }
                 }
@@ -525,25 +577,53 @@ private struct SyncChanges: View {
                 }
             }
             if !plan.removedElsewhere.isEmpty {
-                DisclosureGroup("Removed on another Mac (\(plan.removedElsewhere.count)): left as they are here") {
+                HStack {
+                    Text("Removed on another Mac").font(.title3.weight(.semibold))
+                    Text("\(plan.removedElsewhere.count)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Text("Still here. Nothing is removed unless you choose to.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ChangeList {
                     ForEach(plan.removedElsewhere) { r in
-                        HStack {
-                            Text(r.title)
-                            Spacer()
-                            Text("on \(r.entry.device)").font(.caption).foregroundStyle(.secondary)
-                            Button("Dismiss") { sync.dismissRemoval(r) }
-                                .buttonStyle(.borderless)
-                                .controlSize(.small)
-                                .help("Stop listing this. It stays installed here.")
-                        }
-                        .padding(.vertical, 2)
+                        RemovedRow(item: r)
                     }
                 }
-                .foregroundStyle(.secondary)
             }
         }
         .padding(16)
         .background(CardBackground(tint: .purple))
+    }
+}
+
+/// Something another Mac removed: uninstall it here (after a confirmation that
+/// says exactly what happens) or keep it.
+private struct RemovedRow: View {
+    @Environment(AppModel.self) private var model
+    let item: SyncIncoming
+    private let confirming = State(initialValue: false)
+
+    var body: some View {
+        let sync = model.sync
+        let removal = sync.removal(for: item)
+        ChangeRow(category: item.category, title: item.title,
+                  detail: "Removed on \(item.entry.device) · \(item.entry.updated.formatted(.relative(presentation: .named)))") {
+            HStack(spacing: 8) {
+                if sync.removing.contains(item.id) {
+                    ProgressView().controlSize(.small)
+                } else if removal != nil {
+                    Button("Uninstall…") { confirming.wrappedValue = true }.controlSize(.small)
+                }
+                Button("Keep It") { sync.dismissRemoval(item) }
+                    .buttonStyle(.borderless)
+                    .help("Stop listing this. It stays installed here.")
+            }
+        }
+        .confirmationDialog("Uninstall \(item.title) from this Mac?", isPresented: confirming.projectedValue) {
+            Button("Uninstall", role: .destructive) { sync.uninstall(item) { model.scan() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(removal.map { "Cairn will \($0.summary)." } ?? "")
+        }
     }
 }
 
