@@ -273,11 +273,30 @@ import Testing
         let p = Process(), pipe = Pipe()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [folder.appendingPathComponent("setup.sh").path] + args
-        p.environment = ["PATH": bin.path + ":/usr/bin:/bin", "HOME": home.path]
+        p.environment = ["PATH": bin.path + ":" + (try systemTools(in: dir)).path, "HOME": home.path]
         p.standardOutput = pipe; p.standardError = pipe
         try p.run(); p.waitUntilExit()
         let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         return (out, (try? String(contentsOfFile: log, encoding: .utf8)) ?? "", home)
+    }
+
+    /// The system's tools (bash, grep, ...) minus real package managers and
+    /// anything that needs root, so the kit can only reach the stand-ins: with
+    /// plain `/usr/bin` on PATH, a machine with Flatpak installed ran the real
+    /// `flatpak install` and downloaded gigabytes into the throwaway home.
+    static func systemTools(in dir: URL) throws -> URL {
+        let hidden: Set<String> = ["flatpak", "snap", "apt", "apt-get", "apt-cache", "dpkg", "dpkg-query", "dnf",
+                                   "brew", "pipx", "sudo", "pkexec", "gsettings", "dconf", "systemctl"]
+        let out = dir.appendingPathComponent("system-bin")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        for source in ["/usr/bin", "/bin"] {
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: source)) ?? [] where !hidden.contains(name) {
+                let link = out.appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: link.path) { continue }
+                try? FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: source + "/" + name)
+            }
+        }
+        return out
     }
 
     @Test func linuxDryRunChecksWhatIsAlreadyThere() throws {
