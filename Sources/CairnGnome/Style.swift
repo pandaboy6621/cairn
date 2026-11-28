@@ -139,7 +139,48 @@ enum Style {
 
     // MARK: Stylesheet
 
-    static let css = """
+    static let css = baseCSS + homeCSS + ringCSS
+
+    /// The Home cards' colours: teal (Back Up), blue (Restore), purple (Sync).
+    static let cardColors = [("teal", "#2fb5a5"), ("blue", "#3584e4"), ("purple", "#9b59d0")]
+
+    /// One rule per percent and colour: GTK's CSS has conic gradients but no
+    /// variables in them, so a ring's fill is a class like `ring-blue-73`.
+    static let ringCSS: String = {
+        var out = ""
+        for (name, color) in cardColors {
+            for p in 0...100 {
+                let deg = Double(p) * 3.6
+                out += ".ring-\(name)-\(p) { background-image: conic-gradient(\(color) 0deg, \(color) \(deg)deg, "
+                    + "alpha(currentColor, 0.12) \(deg)deg, alpha(currentColor, 0.12) 360deg); }\n"
+            }
+        }
+        return out
+    }()
+
+    static let homeCSS: String = {
+        var out = """
+        .ring { min-width: 104px; min-height: 104px; border-radius: 999px; }
+        .ring-off { background-color: alpha(currentColor, 0.08); }
+        .ring-hole { min-width: 88px; min-height: 88px; border-radius: 999px;
+                     background-color: @window_bg_color; background-image: linear-gradient(@card_bg_color, @card_bg_color); }
+        .home-card { min-width: 190px; border-radius: 16px; background-color: @card_bg_color;
+                     box-shadow: 0 1px 3px alpha(black, 0.12), inset 0 0 0 1px alpha(currentColor, 0.06); }
+        .card-footer { min-height: 0; padding: 2px 8px; }
+        .card-footer label { opacity: 0.7; }
+
+        """
+        for (name, color) in cardColors {
+            out += ".home-card-\(name) { background-image: linear-gradient(to bottom, alpha(\(color), 0.13), alpha(\(color), 0.02) 60%); }\n"
+            out += ".ring-icon-\(name) { color: \(color); }\n"
+            out += ".card-button-\(name) { background-color: \(color); color: white; }\n"
+            out += ".card-button-\(name):hover { background-color: shade(\(color), 1.08); }\n"
+            out += ".card-button-\(name):disabled { background-color: alpha(\(color), 0.4); color: alpha(white, 0.7); }\n"
+        }
+        return out
+    }()
+
+    static let baseCSS = """
     .tile { border-radius: 8px; padding: 6px; color: white; }
     .tile-large { border-radius: 11px; padding: 10px; }
     .tile-xl { border-radius: 13px; padding: 12px; }

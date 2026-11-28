@@ -14,6 +14,7 @@ struct SyncState {
         var name: String
         var detail: String
         var isLinux: Bool
+        var syncing: Bool
     }
 
     var phase: Phase = .loading

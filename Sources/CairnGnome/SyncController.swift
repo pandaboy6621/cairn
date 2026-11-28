@@ -45,7 +45,7 @@ extension MainView {
                     if !d.info.osVersion.isEmpty { detail += " " + d.info.osVersion }
                     detail += d.info.lastSync.map { " · synced " + BackupMessages.date($0) } ?? " · not synced yet"
                     if !d.config.enabled { detail += " · sync off" }
-                    return .init(id: d.folder, name: d.info.name, detail: detail, isLinux: d.info.os == "linux")
+                    return .init(id: d.folder, name: d.info.name, detail: detail, isLinux: d.info.os == "linux", syncing: d.config.enabled)
                 }
                 let requests = c.store.requests(trust: c.local.trust(), me: c.identity.deviceID)
                 let lastSync = c.store.base(device: me).lastSync

@@ -9,7 +9,7 @@ import Foundation
 /// as packages), `CAIRN_SCREENSHOT_DARK=1` or `=0`, `CAIRN_SCREENSHOT_DELAY` (seconds).
 @MainActor
 enum WindowShot {
-    static func scheduleIfRequested(select: @escaping @MainActor (Destination) -> Void) {
+    static func scheduleIfRequested(select: @escaping @MainActor (String) -> Void) {
         let env = ProcessInfo.processInfo.environment
         guard let path = env["CAIRN_SCREENSHOT"], !path.isEmpty else { return }
         // AdwColorScheme: 1 = force light, 4 = force dark.
@@ -17,16 +17,18 @@ enum WindowShot {
             adw_style_manager_set_color_scheme(adw_style_manager_get_default(), scheme)
         }
         let delay = Double(env["CAIRN_SCREENSHOT_DELAY"] ?? "") ?? 5
-        if let page = env["CAIRN_SCREENSHOT_PAGE"] {
-            after(delay - 1.5) {
-                switch page {
-                case "home": select(.home)
-                case "snapshots": select(.snapshots)
-                case "restore": select(.restore)
-                case "sync": select(.sync)
-                default: if let c = ChecklistCategory(rawValue: page) { select(.category(c)) }
-                }
+        // CAIRN_SCREENSHOT_SIZE=700x900: render the window at that size.
+        if let size = env["CAIRN_SCREENSHOT_SIZE"]?.split(separator: "x").compactMap({ Int32($0) }), size.count == 2 {
+            after(1) {
+                guard let list = gtk_window_list_toplevels(), let first = list.pointee.data else { return }
+                g_list_free(list)
+                let window = first.assumingMemoryBound(to: GtkWindow.self)
+                gtk_window_unmaximize(window)
+                gtk_window_set_default_size(window, size[0], size[1])
             }
+        }
+        if let page = env["CAIRN_SCREENSHOT_PAGE"] {
+            after(delay - 1.5) { select(page) }
         }
         after(delay) {
             save(to: path)

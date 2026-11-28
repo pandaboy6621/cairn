@@ -9,6 +9,8 @@ struct RestoreState {
     enum Phase: Equatable { case idle, previewing, previewed, applying, applied, failed(String) }
 
     var snapshotID: String?
+    /// A backup file chosen from Home (instead of a snapshot in the folder).
+    var file: URL?
     var phase: Phase = .idle
     var report: KitReport?
     var doByHand = ""
@@ -29,6 +31,7 @@ struct RestorePage: View {
     var snapshots: [Snapshot]
     var state: RestoreState
     var select: (String) -> Void
+    var clearFile: () -> Void
     var preview: () -> Void
     var askToApply: () -> Void
 
@@ -37,7 +40,7 @@ struct RestorePage: View {
     }
 
     var view: Body {
-        if snapshots.isEmpty {
+        if snapshots.isEmpty && state.file == nil {
             StatusPage("No Backups to Restore", icon: .custom(name: "document-revert-symbolic"),
                        description: "Back up this computer first, or choose the folder where your backups are.")
                 .vexpand()
@@ -66,8 +69,18 @@ struct RestorePage: View {
 
     var picker: AnyView {
         Form {
+            if let file = state.file {
+                ActionRow("Backup file")
+                    .subtitle(file.lastPathComponent)
+                    .suffix {
+                        Button("Use the Folder's Backups") { clearFile() }
+                            .flat()
+                            .valign(.center)
+                    }
+            } else {
             ComboRow("Backup", selection: Binding { state.snapshotID ?? snapshots.first?.id ?? "" } set: { select($0) },
                      values: choices)
+            }
             ActionRow("Preview")
                 .subtitle("Lists what restoring would change. Changes nothing.")
                 .suffix {

@@ -35,15 +35,12 @@ struct CairnGnome: App {
 
 /// A page in the sidebar.
 enum Destination: Hashable, Identifiable {
-    case home, restore, sync, snapshots
+    case home
     case category(ChecklistCategory)
 
     var id: String {
         switch self {
         case .home: return "home"
-        case .restore: return "restore"
-        case .sync: return "sync"
-        case .snapshots: return "snapshots"
         case .category(let c): return c.rawValue
         }
     }
@@ -51,9 +48,6 @@ enum Destination: Hashable, Identifiable {
     var title: String {
         switch self {
         case .home: return "Home"
-        case .restore: return "Restore"
-        case .sync: return "Sync"
-        case .snapshots: return "Snapshots"
         case .category(let c): return Style.title(c)
         }
     }
@@ -61,9 +55,6 @@ enum Destination: Hashable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "user-home-symbolic"
-        case .restore: return "document-revert-symbolic"
-        case .sync: return "emblem-synchronizing-symbolic"
-        case .snapshots: return "document-open-recent-symbolic"
         case .category(let c): return Style.icon(c)
         }
     }
@@ -71,9 +62,6 @@ enum Destination: Hashable, Identifiable {
     var tint: String {
         switch self {
         case .home: return "tint-blue"
-        case .restore: return "tint-teal"
-        case .sync: return "tint-purple"
-        case .snapshots: return "tint-green"
         case .category(let c): return Style.tint(c)
         }
     }
@@ -100,10 +88,18 @@ struct MainView: View {
     @State var restore = RestoreState()
     @State var sync = SyncState()
     @State var chooseSyncFolder: Signal = .init()
+    @State var homePreview: HomePreview?
+    @State var homeWide = true
+    @State var showBackups = false
+    @State var showRestore = false
+    @State var showSync = false
+    @State var preferences = false
+    @State var backUpToFolder: Signal = .init()
+    @State var chooseBackupFile: Signal = .init()
 
     var destinations: [Destination] {
         let categories = checklist.map { LinuxChecklist.categories(in: $0) } ?? []
-        return [.home, .restore, .sync] + categories.map { .category($0) } + [.snapshots]
+        return [.home] + categories.map { .category($0) }
     }
 
     var view: Body {
@@ -118,6 +114,22 @@ struct MainView: View {
         .showContent($showContent)
         .breakpoint(minWidth: 680, matches: $wide)
         .toast(toastText, signal: $toast)
+        .dialog(visible: $showBackups, title: "Backups", width: 640, height: 720) {
+            SnapshotsPage(snapshots: snapshots, folder: folder, chooseFolder: { chooseFolder.signal() })
+                .topToolbar { HeaderBar.empty() }
+        }
+        .dialog(visible: $showRestore, title: "Restore", width: 760, height: 820) {
+            RestorePage(snapshots: restoreChoices, state: restore,
+                        select: { id in restore.snapshotID = id; restore.file = nil; restore.phase = .idle; restore.report = nil },
+                        clearFile: { restore.file = nil; restore.phase = .idle; restore.report = nil },
+                        preview: { onMainLoop { runRestore(apply: false) } },
+                        askToApply: { restore.confirm = true })
+                .topToolbar { HeaderBar.empty() }
+        }
+        .dialog(visible: $showSync, title: "Sync", width: 760, height: 820) {
+            SyncPage(state: sync, actions: syncActions)
+                .topToolbar { HeaderBar.empty() }
+        }
         .alertDialog(visible: Binding { restore.confirm } set: { restore.confirm = $0 },
                      heading: "Apply This Restore?",
                      body: "Cairn will make the \(restore.report?.changeCount ?? 0) changes in the preview: add software sources, install apps and change settings. It asks for your password first. A file it replaces is kept with .before-cairn added to its name.")
@@ -128,6 +140,37 @@ struct MainView: View {
                      body: "Cairn will make the \(sync.report?.changeCount ?? 0) changes in the preview on this computer. It asks for your password first.")
         .response("Cancel", role: .close) { }
         .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runSyncRestore(apply: true) } }
+        .folderImporter(open: $backUpToFolder, initialFolder: folder, title: "Back Up To",
+                        acceptLabel: "Back Up Here") { url in backUp(to: url) }
+        .fileImporter(open: $chooseBackupFile, initialFolder: folder, title: "Choose a Backup File",
+                      acceptLabel: "Preview") { url in previewFile(url) }
+        .preferencesDialog(visible: $preferences)
+        .preferencesPage("General", icon: .custom(name: "emblem-system-symbolic")) { page in
+            page
+                .group("Backups") {
+                    ActionRow("Backup folder")
+                        .subtitle(BackupFolder.displayPath(folder))
+                        .suffix {
+                            Button("Change…") { preferences = false; chooseFolder.signal() }
+                                .flat()
+                                .valign(.center)
+                        }
+                    ActionRow("Backups found")
+                        .subtitle(snapshots.isEmpty ? "None in this folder yet"
+                                  : "\(snapshots.count) in this folder, from \(Set(snapshots.map(\.info.device)).count) computer\(Set(snapshots.map(\.info.device)).count == 1 ? "" : "s")")
+                    ActionRow("Find backups automatically")
+                        .subtitle("Cairn looks for backups in the backup folder, including ones from your other computers.")
+                }
+                .group("Sync") {
+                    ActionRow("Sync")
+                        .subtitle(sync.enabled ? "On, through " + (sync.folder.map { BackupFolder.displayPath($0) } ?? "the backup folder") : "Off")
+                        .suffix {
+                            Button("Open Sync") { preferences = false; showSync = true }
+                                .flat()
+                                .valign(.center)
+                        }
+                }
+        }
         .folderImporter(open: $chooseSyncFolder, initialFolder: sync.folder ?? folder, title: "Choose the Sync Folder",
                         acceptLabel: "Sync Through This Folder") { url in setSyncFolder(url) }
         .css { Style.css }
@@ -139,12 +182,26 @@ struct MainView: View {
         }
         .onAppear {
             Style.addIconSearchPath()
-            WindowShot.scheduleIfRequested(select: { selection = $0 })
+            WindowShot.scheduleIfRequested(select: { page in
+                switch page {
+                case "backups": showBackups = true
+                case "restore": showRestore = true
+                case "restore-preview": homeActions.previewLatest(); onMainLoop { openRestore() }
+                case "sync": showSync = true
+                case "home": selection = .home
+                default: if let c = ChecklistCategory(rawValue: page) { selection = .category(c) }
+                }
+            })
             // After the first frame: state set while the view is first built is lost.
             onMainLoop {
                 loadSnapshots()
                 scan()
                 loadSync()
+                // Three cards across from about 900 pixels of window.
+                WindowWidth.watch { width in
+                    let wide = width >= 900
+                    if wide != homeWide { homeWide = wide }
+                }
             }
         }
     }
@@ -220,9 +277,7 @@ struct MainView: View {
 
     func badge(_ d: Destination) -> String {
         switch d {
-        case .home, .restore: return ""
-        case .sync: return sync.enabled ? (sync.incomingCount > 0 ? "\(sync.incomingCount)" : "") : "Off"
-        case .snapshots: return snapshots.isEmpty ? "" : "\(snapshots.count)"
+        case .home: return ""
         case .category(let c): return checklist.map { "\($0.count(in: c).total)" } ?? ""
         }
     }
@@ -252,9 +307,7 @@ struct MainView: View {
 
     @ViewBuilder var content: Body {
         VStack {
-            HomePage(checklist: checklist, warnings: warnings, scanning: scanning, scannedAt: scannedAt,
-                     saving: saving, folder: folder, snapshots: snapshots, open: go,
-                     chooseFolder: { chooseFolder.signal() }, backUp: backUp)
+            HomePage(data: homeData, actions: homeActions)
                 .visible(selection == .home)
             ForEach(destinations.compactMap { d -> ChecklistCategory? in
                 if case .category(let c) = d { return c } else { return nil }
@@ -262,15 +315,6 @@ struct MainView: View {
                 CategoryPage(checklist: $checklist, apps: apps, category: category)
                     .visible(selection == .category(category))
             }
-            SnapshotsPage(snapshots: snapshots, folder: folder, chooseFolder: { chooseFolder.signal() })
-                .visible(selection == .snapshots)
-            RestorePage(snapshots: restoreChoices, state: restore,
-                        select: { id in restore.snapshotID = id; restore.phase = .idle; restore.report = nil },
-                        preview: { onMainLoop { runRestore(apply: false) } },
-                        askToApply: { restore.confirm = true })
-                .visible(selection == .restore)
-            SyncPage(state: sync, actions: syncActions)
-                .visible(selection == .sync)
         }
         .vexpand()
         .topToolbar {
@@ -294,9 +338,6 @@ struct MainView: View {
         guard let list = checklist else { return "" }
         switch selection {
         case .home: return scannedAt.map { "Scanned at " + Style.time($0) } ?? ""
-        case .restore: return restore.running ? (restore.phase == .applying ? "Applying…" : "Previewing…") : ""
-        case .sync: return sync.enabled ? (sync.folder.map { BackupFolder.displayPath($0) } ?? "") : "Off"
-        case .snapshots: return BackupFolder.displayPath(folder)
         case .category(let c):
             let n = list.count(in: c)
             return "\(n.checked) of \(n.total) selected"
@@ -334,10 +375,10 @@ struct MainView: View {
         }
     }
 
-    func backUp() {
+    func backUp(to target: URL? = nil) {
         guard let list = checklist, !saving else { return }
         saving = true
-        let folder = folder
+        let folder = target ?? folder
         Task.detached {
             let message: String
             do {
@@ -365,8 +406,10 @@ struct MainView: View {
     /// Runs the kit for the chosen snapshot: a dry run, or for real with the
     /// password asked by Cairn's own window (sudo -A).
     func runRestore(apply: Bool) {
-        guard !restore.running, let snapshot = restoreChoices.first(where: { $0.id == restore.snapshotID }) ?? restoreChoices.first else { return }
-        restore.snapshotID = snapshot.id
+        let file = restore.file
+        let snapshot = restoreChoices.first(where: { $0.id == restore.snapshotID }) ?? restoreChoices.first
+        guard !restore.running, file != nil || snapshot != nil else { return }
+        if file == nil { restore.snapshotID = snapshot?.id }
         restore.phase = apply ? .applying : .previewing
         restore.lastLine = ""
         let folder = folder
@@ -374,7 +417,7 @@ struct MainView: View {
             var helper: URL?
             defer { if let helper { try? FileManager.default.removeItem(at: helper) } }
             do {
-                let manifest = try SnapshotStore(root: folder).manifest(of: snapshot)
+                let manifest = try file.map { try ManifestCoder.read(from: $0) } ?? SnapshotStore(root: folder).manifest(of: snapshot!)
                 var askpass: String?
                 if apply {
                     let h = try Askpass.helper()
@@ -401,199 +444,87 @@ struct MainView: View {
         }
     }
 
+    // MARK: Home
+
+    var mySnapshots: [Snapshot] {
+        let me = checklist?.source.device.name ?? ""
+        return snapshots.filter { $0.info.device == me }
+    }
+
+    var homeData: HomeData {
+        HomeData(checklist: checklist, scanning: scanning, scannedAt: scannedAt, saving: saving, folder: folder,
+                 myBackups: mySnapshots, allBackups: snapshots, preview: homePreview, sync: sync, warnings: warnings,
+                 threeAcross: homeWide)
+    }
+
+    var homeActions: HomeActions {
+        HomeActions(open: go,
+                    preferences: { preferences = true },
+                    backUp: { backUp() },
+                    backUpTo: { backUpToFolder.signal() },
+                    showLastBackup: { if let s = mySnapshots.first { Self.openInFiles(s.url) } },
+                    openFolder: { Self.openInFiles(folder) },
+                    changeFolder: { chooseFolder.signal() },
+                    applyPreset: { preset in checklist?.apply(preset) },
+                    scanAgain: { onMainLoop { scan() } },
+                    previewLatest: { if let s = restoreChoices.first { previewSnapshot(s) } },
+                    preview: { previewSnapshot($0) },
+                    chooseBackupFile: { chooseBackupFile.signal() },
+                    showPreviewInFiles: {
+                        if let p = homePreview { Self.openInFiles(p.snapshot?.url ?? p.file?.deletingLastPathComponent() ?? folder) }
+                    },
+                    clearPreview: { homePreview = nil },
+                    refreshBackups: { loadSnapshots() },
+                    viewChanges: { openRestore() },
+                    openBackups: { showBackups = true },
+                    openSync: { showSync = true },
+                    syncNow: { onMainLoop { syncNow() } },
+                    turnOffSync: { setSync(false) })
+    }
+
+    static func openInFiles(_ url: URL) {
+        g_app_info_launch_default_for_uri(url.absoluteString, nil, nil)
+    }
+
+    /// The Restore card's quick comparison: the backup against this scan, the
+    /// same BackupComparison the Mac uses, so the numbers match.
+    func previewSnapshot(_ s: Snapshot) {
+        guard let current = checklist?.source else { return }
+        let folder = folder
+        Task.detached {
+            guard let backup = try? SnapshotStore(root: folder).manifest(of: s) else { return }
+            let c = BackupComparison(backup: backup, current: current)
+            let name = BackupMessages.date(s.info.created) + " · " + s.info.device
+            onMainLoop { homePreview = HomePreview(snapshot: s, file: nil, name: name, comparison: c) }
+        }
+    }
+
+    func previewFile(_ url: URL) {
+        guard let current = checklist?.source else { return }
+        do {
+            let backup = try ManifestCoder.read(from: url)
+            homePreview = HomePreview(snapshot: nil, file: url, name: url.lastPathComponent,
+                                      comparison: BackupComparison(backup: backup, current: current))
+        } catch {
+            toastText = "That isn't a Cairn backup: \(error.localizedDescription)"
+            toast.signal()
+        }
+    }
+
+    /// "View Changes": the Restore page with the previewed backup, previewing.
+    func openRestore() {
+        if let p = homePreview {
+            restore.snapshotID = p.snapshot?.id
+            restore.file = p.file
+        }
+        restore.phase = .idle
+        restore.report = nil
+        showRestore = true
+        onMainLoop { runRestore(apply: false) }
+    }
+
     func loadSnapshots() {
         snapshots = SnapshotStore(root: folder).list()
-    }
-}
-
-// MARK: - Home
-
-struct HomePage: View {
-    var checklist: Checklist?
-    var warnings: [String]
-    var scanning: Bool
-    var scannedAt: Date?
-    var saving: Bool
-    var folder: URL
-    var snapshots: [Snapshot]
-    var open: (Destination) -> Void
-    var chooseFolder: () -> Void
-    var backUp: () -> Void
-
-    struct Stat: Identifiable {
-        var id: String { label }
-        var value: String
-        var label: String
-        var icon: String
-        var tint: String
-        var destination: Destination
-    }
-
-    var view: Body {
-        if let list = checklist {
-            ScrollView {
-                Clamp()
-                    .maximumSize(820)
-                    .child {
-                        VStack(spacing: 24) {
-                            header(list)
-                            stats(list)
-                            backupCard(list)
-                            if !warnings.isEmpty { warningList }
-                            footnote
-                        }
-                        .padding(24, [.leading, .trailing])
-                        .padding(28, [.top, .bottom])
-                    }
-            }
-            .hscrollbarPolicy(.never)
-            .vexpand()
-        } else {
-            StatusPage("Scanning This Computer", icon: .custom(name: "system-search-symbolic"),
-                       description: "Looking at your apps, settings and config files. Nothing is changed.") {
-                Spinner()
-                    .frame(minWidth: 32)
-                    .halign(.center)
-            }
-            .vexpand()
-        }
-    }
-
-    func header(_ list: Checklist) -> AnyView {
-        HStack(spacing: 18) {
-            Symbol(icon: .custom(name: "dev.cairn.Cairn"))
-                .pixelSize(72)
-                .iconDropshadow()
-            VStack(spacing: 4) {
-                Text("Your computer's setup")
-                    .title1()
-                    .halign(.start)
-                Text([list.source.device.name, scannedAt.map { "scanned " + Style.time($0) }].compactMap { $0 }
-                        .joined(separator: " · "))
-                    .dimLabel()
-                    .halign(.start)
-            }
-            .valign(.center)
-        }
-    }
-
-    func stats(_ list: Checklist) -> AnyView {
-        let packages = list.count(in: .packages).total
-        let settingCategories: [ChecklistCategory] = [.lookAndLayout, .systemSettings, .appPreferences]
-        let settings = settingCategories.reduce(0) { $0 + list.count(in: $1).total }
-        let firstSettings = LinuxChecklist.categories(in: list).first { settingCategories.contains($0) } ?? .systemSettings
-        let values = [
-            Stat(value: "\(packages)", label: packages == 1 ? "App" : "Apps", icon: Style.icon(.packages),
-                 tint: Style.tint(.packages), destination: .category(.packages)),
-            Stat(value: "\(settings)", label: settings == 1 ? "Setting" : "Settings", icon: Style.icon(.systemSettings),
-                 tint: "tint-cyan", destination: .category(firstSettings)),
-            Stat(value: "\(list.checkedCount)", label: "Selected", icon: "object-select-symbolic",
-                 tint: "tint-green", destination: .category(LinuxChecklist.categories(in: list).first ?? .packages)),
-            Stat(value: "\(snapshots.count)", label: snapshots.count == 1 ? "Snapshot" : "Snapshots",
-                 icon: "document-open-recent-symbolic", tint: "tint-purple", destination: .snapshots),
-        ]
-        return HStack(spacing: 12) {
-            ForEach(values) { stat in
-            Button(icon: .custom(name: stat.icon)) { open(stat.destination) }
-                .child {
-                    HStack(spacing: 14) {
-                        Symbol(icon: .custom(name: stat.icon))
-                            .pixelSize(20)
-                            .style("tile")
-                            .style("tile-large")
-                            .style(stat.tint)
-                        VStack {
-                            Text(stat.value)
-                                .title2()
-                                .numeric()
-                                .halign(.start)
-                            Text(stat.label)
-                                .caption()
-                                .dimLabel()
-                                .halign(.start)
-                        }
-                        .valign(.center)
-                    }
-                    .halign(.start)
-                }
-                .style("stat-card")
-                .hexpand()
-            }
-        }
-    }
-
-    func backupCard(_ list: Checklist) -> AnyView {
-        let last = snapshots.first.map { "Last backup " + BackupMessages.date($0.info.created) + "." }
-            ?? "No backups yet."
-        return VStack(spacing: 10) {
-            Symbol(icon: .custom(name: "drive-harddisk-symbolic"))
-                .pixelSize(40)
-                .style("hero-ring")
-                .halign(.center)
-            Text("Back Up")
-                .title2()
-                .padding(6, [.top])
-            Text("\(list.checkedCount) of \(list.items.count) items selected")
-                .heading()
-                .style("teal-text")
-            Text(last + " Saves a snapshot of the apps and settings you selected, never your files.")
-                .wrap()
-                .justify(.center)
-                .dimLabel()
-                .frame(maxWidth: 440)
-            Button(saving ? "Saving…" : "Back Up Now") { backUp() }
-                .pill()
-                .suggested()
-                .style("teal-button")
-                .halign(.center)
-                .padding(8, [.top])
-                .insensitive(saving || scanning || list.checkedCount == 0)
-            HStack(spacing: 6) {
-                Symbol(icon: .custom(name: "folder-symbolic"))
-                    .pixelSize(14)
-                    .dimLabel()
-                Text("Saves to " + BackupFolder.displayPath(folder))
-                    .ellipsize()
-                    .caption()
-                    .dimLabel()
-                Button("Change…") { chooseFolder() }
-                    .flat()
-                    .style("small-link")
-            }
-            .halign(.center)
-        }
-        .padding(28)
-        .inCard("backup-card")
-    }
-
-    var warningList: AnyView {
-        FormSection("Couldn't Read") {
-            Form {
-                ForEach(warnings, id: \.self) { w in
-                    ActionRow(w)
-                        .subtitleLines(3)
-                        .prefix {
-                            Symbol(icon: .custom(name: "dialog-warning-symbolic"))
-                                .warning()
-                        }
-                }
-            }
-        }
-    }
-
-    var footnote: AnyView {
-        HStack(spacing: 8) {
-            Symbol(icon: .custom(name: "security-high-symbolic"))
-                .pixelSize(14)
-                .dimLabel()
-                .valign(.start)
-            Text("Scanning and backing up only read this computer. Cairn never changes it without showing you exactly what will change first.")
-                .wrap()
-                .caption()
-                .dimLabel()
-                .halign(.start)
-                .hexpand()
-        }
     }
 }
 
