@@ -320,4 +320,12 @@ import Testing
         #expect(list.contains("its 2 apt packages have no Fedora names"))
         #expect(!list.contains("Not in every distro"))
     }
+
+    @Test func linuxShellFilesArentCalledMacFiles() {
+        var m = Self.linuxBackup()
+        m.dotfiles = [DotfileItem(path: "~/.bashrc", kind: .shell, content: "alias ll='ls -l'\n")]
+        let list = PlatformExport.make(m, for: .linux).checklist()
+        #expect(list.contains("These are test-laptop's own shell files."))
+        #expect(!list.contains("written for the Mac"))
+    }
 }

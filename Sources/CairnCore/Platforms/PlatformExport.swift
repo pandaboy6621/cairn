@@ -890,7 +890,9 @@ public struct PlatformExport: Equatable, Sendable {
             byHand += "### Shell config (\(shells.count))\n\n"
             byHand += target == .windows
                 ? "These were written for zsh or bash on the Mac, so the script doesn't install them. They're in the `dotfiles` folder: copy any aliases or settings you want into your PowerShell profile (or into WSL).\n\n"
-                : "These were written for the Mac (Homebrew paths, macOS commands), so the script doesn't install them. They're in the `dotfiles` folder: merge what you want into yours.\n\n"
+                : device.os == "linux"
+                    ? "These are \(Self.oneLine(device.name))'s own shell files. The script doesn't overwrite your shell setup: they're in the `dotfiles` folder, so merge what you want into yours.\n\n"
+                    : "These were written for the Mac (Homebrew paths, macOS commands), so the script doesn't install them. They're in the `dotfiles` folder: merge what you want into yours.\n\n"
             byHand += shells.map { "- [ ] `\($0.name)` → `~/\(Self.oneLine($0.target))`" }.joined(separator: "\n") + "\n\n"
         }
         let commented = dotfiles.reduce(0) { $0 + $1.commented }
