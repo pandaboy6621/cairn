@@ -7,15 +7,15 @@ private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.sel
                                                 Dock.self, Displays.self, VaultCommand.self, SyncCommand.self, Export.self,
                                                 UpdateCommand.self]
 #else
-// Linux: backing up and exporting. Restore, sync, the vault and the Mac layout commands are macOS-only for now.
-private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, Export.self]
+// Linux: backing up, restoring (through the setup kit) and exporting. Sync, the vault and the Mac layout commands are macOS-only for now.
+private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, LinuxRestore.self, Export.self]
 #endif
 
 @main
 struct CairnCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cairn",
-        abstract: "Back up, restore, and sync a computer's setup (macOS, or Linux for backups).",
+        abstract: "Back up, restore, and sync a computer's setup (macOS; Linux backs up and restores).",
         version: Cairn.version,
         subcommands: commands
     )
