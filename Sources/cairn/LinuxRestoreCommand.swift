@@ -36,26 +36,10 @@ struct LinuxRestore: ParsableCommand {
             stderr("Using snapshot \(newest.id).")
             manifest = try store.manifest(of: newest)
         }
-        let kit = PlatformExport.make(manifest, for: .linux)
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("cairn-restore-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let folder = try kit.write(into: tmp)
-        print(kit.summary)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [folder.appendingPathComponent("setup.sh").path] + (apply ? ["--apply"] : [])
-        p.currentDirectoryURL = folder
-        try p.run()
-        p.waitUntilExit()
-        if !kit.debFiles.isEmpty || !kit.unmapped.isEmpty || !kit.reposByHand.isEmpty {
-            let list = (try? String(contentsOf: folder.appendingPathComponent("CHECKLIST.md"), encoding: .utf8)) ?? ""
-            if let start = list.range(of: "## Do by hand") {
-                print("\n" + list[start.lowerBound...].trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-        }
-        if p.terminationStatus != 0 { throw ExitCode(p.terminationStatus) }
+        print(PlatformExport.make(manifest, for: .linux).summary)
+        let result = try LinuxRestoreRun(manifest: manifest).run(apply: apply) { print($0) }
+        if !result.doByHand.isEmpty { print("\n" + result.doByHand) }
+        if result.status != 0 { throw ExitCode(result.status) }
     }
 }
 #endif
