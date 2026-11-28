@@ -239,7 +239,7 @@ import Testing
 
     /// Runs the Linux kit's `setup.sh` with stand-in Ubuntu tools on PATH and a
     /// throwaway home folder. Returns what it printed and what `sudo` was asked to do.
-    static func runLinuxKit(_ args: [String], tools extra: [String: String] = [:]) throws -> (out: String, sudo: String, home: URL) {
+    static func runLinuxKit(_ args: [String], tools extra: [String: String] = [:], env: [String: String] = [:]) throws -> (out: String, sudo: String, home: URL) {
         var m = manifest()
         m.packages.append(PackageItem(id: "ghost", kind: .formula, resolvers: ["brew": "ghost", "apt": "ghost"]))
         m.packages.append(PackageItem(id: "uv", kind: .formula, resolvers: ["brew": "uv"]))
@@ -274,6 +274,7 @@ import Testing
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [folder.appendingPathComponent("setup.sh").path] + args
         p.environment = ["PATH": bin.path + ":" + (try systemTools(in: dir)).path, "HOME": home.path]
+            .merging(env) { $1 }
         p.standardOutput = pipe; p.standardError = pipe
         try p.run(); p.waitUntilExit()
         let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
@@ -370,6 +371,16 @@ import Testing
 
     /// Everything already there: --apply has nothing to do, so it never calls sudo
     /// (no password prompt, no `apt-get update`).
+    /// From Cairn's app (no terminal), every root step goes through `sudo -A`, so
+    /// sudo asks with the app's password window; from a terminal it stays plain sudo.
+    @Test func linuxApplyUsesTheAskpassWindowWhenTheAppRunsIt() throws {
+        let app = try Self.runLinuxKit(["--apply"], env: ["CAIRN_ASKPASS": "1"])
+        let lines = app.sudo.split(separator: "\n")
+        #expect(!lines.isEmpty && lines.allSatisfy { $0.hasPrefix("-A ") }, "sudo log: \(app.sudo)")
+        let terminal = try Self.runLinuxKit(["--apply"])
+        #expect(!terminal.sudo.isEmpty && !terminal.sudo.contains("-A "))
+    }
+
     @Test func linuxApplyWithNothingToDoNeedsNoSudo() throws {
         let everything = #"echo 'install ok installed'"#
         let r = try Self.runLinuxKit(["--apply"], tools: [

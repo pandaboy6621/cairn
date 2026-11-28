@@ -438,6 +438,9 @@ public struct PlatformExport: Equatable, Sendable {
         APPLY=0
         [ "${1:-}" = "--apply" ] && APPLY=1
         failed=()
+        # Root rights through sudo. Cairn's app has no terminal to ask in, so it sets
+        # CAIRN_ASKPASS=1 and SUDO_ASKPASS, and sudo -A shows its password window.
+        as_root() { if [ "${CAIRN_ASKPASS:-}" = 1 ]; then sudo -A "$@"; else sudo "$@"; fi; }
 
         APT=(\(apt.map { sh($0.id) }.joined(separator: " ")))
         # The vendor repository each apt package comes from ('' for the distro's own).
@@ -475,7 +478,7 @@ public struct PlatformExport: Equatable, Sendable {
           for p in "$@"; do
             if installed "$manager" "$p"; then echo "  $p is already installed"; continue; fi
             if [ $APPLY = 1 ] && [ "$manager" = apt ] && [ $refreshed = 0 ]; then
-              sudo apt-get update -qq >/dev/null; refreshed=1
+              as_root apt-get update -qq >/dev/null; refreshed=1
             fi
             from=$(repo_of "$p")
             if [ $APPLY = 0 ] && [ -n "$from" ] && [[ " ${newrepos[*]} " == *" $from "* ]]; then
@@ -484,8 +487,8 @@ public struct PlatformExport: Equatable, Sendable {
             if ! available "$manager" "$p"; then echo "  $p isn't in $manager here"; missing+=("$p"); continue; fi
             if [ $APPLY = 1 ]; then
               echo "  installing $p"
-              if [ "$manager" = apt ]; then sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null || failed+=("$p")
-              else sudo dnf install -y -q "$p" >/dev/null || failed+=("$p"); fi
+              if [ "$manager" = apt ]; then as_root DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null || failed+=("$p")
+              else as_root dnf install -y -q "$p" >/dev/null || failed+=("$p"); fi
             else
               echo "  would install $p"
             fi
@@ -512,7 +515,7 @@ public struct PlatformExport: Equatable, Sendable {
               FLATPAK=()
             elif [ $APPLY = 1 ]; then
               echo "  installing flatpak first"
-              if command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y flatpak; else sudo dnf install -y flatpak; fi
+              if command -v apt-get >/dev/null 2>&1; then as_root apt-get install -y flatpak; else as_root dnf install -y flatpak; fi
               command -v flatpak >/dev/null 2>&1 || { failed+=(flatpak); FLATPAK=(); }
               newflatpak=1
             else
@@ -597,12 +600,12 @@ public struct PlatformExport: Equatable, Sendable {
             if [ $APPLY = 1 ]; then
               echo "  adding $id ($uris)"
               key=/etc/apt/keyrings/cairn-$id.${REPO_KEYFMT[$i]}
-              sudo install -d -m 0755 /etc/apt/keyrings
-              if printf '%s' "${REPO_KEYS[$i]}" | base64 -d | sudo tee "$key" >/dev/null && sudo chmod 0644 "$key"; then
+              as_root install -d -m 0755 /etc/apt/keyrings
+              if printf '%s' "${REPO_KEYS[$i]}" | base64 -d | as_root tee "$key" >/dev/null && as_root chmod 0644 "$key"; then
                 { printf 'Types: deb\nURIs: %s\nSuites: %s\n' "$uris" "${REPO_SUITES[$i]}"
                   [ -n "${REPO_COMPONENTS[$i]}" ] && printf 'Components: %s\n' "${REPO_COMPONENTS[$i]}"
                   [ -n "${REPO_ARCHS[$i]}" ] && printf 'Architectures: %s\n' "${REPO_ARCHS[$i]}"
-                  printf 'Signed-By: %s\n' "$key"; } | sudo tee "/etc/apt/sources.list.d/cairn-$id.sources" >/dev/null || failed+=("$id")
+                  printf 'Signed-By: %s\n' "$key"; } | as_root tee "/etc/apt/sources.list.d/cairn-$id.sources" >/dev/null || failed+=("$id")
               else
                 failed+=("$id")
               fi
@@ -630,7 +633,7 @@ public struct PlatformExport: Equatable, Sendable {
             n=${SNAPS[$i]} classic=()
             [ "${SNAP_CLASSIC[$i]}" = 1 ] && classic=(--classic)
             if snap list "$n" >/dev/null 2>&1; then echo "  $n is already installed"
-            elif [ $APPLY = 1 ]; then echo "  installing $n"; sudo snap install "$n" "${classic[@]}" >/dev/null || failed+=("$n")
+            elif [ $APPLY = 1 ]; then echo "  installing $n"; as_root snap install "$n" "${classic[@]}" >/dev/null || failed+=("$n")
             else echo "  would install $n"; fi
           done
         fi
