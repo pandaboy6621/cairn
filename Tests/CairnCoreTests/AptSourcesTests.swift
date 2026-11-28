@@ -288,21 +288,24 @@ import Testing
 
     static let gitconfig = "[credential]\n\thelper = !/usr/bin/gh auth git-credential\n"
 
-    @Test func configStillAsBackedUpCountsAsSetUp() throws {
+    /// A Linux backup's config goes back exactly as backed up (`/usr/bin/gh` stays),
+    /// so the same laptop counts as set up and a restore doesn't rewrite it.
+    @Test func linuxConfigGoesBackExactlyAsBackedUp() throws {
         var m = Self.linuxBackup()
         m.dotfiles = [DotfileItem(path: "~/.gitconfig", kind: .git, content: Self.gitconfig)]
         let kit = PlatformExport.make(m, for: .linux)
-        #expect(kit.dotfiles[0].text.contains("helper = !gh auth"))
-        #expect(kit.dotfiles[0].backupSHA != nil)
+        #expect(kit.dotfiles[0].text == Self.gitconfig)
 
         let same = try Self.run([], manifest: m, homeFiles: [".gitconfig": Self.gitconfig])
-        #expect(same.out.contains(".gitconfig is already as backed up"))
+        #expect(same.out.contains(".gitconfig already matches"))
         let edited = try Self.run([], manifest: m, homeFiles: [".gitconfig": Self.gitconfig + "[core]\n\teditor = nano\n"])
         #expect(edited.out.contains("would replace .gitconfig"))
 
-        // From a Mac backup, the Mac's own file is never good enough on Linux.
+        // A Mac backup's file is made portable for Linux (Homebrew's gh path dropped).
         m.device = Device(name: "test-mac", os: "macos", osVersion: "26.1")
-        #expect(PlatformExport.make(m, for: .linux).dotfiles[0].backupSHA == nil)
+        m.dotfiles = [DotfileItem(path: "~/.gitconfig", kind: .git,
+                                  content: "[credential]\n\thelper = !/opt/homebrew/bin/gh auth git-credential\n")]
+        #expect(PlatformExport.make(m, for: .linux).dotfiles[0].text.contains("helper = !gh auth"))
     }
 
     @Test func aKeyInTwoSchemasIsNamedWithItsSchema() {

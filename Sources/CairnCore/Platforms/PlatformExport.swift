@@ -1,9 +1,4 @@
 import Foundation
-#if canImport(CryptoKit)
-import CryptoKit
-#else
-import Crypto
-#endif
 
 /// Another OS a backup can set up.
 public enum TargetPlatform: String, CaseIterable, Identifiable, Sendable {
@@ -78,9 +73,6 @@ public struct PlatformExport: Equatable, Sendable {
         /// macOS-only lines commented out, and secret-looking lines left out of the backup.
         public var commented: Int
         public var redacted: Int
-        /// Linux backups: SHA-256 of the file as backed up, when the kit's copy differs
-        /// from it only by being made portable. A file still like that counts as set up.
-        public var backupSHA: String? = nil
     }
 
     public var registry: [RegistryWrite] = []
@@ -178,13 +170,12 @@ public struct PlatformExport: Equatable, Sendable {
         e.shares = m.shares.filter(\.include)
         for d in m.dotfiles where d.include && Dotfiles.isKnown(d.path) {
             let installs = d.kind != .shell
-            let p = installs ? Dotfiles.portable(d, windows: target == .windows) : (text: d.content, commented: 0)
-            var kit = KitDotfile(name: Dotfiles.kitName(d.path), target: d.relativePath, kind: d.kind,
-                                 text: p.text, installs: installs, commented: p.commented, redacted: d.redacted)
-            if target == .linux, m.device.os == "linux", installs, p.text != d.content {
-                kit.backupSHA = SHA256.hash(data: Data(d.content.utf8)).map { String(format: "%02x", $0) }.joined()
-            }
-            e.dotfiles.append(kit)
+            // A Linux backup's git and SSH config already worked on Linux: it goes back
+            // exactly as backed up. Only other systems' files are made portable.
+            let asIs = target == .linux && m.device.os == "linux"
+            let p = installs && !asIs ? Dotfiles.portable(d, windows: target == .windows) : (text: d.content, commented: 0)
+            e.dotfiles.append(KitDotfile(name: Dotfiles.kitName(d.path), target: d.relativePath, kind: d.kind,
+                                         text: p.text, installs: installs, commented: p.commented, redacted: d.redacted))
         }
         e.hasLayout = m.layout.dock?.include == true || m.layout.displays?.include == true
             || m.layout.wallpaper?.include == true
@@ -789,12 +780,10 @@ public struct PlatformExport: Equatable, Sendable {
         var s = """
 
         KIT="$(cd "$(dirname "$0")" && pwd)"
-        sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
-        put_config() { # kit file, path below $HOME, mode, [SHA-256 of the file as backed up]
+        put_config() { # kit file, path below $HOME, mode
           local src="$KIT/dotfiles/$1" dst="$HOME/$2"
           if [ -L "$dst" ]; then echo "  skipped $2: it's a link (a dotfiles tool may manage it)"; return; fi
           if [ -f "$dst" ] && cmp -s "$src" "$dst"; then echo "  $2 already matches"; return; fi
-          if [ -n "${4:-}" ] && [ -f "$dst" ] && [ "$(sha256_of "$dst")" = "$4" ]; then echo "  $2 is already as backed up"; return; fi
           if [ $APPLY = 1 ]; then
             if [ "$3" = 600 ]; then mkdir -p -m 700 "$(dirname "$dst")"; else mkdir -p "$(dirname "$dst")"; fi
             if [ -e "$dst" ]; then cp -p "$dst" "$dst.before-cairn" && echo "  kept your old $2 as $2.before-cairn"; fi
@@ -806,7 +795,7 @@ public struct PlatformExport: Equatable, Sendable {
         """
         s += "echo \"Config files (\(files.count))\"\n"
         for d in files {
-            s += "put_config \(sh(d.name)) \(sh(d.target)) \(d.kind == .ssh ? "600" : "644")" + (d.backupSHA.map { " \($0)" } ?? "") + "\n"
+            s += "put_config \(sh(d.name)) \(sh(d.target)) \(d.kind == .ssh ? "600" : "644")\n"
         }
         return s
     }
