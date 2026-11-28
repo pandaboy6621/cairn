@@ -231,18 +231,20 @@ struct HomePage: View {
     func ring(_ fraction: Double?, tint: String, icon: String?, label: String? = nil, disabled: Bool = false) -> AnyView {
         let p = fraction.map { max(0, min(100, Int(($0 * 100).rounded()))) } ?? 0
         // The hole is a horizontal box: its child gets the full height, so
-        // valign centres it without anything expanding the card.
-        let centre: AnyView
-        if let label {
-            centre = Text(label)
+        // valign centres it without anything expanding the card. Both the
+        // percentage and the icon are always there and one is shown, so a ring
+        // that turns from icon to percentage updates in place.
+        let centre: AnyView = HStack {
+            Text(label ?? "")
                 .title2()
                 .numeric()
                 .valign(.center)
-        } else {
-            centre = Symbol(icon: .custom(name: icon ?? "emblem-ok-symbolic"))
+                .visible(label != nil)
+            Symbol(icon: .custom(name: icon ?? "emblem-ok-symbolic"))
                 .pixelSize(30)
                 .style(disabled ? "dim-label" : "ring-icon-\(tint)")
                 .valign(.center)
+                .visible(label == nil)
         }
         return VStack {
             HStack { centre.hexpand().halign(.center) }

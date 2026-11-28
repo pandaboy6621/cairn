@@ -125,21 +125,21 @@ struct MainView: View {
                         preview: { onMainLoop { runRestore(apply: false) } },
                         askToApply: { restore.confirm = true })
                 .topToolbar { HeaderBar.empty() }
+            .alertDialog(visible: Binding { restore.confirm } set: { restore.confirm = $0 },
+                         heading: "Apply This Restore?",
+                         body: "Cairn will make the \(restore.report?.changeCount ?? 0) changes in the preview: add software sources, install apps and change settings. It asks for your password first. A file it replaces is kept with .before-cairn added to its name.")
+            .response("Cancel", role: .close) { }
+            .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runRestore(apply: true) } }
         }
         .dialog(visible: $showSync, title: "Sync", width: 760, height: 820) {
             SyncPage(state: sync, actions: syncActions)
                 .topToolbar { HeaderBar.empty() }
+            .alertDialog(visible: Binding { sync.confirm } set: { sync.confirm = $0 },
+                         heading: "Apply Changes from Your Other Computers?",
+                         body: "Cairn will make the \(sync.report?.changeCount ?? 0) changes in the preview on this computer. It asks for your password first.")
+            .response("Cancel", role: .close) { }
+            .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runSyncRestore(apply: true) } }
         }
-        .alertDialog(visible: Binding { restore.confirm } set: { restore.confirm = $0 },
-                     heading: "Apply This Restore?",
-                     body: "Cairn will make the \(restore.report?.changeCount ?? 0) changes in the preview: add software sources, install apps and change settings. It asks for your password first. A file it replaces is kept with .before-cairn added to its name.")
-        .response("Cancel", role: .close) { }
-        .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runRestore(apply: true) } }
-        .alertDialog(visible: Binding { sync.confirm } set: { sync.confirm = $0 },
-                     heading: "Apply Changes from Your Other Computers?",
-                     body: "Cairn will make the \(sync.report?.changeCount ?? 0) changes in the preview on this computer. It asks for your password first.")
-        .response("Cancel", role: .close) { }
-        .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runSyncRestore(apply: true) } }
         .folderImporter(open: $backUpToFolder, initialFolder: folder, title: "Back Up To",
                         acceptLabel: "Back Up Here") { url in backUp(to: url) }
         .fileImporter(open: $chooseBackupFile, initialFolder: folder, title: "Choose a Backup File",
@@ -371,6 +371,7 @@ struct MainView: View {
                 warnings = report.warnings
                 scannedAt = Date()
                 scanning = false
+                refreshHomePreview()
             }
         }
     }
@@ -435,6 +436,8 @@ struct MainView: View {
                     if apply {
                         toastText = result.report.failed.isEmpty ? "Restore finished" : "Restore finished with problems"
                         toast.signal()
+                        // This computer just changed: scan it again, which also redoes the card's comparison.
+                        scan()
                     }
                 }
             } catch {
@@ -497,6 +500,13 @@ struct MainView: View {
             let name = BackupMessages.date(s.info.created) + " · " + s.info.device
             onMainLoop { homePreview = HomePreview(snapshot: s, file: nil, name: name, comparison: c) }
         }
+    }
+
+    /// After a scan, the Restore card's comparison is redone against the new scan,
+    /// so it never shows numbers from before a restore.
+    func refreshHomePreview() {
+        guard let p = homePreview else { return }
+        if let s = p.snapshot { previewSnapshot(s) } else if let f = p.file { previewFile(f) }
     }
 
     func previewFile(_ url: URL) {

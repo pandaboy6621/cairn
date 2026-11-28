@@ -11,6 +11,9 @@ import Foundation
 enum WindowShot {
     static func scheduleIfRequested(select: @escaping @MainActor (String) -> Void) {
         let env = ProcessInfo.processInfo.environment
+        // CAIRN_SCREENSHOT_DIR=<folder>: keep running and save <folder>/<name>.png
+        // whenever a file <folder>/take containing <name> appears (for multi-step demos).
+        if let dir = env["CAIRN_SCREENSHOT_DIR"], !dir.isEmpty { watchForRequests(in: dir) }
         guard let path = env["CAIRN_SCREENSHOT"], !path.isEmpty else { return }
         // AdwColorScheme: 1 = force light, 4 = force dark.
         if let dark = env["CAIRN_SCREENSHOT_DARK"], let scheme = AdwColorScheme(rawValue: dark == "1" ? 4 : 1) {
@@ -34,6 +37,21 @@ enum WindowShot {
             save(to: path)
             exit(0)
         }
+    }
+
+    static func watchForRequests(in dir: String) {
+        let trigger = dir + "/take"
+        func poll() {
+            after(0.5) {
+                if let name = try? String(contentsOfFile: trigger, encoding: .utf8) {
+                    try? FileManager.default.removeItem(atPath: trigger)
+                    let clean = name.trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isLetter || $0.isNumber || $0 == "-" }
+                    if !clean.isEmpty { save(to: dir + "/" + clean + ".png") }
+                }
+                poll()
+            }
+        }
+        poll()
     }
 
     private static func after(_ seconds: Double, _ body: @escaping @MainActor () -> Void) {
