@@ -138,6 +138,9 @@ public struct PackageItem: Codable, Equatable, Sendable {
         case formula, cask, tap
         /// Linux: a distro package (apt), a Flathub app, a Snap.
         case apt, flatpak, snap
+        /// Linux: a third-party apt repository (address and signing key in
+        /// `resolvers`), added before installing the packages that come from it.
+        case aptrepo
         /// Windows: a winget package (`Git.Git`), or a Microsoft Store app by its
         /// Store id (`9NKSQGP7F2NH`).
         case winget, msstore

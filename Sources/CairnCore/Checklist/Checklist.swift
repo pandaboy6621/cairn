@@ -219,13 +219,14 @@ public struct Checklist: Sendable {
     static func buildItems(_ m: Manifest) -> [ChecklistItem] {
         var out: [ChecklistItem] = []
         let kindTitles: [PackageItem.Kind: String] = [.formula: "Formulae", .cask: "Casks", .tap: "Taps",
-                                                       .apt: "apt packages", .flatpak: "Flatpak apps", .snap: "Snaps",
+                                                       .apt: "apt packages", .flatpak: "Flatpak apps", .snap: "Snaps", .aptrepo: "Software sources",
                                                        .winget: "winget packages", .msstore: "Microsoft Store apps"]
         for kind in PackageItem.Kind.allCases {
             for p in m.packages where p.kind == kind {
                 let brew = p.resolvers["brew"] ?? p.id
+                let detail = kind == .aptrepo ? (p.resolvers["uris"] ?? "") : (brew == p.id ? "" : brew)
                 out.append(ChecklistItem(id: id(package: p), category: .packages, group: kindTitles[kind]!,
-                                         title: p.id, detail: brew == p.id ? "" : brew, isChecked: p.include))
+                                         title: p.id, detail: detail, isChecked: p.include))
             }
         }
         for a in m.apps.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {

@@ -56,6 +56,20 @@ public enum PackageCatalog {
         return nil
     }
 
+    /// Official download pages for apps usually installed from a downloaded `.deb`.
+    public static let debDownloads: [String: String] = [
+        "bitwarden": "https://bitwarden.com/download/",
+        "discord": "https://discord.com/download",
+        "localsend": "https://localsend.org/download",
+        "rustdesk": "https://rustdesk.com/download",
+        "zoom": "https://zoom.us/download",
+        "slack-desktop": "https://slack.com/downloads/linux",
+        "code": "https://code.visualstudio.com/download",
+        "google-chrome-stable": "https://www.google.com/chrome/",
+        "obsidian": "https://obsidian.md/download",
+        "steam-launcher": "https://store.steampowered.com/about/",
+    ]
+
     static let officeSuites: Set<String> = ["libreoffice", "libreoffice-still", "openoffice", "onlyoffice"]
     static let officeCasks: Set<String> = ["microsoft-office", "microsoft-word", "microsoft-excel", "microsoft-powerpoint", "microsoft-outlook"]
     static let officeApps: Set<String> = ["Microsoft Word", "Microsoft Excel", "Microsoft PowerPoint", "Microsoft Outlook"]
@@ -74,7 +88,7 @@ public enum PackageCatalog {
         // From a Linux backup: find the entry with this name, for the other platforms' names.
         case .apt: return byName(formulae, casks) { $0.apt == p.id }
         case .flatpak: return byName(casks, formulae) { $0.flatpak == p.id }
-        case .snap, .msstore: return nil
+        case .snap, .msstore, .aptrepo: return nil
         // From a Windows backup.
         case .winget: return byName(casks, formulae) { $0.winget == p.id }
         }

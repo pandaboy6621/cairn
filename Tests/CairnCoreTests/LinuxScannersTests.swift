@@ -75,7 +75,7 @@ import Testing
         let r = FixtureRunner()
         r.stub(Command("apt-mark", ["showmanual"]), stdout: manual + "\n")
         r.stub(Command("dpkg-query", ["-W", AptScanner.dpkgFormat]), stdout: dpkg)
-        let found = try AptScanner(aptLogs: logs.path).scan(using: r).packages
+        let found = try AptScanner(aptLogs: logs.path, sourcesDirectory: logs.path).scan(using: r).packages
         // curl is needed by Steam, but apt's history says it was asked for.
         #expect(found.map(\.id) == ["brave-browser", "curl", "gh", "libavif-bin", "libimage-exiftool-perl", "nmap", "steam-launcher", "yt-dlp"])
         #expect(found[0].kind == .apt && found[0].resolvers == ["apt": "brave-browser"])
@@ -117,7 +117,7 @@ import Testing
         let r = FixtureRunner()
         r.stub(Command("apt-mark", ["showmanual"]), stdout: manual)
         r.stub(Command("dpkg-query", ["-W", AptScanner.dpkgFormat]), stdout: dpkg)
-        let found = try AptScanner(aptLogs: logs.path).scan(using: r).packages.map(\.id)
+        let found = try AptScanner(aptLogs: logs.path, sourcesDirectory: logs.path).scan(using: r).packages.map(\.id)
         // libegl1 and libinput-bin came with Ubuntu, steam-libs-amd64 with Steam's helper.
         // htop was installed later from a root shell (no Requested-By), so it stays.
         #expect(found == ["htop", "nmap", "steam-launcher"])

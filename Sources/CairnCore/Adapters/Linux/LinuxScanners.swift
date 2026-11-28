@@ -24,8 +24,12 @@ public struct AptScanner: SetupScanning {
     static let dpkgFormat = "-f=${db:Status-Abbrev}\t${Package}\t${Priority}\t${Pre-Depends}, ${Depends}\n"
 
     let aptLogs: String
+    let sourcesDirectory: String
 
-    public init(aptLogs: String = "/var/log/apt") { self.aptLogs = aptLogs }
+    public init(aptLogs: String = "/var/log/apt", sourcesDirectory: String = AptSources.sourcesDirectory) {
+        self.aptLogs = aptLogs
+        self.sourcesDirectory = sourcesDirectory
+    }
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
         var out = ScanContribution()
@@ -42,8 +46,24 @@ public struct AptScanner: SetupScanning {
         installerList.formUnion(Self.installedBySetup(history: log))
         // What only another app's helper installed comes back when that app runs (Steam's libraries).
         installerList.formUnion(Self.installedByHelpers(history: log).subtracting(asked))
-        out.packages = Self.userPackages(manual: manual, rows: rows, installerList: installerList, asked: asked)
-            .sorted().map { PackageItem(id: $0, kind: .apt, resolvers: ["apt": $0]) }
+        let mine = Self.userPackages(manual: manual, rows: rows, installerList: installerList, asked: asked).sorted()
+        // Where each one came from: a vendor's repository comes along, a downloaded .deb is noted.
+        let repos = AptSources.repos(in: sourcesDirectory)
+        let names = mine.filter { PlatformExport.valid($0) != nil }
+        let policy = names.isEmpty ? "" : ((try? runner.output(Command("apt-cache", ["policy"] + names))) ?? "")
+        let origins = AptSources.origins(policy: policy, repos: repos)
+        var used = Set<String>()
+        out.packages = mine.map { name in
+            var r = ["apt": name]
+            switch origins[name] {
+            case .repo(let id)?: r["apt-repo"] = id; used.insert(id)
+            case .debFile?: r["apt-source"] = "deb"
+            default: break
+            }
+            return PackageItem(id: name, kind: .apt, resolvers: r)
+        }
+        // Only repositories something the user installed comes from.
+        out.packages += repos.filter { used.contains($0.id) }.map(\.item)
         return out
     }
 

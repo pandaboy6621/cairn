@@ -48,6 +48,9 @@ public struct CommandPolicy: Sendable {
             return args == ["showmanual"]
         case "dpkg-query":
             return args == ["-W", AptScanner.dpkgFormat]
+        case "apt-cache":
+            // Where installed packages come from; plain package names only.
+            return args.count >= 2 && args[0] == "policy" && args.dropFirst().allSatisfy { PlatformExport.valid($0) != nil }
         case "gzip":
             // The installer's package list, or apt's rotated history logs.
             return args.count == 2 && args[0] == "-dc"

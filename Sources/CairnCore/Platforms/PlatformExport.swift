@@ -20,6 +20,27 @@ public struct PlatformExport: Equatable, Sendable {
         public var id: String
         /// The Homebrew name, for messages.
         public var label: String
+        /// Linux apt: the third-party repository it comes from (an `AptRepoSource` id).
+        public var repo: String? = nil
+    }
+
+    /// A vendor's apt repository to add before installing from it (from a Linux backup).
+    public struct AptRepoSource: Equatable, Sendable {
+        public var id: String
+        public var uris: String
+        public var suites: String
+        public var components: String
+        public var architectures: String
+        /// Base64 of the signing key file.
+        public var key: String
+        /// `gpg` (binary) or `asc` (armored).
+        public var keyFormat: String
+    }
+
+    /// A Snap to install (from a Linux backup that had it as a Snap).
+    public struct SnapInstall: Equatable, Sendable {
+        public var name: String
+        public var classic: Bool
     }
 
     public var target: TargetPlatform
@@ -30,6 +51,12 @@ public struct PlatformExport: Equatable, Sendable {
     public var apt: [Install] = []
     public var dnf: [Install] = []
     public var flatpak: [Install] = []
+    public var repos: [AptRepoSource] = []
+    public var snaps: [SnapInstall] = []
+    /// Apps installed from a downloaded `.deb` file: no repository has them.
+    public var debFiles: [String] = []
+    /// Repositories that can't be added by the script (no signing key, or odd values).
+    public var reposByHand: [String] = []
     /// A config file carried in the kit's `dotfiles` folder.
     public struct KitDotfile: Equatable, Sendable {
         /// File name in the kit: `gitconfig`, `ssh-config`.
@@ -71,7 +98,7 @@ public struct PlatformExport: Equatable, Sendable {
     public var secrets = 0
 
     public var packageCount: Int {
-        target == .windows ? winget.count : Set((apt + dnf + flatpak).map(\.label)).count
+        target == .windows ? winget.count : Set((apt + dnf + flatpak).map(\.label)).count + snaps.count
     }
     public var settingCount: Int { target == .windows ? registry.count : gsettings.count }
 
@@ -80,6 +107,24 @@ public struct PlatformExport: Equatable, Sendable {
         for p in m.packages where p.include {
             // A tap is only where Homebrew finds packages; its packages are listed on their own.
             if p.kind == .tap { continue }
+            if p.kind == .aptrepo {
+                if target == .linux {
+                    if let r = repoSource(p) { e.repos.append(r) } else { e.reposByHand.append(p.id) }
+                }
+                continue
+            }
+            if target == .linux, p.kind == .snap, let name = valid(p.resolvers["snap"] ?? p.id) {
+                e.snaps.append(SnapInstall(name: name, classic: p.resolvers["snap-confinement"] == "classic"))
+                continue
+            }
+            if target == .linux, p.kind == .apt, p.resolvers["apt-source"] == "deb" {
+                e.debFiles.append(p.id)
+                continue
+            }
+            if target == .linux, p.kind == .apt, let id = valid(p.resolvers["apt"] ?? p.id) {
+                e.apt.append(Install(id: id, label: p.id, repo: valid(p.resolvers["apt-repo"])))
+                continue
+            }
             let label = p.resolvers["brew"] ?? p.id
             if PackageCatalog.isMacOnly(p) { e.macOnly.append(label); continue }
             if let why = PackageCatalog.redundant(p, in: m, for: target) { e.redundant.append(Skipped(label: label, reason: why)); continue }
@@ -133,6 +178,28 @@ public struct PlatformExport: Equatable, Sendable {
         }
         e.secrets = m.sensitive.filter(\.include).count
         return e
+    }
+
+    /// A repository's values go into a script run with sudo, so each one is checked:
+    /// http(s) addresses, plain words, a base64 key. Nil if anything is off or there's no key.
+    static func repoSource(_ p: PackageItem) -> AptRepoSource? {
+        let r = p.resolvers
+        func plain(_ s: String?, extra: String = "") -> Bool {
+            guard let s else { return true }
+            return s.count <= 512 && s.unicodeScalars.allSatisfy {
+                $0.isASCII && (CharacterSet.alphanumerics.contains($0) || ("._/~+- " + extra).unicodeScalars.contains($0))
+            }
+        }
+        guard let id = valid(p.id), let uris = r["uris"], let suites = r["suites"], let key = r["key"], !key.isEmpty,
+              !uris.isEmpty, !suites.isEmpty,
+              uris.split(separator: " ").allSatisfy({ $0.hasPrefix("https://") || $0.hasPrefix("http://") }),
+              plain(uris, extra: ":%@"), plain(suites), plain(r["components"]), plain(r["architectures"]),
+              key.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+/=".unicodeScalars.contains($0)) }),
+              Data(base64Encoded: key) != nil
+        else { return nil }
+        let format = r["key-format"] == "asc" ? "asc" : "gpg"
+        return AptRepoSource(id: id, uris: uris, suites: suites, components: r["components"] ?? "",
+                             architectures: r["architectures"] ?? "", key: key, keyFormat: format)
     }
 
     /// Package ids go into scripts, so only plain names are allowed (a hand-edited
@@ -361,12 +428,15 @@ public struct PlatformExport: Equatable, Sendable {
         failed=()
 
         APT=(\(apt.map { sh($0.id) }.joined(separator: " ")))
+        # The vendor repository each apt package comes from ('' for the distro's own).
+        APT_REPO=(\(apt.map { sh($0.repo ?? "") }.joined(separator: " ")))
         DNF=(\(dnf.map { sh($0.id) }.joined(separator: " ")))
         FLATPAK=(\(flatpak.map { sh($0.id) }.joined(separator: " ")))
         # The command each app has when it came another way (a snap, the distro).
         FLATPAK_CMD=(\(flatpak.map { sh(PackageCatalog.command(forFlatpak: $0.id)) }.joined(separator: " ")))
 
         missing=()
+        newrepos=()
         # Already there, or can the package manager get it?
         installed() { # manager, package
           if [ "$1" = apt ]; then dpkg-query -W -f='${Status}' "$2" 2>/dev/null | grep -q 'ok installed'
@@ -377,6 +447,11 @@ public struct PlatformExport: Equatable, Sendable {
           else dnf -q info "$2" >/dev/null 2>&1; fi
         }
 
+        repo_of() { # apt package → its vendor repository, if any
+          local i
+          for i in "${!APT[@]}"; do [ "${APT[$i]}" = "$1" ] && { echo "${APT_REPO[$i]}"; return; }; done
+        }
+
         install_with() { # manager, packages...
           local manager=$1; shift
           [ $# -gt 0 ] || return 0
@@ -385,6 +460,10 @@ public struct PlatformExport: Equatable, Sendable {
           [ $APPLY = 1 ] && [ "$manager" = apt ] && sudo apt-get update -qq >/dev/null
           for p in "$@"; do
             if installed "$manager" "$p"; then echo "  $p is already installed"; continue; fi
+            from=$(repo_of "$p")
+            if [ $APPLY = 0 ] && [ -n "$from" ] && [[ " ${newrepos[*]} " == *" $from "* ]]; then
+              echo "  would install $p (from $from, once it's added)"; continue
+            fi
             if ! available "$manager" "$p"; then echo "  $p isn't in $manager here"; missing+=("$p"); continue; fi
             if [ $APPLY = 1 ]; then
               echo "  installing $p"
@@ -396,6 +475,7 @@ public struct PlatformExport: Equatable, Sendable {
           done
         }
 
+        \(bashRepos())\
         if command -v apt-get >/dev/null 2>&1; then
           install_with apt "${APT[@]}"
         \(notIn("apt", onlyDNF))\
@@ -433,6 +513,7 @@ public struct PlatformExport: Equatable, Sendable {
           done
         fi
 
+        \(bashSnaps())\
         set_setting() { # schema, key, value
           local now
           if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $2 (not on this desktop)"; return; fi
@@ -454,10 +535,72 @@ public struct PlatformExport: Equatable, Sendable {
 
         echo
         [ ${#missing[@]} -gt 0 ] && echo "Not available here, install another way: ${missing[*]}"
+        \(debFiles.isEmpty ? "" : "        echo \(sh("Downloaded from their makers' websites, so get them there (see CHECKLIST.md): " + debFiles.sorted().joined(separator: ", ")))\n")\
         if [ $APPLY = 0 ]; then echo "Dry run: nothing changed. Run again with --apply to make these changes."
         elif [ ${#failed[@]} -gt 0 ]; then echo "Didn't work: ${failed[*]}"; fi
         [ $newflatpak = 1 ] && echo "Log out and back in so the new Flathub apps show up in your app list."
         echo "See CHECKLIST.md for what to do by hand."
+
+        """
+        return s
+    }
+
+    /// Adds vendors' apt repositories (key in /etc/apt/keyrings, a deb822 file in
+    /// sources.list.d) before apt installs from them. Skipped when the address is already set up.
+    func bashRepos() -> String {
+        guard !repos.isEmpty else { return "" }
+        func arr(_ name: String, _ values: [String]) -> String { "\(name)=(\(values.map(sh).joined(separator: " ")))\n" }
+        var s = arr("REPO_IDS", repos.map(\.id)) + arr("REPO_URIS", repos.map(\.uris)) + arr("REPO_SUITES", repos.map(\.suites))
+        s += arr("REPO_COMPONENTS", repos.map(\.components)) + arr("REPO_ARCHS", repos.map(\.architectures))
+        s += arr("REPO_KEYS", repos.map(\.key)) + arr("REPO_KEYFMT", repos.map(\.keyFormat))
+        s += """
+        if command -v apt-get >/dev/null 2>&1; then
+          echo "Software sources (${#REPO_IDS[@]})"
+          for i in "${!REPO_IDS[@]}"; do
+            id=${REPO_IDS[$i]} uris=${REPO_URIS[$i]}
+            first=${uris%% *}
+            if grep -rqsF -- "${first%/}" /etc/apt/sources.list /etc/apt/sources.list.d/; then echo "  $id is already set up"; continue; fi
+            newrepos+=("$id")
+            if [ $APPLY = 1 ]; then
+              echo "  adding $id ($uris)"
+              key=/etc/apt/keyrings/cairn-$id.${REPO_KEYFMT[$i]}
+              sudo install -d -m 0755 /etc/apt/keyrings
+              if printf '%s' "${REPO_KEYS[$i]}" | base64 -d | sudo tee "$key" >/dev/null && sudo chmod 0644 "$key"; then
+                { printf 'Types: deb\nURIs: %s\nSuites: %s\n' "$uris" "${REPO_SUITES[$i]}"
+                  [ -n "${REPO_COMPONENTS[$i]}" ] && printf 'Components: %s\n' "${REPO_COMPONENTS[$i]}"
+                  [ -n "${REPO_ARCHS[$i]}" ] && printf 'Architectures: %s\n' "${REPO_ARCHS[$i]}"
+                  printf 'Signed-By: %s\n' "$key"; } | sudo tee "/etc/apt/sources.list.d/cairn-$id.sources" >/dev/null || failed+=("$id")
+              else
+                failed+=("$id")
+              fi
+            else
+              echo "  would add $id ($uris)"
+            fi
+          done
+        fi
+
+        """
+        return s
+    }
+
+    /// Snaps that were Snaps on the backed-up machine.
+    func bashSnaps() -> String {
+        guard !snaps.isEmpty else { return "" }
+        var s = "SNAPS=(\(snaps.map { sh($0.name) }.joined(separator: " ")))\n"
+        s += "SNAP_CLASSIC=(\(snaps.map { $0.classic ? "1" : "0" }.joined(separator: " ")))\n"
+        s += """
+        echo "Snaps (${#SNAPS[@]})"
+        if ! command -v snap >/dev/null 2>&1; then
+          echo "  snap isn't on this system: install these another way: ${SNAPS[*]}"
+        else
+          for i in "${!SNAPS[@]}"; do
+            n=${SNAPS[$i]} classic=()
+            [ "${SNAP_CLASSIC[$i]}" = 1 ] && classic=(--classic)
+            if snap list "$n" >/dev/null 2>&1; then echo "  $n is already installed"
+            elif [ $APPLY = 1 ]; then echo "  installing $n"; sudo snap install "$n" "${classic[@]}" >/dev/null || failed+=("$n")
+            else echo "  would install $n"; fi
+          done
+        fi
 
         """
         return s
@@ -645,7 +788,8 @@ public struct PlatformExport: Equatable, Sendable {
                 s += "`HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Explorer` and delete `StartLayoutFile` and `LockedStartLayout`.\n\n"
             }
         case .linux:
-            s += "Installs packages with apt (Debian, Ubuntu) or dnf (Fedora), apps from Flathub"
+            if !repos.isEmpty { s += "Adds \(repos.count) software source\(repos.count == 1 ? "" : "s") (\(repos.map(\.id).joined(separator: ", "))), then i" } else { s += "I" }
+            s += "nstalls packages with apt (Debian, Ubuntu) or dnf (Fedora), apps from Flathub\(snaps.isEmpty ? "" : ", Snaps")"
             s += gsettings.isEmpty ? ".\n\n" : ", and sets \(gsettings.count) GNOME setting\(gsettings.count == 1 ? "" : "s").\n\n"
             s += "In a terminal, in this folder:\n\n```\nbash setup.sh\n```\n\n"
             s += "That only lists what it would do. Add `--apply` to do it (it asks for your password for apt or dnf).\n\n"
@@ -670,6 +814,16 @@ public struct PlatformExport: Equatable, Sendable {
                 byHand += (onlyDNF.map { line($0, "apt (Debian, Ubuntu)") } + onlyAPT.map { line($0, "dnf (Fedora)") })
                     .joined(separator: "\n") + "\n\n"
             }
+        }
+        if !debFiles.isEmpty {
+            byHand += "### Apps from downloaded .deb files (\(debFiles.count))\n\nNo repository has these: they were downloaded from their makers' websites. Get the latest from there.\n\n"
+            byHand += debFiles.sorted().map { name in
+                "- [ ] \(Self.oneLine(name))" + (PackageCatalog.debDownloads[name].map { ": \($0)" } ?? "")
+            }.joined(separator: "\n") + "\n\n"
+        }
+        if !reposByHand.isEmpty {
+            byHand += "### Software sources to add yourself (\(reposByHand.count))\n\nCairn couldn't read their signing key, so the script doesn't add them. Follow each maker's install instructions.\n\n"
+            byHand += reposByHand.sorted().map { "- [ ] \(Self.oneLine($0))" }.joined(separator: "\n") + "\n\n"
         }
         if !appStore.isEmpty {
             byHand += "### Mac App Store apps (\(appStore.count))\n\nSome have \(target.title) versions on their makers' sites.\n\n"
