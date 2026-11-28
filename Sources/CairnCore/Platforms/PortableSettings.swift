@@ -18,6 +18,17 @@ public struct GSettingsWrite: Equatable, Sendable {
     public var key: String
     /// Already in GVariant text form: `true`, `'prefer-dark'`.
     public var value: String
+    /// For `uint32` values: how far the current value may be from `value` and
+    /// still count as set. Key repeat is stored in the Mac's 15 ms steps, so
+    /// GNOME's 500 ms comes back as 495: within half a step is the same setting.
+    public var tolerance: Int = 0
+
+    public init(schema: String, key: String, value: String, tolerance: Int = 0) {
+        self.schema = schema
+        self.key = key
+        self.value = value
+        self.tolerance = tolerance
+    }
 }
 
 /// Settings with a clear equivalent on Windows or Linux (GNOME). Everything else
@@ -94,7 +105,7 @@ public enum PortableSettings {
             // macOS counts in 15 ms steps; GNOME takes milliseconds.
             guard let steps = int(s.value), (1...300).contains(steps) else { return [] }
             let key = s.key == "keyboard.key_repeat" ? "repeat-interval" : "delay"
-            return [GSettingsWrite(schema: keyboard, key: key, value: "uint32 \(steps * 15)")]
+            return [GSettingsWrite(schema: keyboard, key: key, value: "uint32 \(steps * 15)", tolerance: 7)]
         case "sound.ui_sounds":
             guard let b = bool(s.value) else { return [] }
             return [GSettingsWrite(schema: "org.gnome.desktop.sound", key: "event-sounds", value: String(b))]

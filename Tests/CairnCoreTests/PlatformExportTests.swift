@@ -299,6 +299,45 @@ import Testing
         return out
     }
 
+    /// Key repeat is stored in the Mac's 15 ms steps: GNOME's 500 ms is saved as 33
+    /// steps and comes back as 495. Within half a step counts as already set.
+    @Test func linuxKeyRepeatWithinAStepIsAlreadySet() throws {
+        let item = SettingItem(key: "keyboard.initial_key_repeat", value: .int(33), platforms: ["linux"], adapter: SettingAdapters())
+        let writes = PortableSettings.linux(item)
+        #expect(writes == [GSettingsWrite(schema: "org.gnome.desktop.peripherals.keyboard", key: "delay", value: "uint32 495", tolerance: 7)])
+
+        var m = Self.manifest()
+        m.settings = [item]
+        let script = PlatformExport.make(m, for: .linux).bash()
+        #expect(script.contains("set_setting 'org.gnome.desktop.peripherals.keyboard' 'delay' 'uint32 495' 7"))
+
+        // Run just the script's set_setting with a stand-in gsettings.
+        guard let start = script.range(of: "set_setting() {"),
+              let end = script.range(of: "\n}\n", range: start.upperBound..<script.endIndex) else {
+            Issue.record("no set_setting in the script"); return
+        }
+        let function = String(script[start.lowerBound..<end.upperBound])
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bin = dir.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let gsettings = bin.appendingPathComponent("gsettings")
+        try "#!/bin/bash\n[ \"$1\" = get ] && echo \"uint32 $NOW\" || echo true\n".write(to: gsettings, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gsettings.path)
+        func run(_ now: Int) throws -> String {
+            let p = Process(), pipe = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/bin/bash")
+            p.arguments = ["-c", "APPLY=0; failed=()\n" + function + "set_setting s delay 'uint32 495' 7"]
+            p.environment = ["PATH": bin.path + ":" + (try Self.systemTools(in: dir)).path, "NOW": String(now)]
+            p.standardOutput = pipe; p.standardError = pipe
+            try p.run(); p.waitUntilExit()
+            return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        }
+        #expect(try run(500).contains("delay is already uint32 500 (close enough to uint32 495)"))
+        #expect(try run(495).contains("delay is already uint32 495"))
+        #expect(try run(600).contains("would change delay from uint32 600 to uint32 495"))
+    }
+
     @Test func linuxDryRunChecksWhatIsAlreadyThere() throws {
         let r = try Self.runLinuxKit([])
         #expect(r.out.contains("git is already installed"))
