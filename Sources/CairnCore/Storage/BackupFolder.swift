@@ -71,9 +71,14 @@ public enum BackupFolder {
     }
 
     /// `/Users/x/Library/...` → `~/Library/...` for display.
-    public static func displayPath(_ url: URL) -> String {
-        let home = NSHomeDirectory()
+    /// Linux's Foundation takes the default folder from `$HOME` but `NSHomeDirectory()`
+    /// from the user database; in a container or under sudo they can differ, so both count.
+    public static func displayPath(_ url: URL, environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
         let path = url.path
-        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+        for home in [NSHomeDirectory(), environment["HOME"] ?? ""] where !home.isEmpty && home != "/" {
+            let h = home.hasSuffix("/") ? String(home.dropLast()) : home
+            if path.hasPrefix(h + "/") { return "~" + path.dropFirst(h.count) }
+        }
+        return path
     }
 }
