@@ -328,4 +328,15 @@ import Testing
         #expect(list.contains("These are test-laptop's own shell files."))
         #expect(!list.contains("written for the Mac"))
     }
+
+    /// A newer Cairn may add package kinds (as `aptrepo` was added): an older one
+    /// skips what it doesn't know instead of failing to read the whole backup.
+    @Test func unknownPackageKindsAreSkippedNotFatal() throws {
+        let yaml = try ManifestCoder.encode(Self.linuxBackup())
+            .replacingOccurrences(of: "kind: aptrepo", with: "kind: some-future-kind")
+        let m = try ManifestCoder.decode(yaml)
+        #expect(m.packages.filter { $0.kind == .aptrepo }.isEmpty)
+        #expect(m.packages.contains { $0.uid == "apt:htop" })
+        #expect(m.packages.count == Self.linuxBackup().packages.count - 3)
+    }
 }

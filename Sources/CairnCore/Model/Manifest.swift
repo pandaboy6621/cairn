@@ -59,7 +59,9 @@ public struct Manifest: Codable, Equatable, Sendable {
         }
         device = try c.decode(Device.self, forKey: .device)
         created = try c.decode(Date.self, forKey: .created)
-        packages = try c.decodeIfPresent([PackageItem].self, forKey: .packages) ?? []
+        // Kinds a newer Cairn added are skipped, not fatal: an older Cairn reading a
+        // newer backup keeps everything it understands.
+        packages = (try c.decodeIfPresent([KnownPackage].self, forKey: .packages) ?? []).compactMap(\.item)
         apps = try c.decodeIfPresent([AppItem].self, forKey: .apps) ?? []
         settings = try c.decodeIfPresent([SettingItem].self, forKey: .settings) ?? []
         layout = try c.decodeIfPresent(Layout.self, forKey: .layout) ?? Layout()
@@ -85,6 +87,17 @@ public struct Manifest: Codable, Equatable, Sendable {
         // Whole seconds only: sub-second noise would make every snapshot differ.
         m.created = Date(timeIntervalSince1970: m.created.timeIntervalSince1970.rounded(.down))
         return m
+    }
+}
+
+/// A package entry, or nil when its `kind` is one this version doesn't know.
+private struct KnownPackage: Decodable {
+    var item: PackageItem?
+    private enum Keys: String, CodingKey { case kind }
+
+    init(from decoder: Decoder) throws {
+        let kind = try decoder.container(keyedBy: Keys.self).decode(String.self, forKey: .kind)
+        item = PackageItem.Kind(rawValue: kind) == nil ? nil : try PackageItem(from: decoder)
     }
 }
 

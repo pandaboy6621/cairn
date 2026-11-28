@@ -27,7 +27,9 @@ import Testing
     }
 
     @Test func scansTheUsersFonts() throws {
-        let found = try FontsScanner(home: try Self.home().path).scan(using: FixtureRunner())
+        let home = try Self.home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let found = try FontsScanner(home: home.path).scan(using: FixtureRunner())
         #expect(found.fonts.map(\.file) == ["Old_Suitcase.dfont", "Test-Regular.ttf"])
         let ttf = found.fonts[1]
         #expect(ttf.name == "Test Regular") // not a real font, so named from its file
@@ -51,6 +53,7 @@ import Testing
     @Test func snapshotsKeepOneCopyOfEachFont() throws {
         let home = try Self.home()
         let root = try Self.temp("store")
+        defer { for u in [home, root] { try? FileManager.default.removeItem(at: u) } }
         let store = SnapshotStore(root: root)
         var m = Samples.manifest
         m.fonts = try FontsScanner(home: home.path).scan(using: FixtureRunner()).fonts
@@ -103,6 +106,7 @@ import Testing
     @Test func installsIntoTheFontsFolderWithoutReplacing() throws {
         let backupFonts = try Self.temp("backup")
         let destination = try Self.temp("dest")
+        defer { for u in [backupFonts, destination] { try? FileManager.default.removeItem(at: u) } }
         let new = FontItem(file: "New.ttf", name: "New", sha256: Self.hash("1"), size: 3)
         let there = FontItem(file: "There.ttf", name: "There", sha256: Self.hash("2"), size: 3)
         try Data("new".utf8).write(to: backupFonts.appendingPathComponent(new.storedName))
