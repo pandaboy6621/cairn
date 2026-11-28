@@ -61,6 +61,9 @@ public struct CommandPolicy: Sendable {
             return args == ["list", "--app", "--columns=application"]
         case "snap":
             return args == ["list"]
+        case "nmcli":
+            // Saved connections' names and types; never secrets (that's secretReads).
+            return args == LinuxWiFiScanner.listArgs
         case "gsettings":
             return args.count == 3 && args[0] == "get"
         case "plutil":
@@ -160,6 +163,14 @@ public struct CommandPolicy: Sendable {
     /// this, and macOS asks the user to approve each read.
     public static let secretReads = CommandPolicy { command in
         readOnly.allows(command) || isWiFiPasswordRead(command) || isSharePasswordRead(command)
+            || isLinuxWiFiPasswordRead(command)
+    }
+
+    /// `nmcli --show-secrets --get-values 802-11-wireless-security.psk connection show id <name>`.
+    static func isLinuxWiFiPasswordRead(_ command: Command) -> Bool {
+        let a = command.arguments
+        return command.program == "nmcli" && a.count == 7 && Array(a[0...5]) == Array(LinuxWiFiPasswords.command(name: "").arguments[0...5])
+            && !a[6].isEmpty
     }
 
     static func isWiFiPasswordRead(_ command: Command) -> Bool {

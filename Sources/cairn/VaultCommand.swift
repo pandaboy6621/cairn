@@ -1,16 +1,19 @@
-#if os(macOS)
 import ArgumentParser
 import CairnCore
-import Darwin
 import Foundation
+#if os(macOS)
+import Darwin
+#else
+import Glibc
+#endif
 
 struct VaultCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "vault",
         abstract: "Set up and manage the password that encrypts Sensitive items.",
         discussion: """
-            The vault lives in the backup folder as vault.yaml, so every Mac backing up to
-            the same folder shares one password. It holds no secret in the clear.
+            The vault lives in the backup folder as vault.yaml, so every computer backing up
+            to the same folder shares one password. It holds no secret in the clear.
             """,
         subcommands: [Init.self, Status.self, Check.self, ChangePassword.self, Secrets.self, WiFi.self, Remember.self, Forget.self]
     )
@@ -66,7 +69,7 @@ struct VaultCommand: ParsableCommand {
             }
             let e = try VaultStore.read(in: folder)
             print("Vault in \(BackupFolder.displayPath(folder)): \(e.kdf), \(e.kdfParams.iterations) iterations, version \(e.v).")
-            let remembered = Vault.cachedKey(for: e, cache: KeychainVaultKeyCache()) != nil
+            let remembered = Vault.cachedKey(for: e, cache: PlatformVaultKeyCache.make()) != nil
             print(remembered ? "This Mac remembers the vault key." : "This Mac asks for the vault password each time.")
         }
     }
@@ -119,10 +122,10 @@ extension VaultCommand {
         SetupScanner().scan([.wifi, .ssh, .shares, .tokens, .vpn]).manifest.sensitive
     }
 
-    /// The vault key from this Mac's Keychain if remembered, else a prompt.
+    /// The vault key from this computer's keychain if remembered, else a prompt.
     static func unlock(_ location: Location) throws -> VaultKey {
         let envelope = try VaultStore.read(in: location.url)
-        if let key = Vault.cachedKey(for: envelope, cache: KeychainVaultKeyCache()) { return key }
+        if let key = Vault.cachedKey(for: envelope, cache: PlatformVaultKeyCache.make()) { return key }
         return try Vault.unlock(envelope, password: readPassword("Vault password: ", stdin: location.passwordStdin))
     }
 
@@ -130,7 +133,7 @@ extension VaultCommand {
         let folder = location.url
         let existing = VaultStore.readSecrets(in: folder, device: device)
         let key = try unlock(location)
-        print("Reading \(refs.count) secret\(refs.count == 1 ? "" : "s"). Approve each macOS prompt.")
+        print("Reading \(refs.count) secret\(refs.count == 1 ? "" : "s")." + (isMacHost ? " Approve each macOS prompt." : ""))
         let reader = SecretReader()
         let (file, report) = SecretCapture.capture(refs, into: existing, key: key, read: reader.read)
         try VaultStore.writeSecrets(file, in: folder, device: device)
@@ -145,8 +148,8 @@ extension VaultCommand {
         static let configuration = CommandConfiguration(
             abstract: "List Wi-Fi passwords, SSH keys, and share passwords, or save them encrypted.",
             discussion: """
-                With no options, lists what this Mac has and which are saved. Saving reads each
-                secret (macOS asks you to approve Keychain reads one by one) and stores only
+                With no options, lists what this computer has and which are saved. Saving reads each
+                secret (on a Mac, macOS asks you to approve Keychain reads one by one) and stores only
                 ciphertext, in secrets/<device>.yaml in the backup folder. Each later backup
                 copies it into the snapshot, so automatic backups never need the password.
                 """)
@@ -206,24 +209,24 @@ extension VaultCommand {
 
     struct Remember: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Remember the vault key in this Mac's Keychain, so you're not asked again here.",
-            discussion: "Stays on this Mac (never synced). Undo with `cairn vault forget`.")
+            abstract: "Remember the vault key in this computer's keychain, so you're not asked again here.",
+            discussion: "Stays on this computer (never synced). Undo with `cairn vault forget`.")
         @OptionGroup var location: Location
 
         func run() throws {
             let envelope = try VaultStore.read(in: location.url)
             let key = try Vault.unlock(envelope, password: readPassword("Vault password: ", stdin: location.passwordStdin))
-            try KeychainVaultKeyCache().save(key, vaultID: envelope.id)
-            print("This Mac will remember the vault key.")
+            try PlatformVaultKeyCache.make().save(key, vaultID: envelope.id)
+            print("This computer will remember the vault key.")
         }
     }
 
     struct Forget: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Remove the remembered vault key from this Mac's Keychain.")
+        static let configuration = CommandConfiguration(abstract: "Remove the remembered vault key from this computer's keychain.")
         @OptionGroup var location: Location
 
         func run() throws {
-            KeychainVaultKeyCache().remove(vaultID: try VaultStore.read(in: location.url).id)
+            PlatformVaultKeyCache.make().remove(vaultID: try VaultStore.read(in: location.url).id)
             print("Forgotten. You'll be asked for the vault password next time.")
         }
     }
@@ -235,11 +238,36 @@ func readPassword(_ prompt: String, stdin useStdin: Bool) throws -> String {
         guard let line = readLine(strippingNewline: true) else { throw ValidationError("No password on stdin.") }
         return line
     }
+    #if os(macOS)
     var buffer = [CChar](repeating: 0, count: 1024)
     defer { buffer.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) } }
     guard readpassphrase(prompt, &buffer, buffer.count, RPP_REQUIRE_TTY) != nil else {
         throw ValidationError("Couldn't read a password (no terminal?). Use --password-stdin.")
     }
     return String(cString: buffer)
+    #else
+    // Linux has no readpassphrase: turn the terminal's echo off while reading.
+    let tty = open("/dev/tty", O_RDWR)
+    guard tty >= 0 else { throw ValidationError("Couldn't read a password (no terminal?). Use --password-stdin.") }
+    defer { close(tty) }
+    var saved = termios()
+    guard tcgetattr(tty, &saved) == 0 else { throw ValidationError("Couldn't read a password. Use --password-stdin.") }
+    var quiet = saved
+    quiet.c_lflag &= ~tcflag_t(ECHO)
+    _ = tcsetattr(tty, TCSAFLUSH, &quiet)
+    defer { _ = tcsetattr(tty, TCSAFLUSH, &saved); _ = write(tty, "\n", 1) }
+    _ = prompt.withCString { write(tty, $0, strlen($0)) }
+    var bytes: [UInt8] = []
+    defer { for i in bytes.indices { bytes[i] = 0 } }
+    var c: UInt8 = 0
+    while read(tty, &c, 1) == 1, c != UInt8(ascii: "\n"), bytes.count < 1024 { bytes.append(c) }
+    c = 0
+    return String(decoding: bytes, as: UTF8.self)
+    #endif
 }
+
+#if os(macOS)
+let isMacHost = true
+#else
+let isMacHost = false
 #endif

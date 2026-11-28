@@ -224,4 +224,71 @@ import Testing
         #expect(try String(contentsOfFile: log, encoding: .utf8).contains("default brave-browser.desktop x-scheme-handler/http"))
         #expect(try run(false).contains("chat-app.desktop is already set up"))
     }
+
+    // MARK: Secrets
+
+    @Test func savedWiFiNetworksComeFromNetworkManager() throws {
+        let r = FixtureRunner()
+        r.stub(Command("nmcli", LinuxWiFiScanner.listArgs), stdout: """
+        Home Network:802-11-wireless
+        Wired connection 1:802-3-ethernet
+        Cafe\\:Guest:802-11-wireless
+        Home Network:802-11-wireless
+        lo:loopback
+        """)
+        let refs = try LinuxWiFiScanner().scan(using: r).sensitive
+        #expect(refs.map(\.ref) == ["vault://wifi/Home Network", "vault://wifi/Cafe:Guest"])
+        #expect(refs.allSatisfy { !$0.include })
+    }
+
+    @Test func wifiPasswordIsReadOnlyWithTheExactCommand() throws {
+        let r = FixtureRunner(policy: .secretReads)
+        r.stub(LinuxWiFiPasswords.command(name: "Home Network"), stdout: "not-a-real-password\n")
+        r.stub(LinuxWiFiPasswords.command(name: "Open Cafe"), stdout: "\n")
+        #expect(try LinuxWiFiPasswords.read(name: "Home Network", using: r) == Data("not-a-real-password".utf8))
+        #expect(try LinuxWiFiPasswords.read(name: "Open Cafe", using: r) == nil)
+
+        #expect(CommandPolicy.secretReads.allows(LinuxWiFiPasswords.command(name: "Home Network")))
+        #expect(!CommandPolicy.readOnly.allows(LinuxWiFiPasswords.command(name: "Home Network")))
+        #expect(CommandPolicy.readOnly.allows(Command("nmcli", LinuxWiFiScanner.listArgs)))
+        #expect(!CommandPolicy.secretReads.allows(Command("nmcli", ["connection", "delete", "id", "Home Network"])))
+        #expect(!CommandPolicy.secretReads.allows(Command("nmcli", ["--show-secrets", "connection", "show"])))
+    }
+
+    @Test func linuxScansTheSensitiveSourcesToo() {
+        #expect(SetupScanner.Source.linux.contains(.wifi) && SetupScanner.Source.linux.contains(.ssh) && SetupScanner.Source.linux.contains(.tokens))
+    }
+
+    final class FakeSecretTool: @unchecked Sendable {
+        var store: [String: Data] = [:]
+        var calls: [[String]] = []
+        let lock = NSLock()
+        func run(_ args: [String], _ input: Data?) -> (status: Int32, output: Data) {
+            lock.lock(); defer { lock.unlock() }
+            calls.append(args)
+            let id = args.last ?? ""
+            switch args.first {
+            case "store": store[id] = input; return (0, Data())
+            case "lookup": return store[id].map { (0, $0) } ?? (1, Data())
+            case "clear": store[id] = nil; return (0, Data())
+            default: return (2, Data())
+            }
+        }
+    }
+
+    @Test func vaultKeyIsRememberedInTheKeyringThroughStdin() throws {
+        let fake = FakeSecretTool()
+        let cache = SecretToolVaultKeyCache(run: { fake.run($0, $1) })
+        let key = try Vault.create(password: "not a real password").key
+        #expect(cache.load(vaultID: "abc123") == nil)
+        try cache.save(key, vaultID: "abc123")
+        let loaded = try #require(cache.load(vaultID: "abc123"))
+        #expect(loaded.fingerprint == key.fingerprint)
+        // The key never goes on the command line.
+        let secret = key.withRawBytes { Data($0) }.base64EncodedString()
+        #expect(fake.calls.allSatisfy { !$0.joined(separator: " ").contains(secret) })
+        #expect(fake.calls.contains(["store", "--label=Cairn vault key", "application", "dev.cairn.Cairn", "vault", "abc123"]))
+        cache.remove(vaultID: "abc123")
+        #expect(cache.load(vaultID: "abc123") == nil)
+    }
 }

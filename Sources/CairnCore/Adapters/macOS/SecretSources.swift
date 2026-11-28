@@ -97,7 +97,13 @@ public struct SecretReader: Sendable {
     }
 
     public func read(_ ref: String) throws -> Data? {
-        if let ssid = WiFiPasswords.ssid(ref: ref) { return try WiFiPasswords.read(ssid: ssid, using: runner) }
+        if let ssid = WiFiPasswords.ssid(ref: ref) {
+            #if os(macOS)
+            return try WiFiPasswords.read(ssid: ssid, using: runner)
+            #else
+            return try LinuxWiFiPasswords.read(name: ssid, using: runner)
+            #endif
+        }
         if SSHKeyScanner.file(ref: ref) != nil { return try SSHKeyScanner.read(ref: ref, home: home) }
         if ref.hasPrefix(SharePasswords.prefix) { return try SharePasswords.read(ref: ref, using: runner) }
         if CredentialFiles.path(ref: ref) != nil { return CredentialFiles.read(ref: ref, home: home) }
