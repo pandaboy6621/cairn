@@ -91,6 +91,12 @@ jobs:
           SmartScreen warns the first time (More info, then Run anyway). It's added a few minutes after the Mac app.
           If there's no Run anyway button, run this in PowerShell (pointed at the folder you unzipped into) and try again:
           \`Get-ChildItem -Recurse "\$env:USERPROFILE\\Apps\\Cairn" | Unblock-File\`
+
+          **Linux** (Ubuntu 26.04 or newer, added a few minutes after the Mac app):
+          - **.deb:** open it and App Center installs Cairn into the app grid. It adds Cairn's software source,
+            so new versions come with Software Updater.
+          - **AppImage:** no install. In Files, right-click it, Properties, turn on Executable as Program, then
+            double-click it. It adds itself to the app grid and updates itself from inside the app.
           EOF
           # The Windows build may have created the release first.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

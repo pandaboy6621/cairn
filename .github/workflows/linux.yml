@@ -6,7 +6,7 @@ name: Linux
 
 on:
   push:
-    branches: [main, claude/linux-packages]
+    branches: [main]
     tags: ["v*"] # path filters don't apply to tags
     paths:
       - "Sources/**"
