@@ -22,6 +22,7 @@ enum WindowShot {
                 switch page {
                 case "home": select(.home)
                 case "snapshots": select(.snapshots)
+                case "restore": select(.restore)
                 default: if let c = ChecklistCategory(rawValue: page) { select(.category(c)) }
                 }
             }

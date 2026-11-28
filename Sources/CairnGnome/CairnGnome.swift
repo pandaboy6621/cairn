@@ -35,12 +35,13 @@ struct CairnGnome: App {
 
 /// A page in the sidebar.
 enum Destination: Hashable, Identifiable {
-    case home, snapshots
+    case home, restore, snapshots
     case category(ChecklistCategory)
 
     var id: String {
         switch self {
         case .home: return "home"
+        case .restore: return "restore"
         case .snapshots: return "snapshots"
         case .category(let c): return c.rawValue
         }
@@ -49,6 +50,7 @@ enum Destination: Hashable, Identifiable {
     var title: String {
         switch self {
         case .home: return "Home"
+        case .restore: return "Restore"
         case .snapshots: return "Snapshots"
         case .category(let c): return Style.title(c)
         }
@@ -57,6 +59,7 @@ enum Destination: Hashable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "user-home-symbolic"
+        case .restore: return "document-revert-symbolic"
         case .snapshots: return "document-open-recent-symbolic"
         case .category(let c): return Style.icon(c)
         }
@@ -65,6 +68,7 @@ enum Destination: Hashable, Identifiable {
     var tint: String {
         switch self {
         case .home: return "tint-blue"
+        case .restore: return "tint-teal"
         case .snapshots: return "tint-green"
         case .category(let c): return Style.tint(c)
         }
@@ -89,10 +93,11 @@ struct MainView: View {
     @State private var toastText = ""
     @State private var wide = true
     @State private var showContent = false
+    @State private var restore = RestoreState()
 
     var destinations: [Destination] {
         let categories = checklist.map { LinuxChecklist.categories(in: $0) } ?? []
-        return [.home] + categories.map { .category($0) } + [.snapshots]
+        return [.home, .restore] + categories.map { .category($0) } + [.snapshots]
     }
 
     var view: Body {
@@ -107,6 +112,11 @@ struct MainView: View {
         .showContent($showContent)
         .breakpoint(minWidth: 680, matches: $wide)
         .toast(toastText, signal: $toast)
+        .alertDialog(visible: Binding { restore.confirm } set: { restore.confirm = $0 },
+                     heading: "Apply This Restore?",
+                     body: "Cairn will make the \(restore.report?.changeCount ?? 0) changes in the preview: add software sources, install apps and change settings. It asks for your password first. A file it replaces is kept with .before-cairn added to its name.")
+        .response("Cancel", role: .close) { }
+        .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runRestore(apply: true) } }
         .css { Style.css }
         .folderImporter(open: $chooseFolder, initialFolder: folder, title: "Choose a Backup Folder",
                         acceptLabel: "Use This Folder") { url in
@@ -196,7 +206,7 @@ struct MainView: View {
 
     func badge(_ d: Destination) -> String {
         switch d {
-        case .home: return ""
+        case .home, .restore: return ""
         case .snapshots: return snapshots.isEmpty ? "" : "\(snapshots.count)"
         case .category(let c): return checklist.map { "\($0.count(in: c).total)" } ?? ""
         }
@@ -239,6 +249,11 @@ struct MainView: View {
             }
             SnapshotsPage(snapshots: snapshots, folder: folder, chooseFolder: { chooseFolder.signal() })
                 .visible(selection == .snapshots)
+            RestorePage(snapshots: restoreChoices, state: restore,
+                        select: { id in restore.snapshotID = id; restore.phase = .idle; restore.report = nil },
+                        preview: { onMainLoop { runRestore(apply: false) } },
+                        askToApply: { restore.confirm = true })
+                .visible(selection == .restore)
         }
         .vexpand()
         .topToolbar {
@@ -262,6 +277,7 @@ struct MainView: View {
         guard let list = checklist else { return "" }
         switch selection {
         case .home: return scannedAt.map { "Scanned at " + Style.time($0) } ?? ""
+        case .restore: return restore.running ? (restore.phase == .applying ? "Applying…" : "Previewing…") : ""
         case .snapshots: return BackupFolder.displayPath(folder)
         case .category(let c):
             let n = list.count(in: c)
@@ -318,6 +334,51 @@ struct MainView: View {
                 toastText = message
                 toast.signal()
                 loadSnapshots()
+            }
+        }
+    }
+
+    /// Snapshots a restore can use: this computer's first, then the others in the folder.
+    var restoreChoices: [Snapshot] {
+        let me = checklist?.source.device.name ?? ""
+        return snapshots.filter { $0.info.device == me } + snapshots.filter { $0.info.device != me }
+    }
+
+    /// Runs the kit for the chosen snapshot: a dry run, or for real with the
+    /// password asked by Cairn's own window (sudo -A).
+    func runRestore(apply: Bool) {
+        guard !restore.running, let snapshot = restoreChoices.first(where: { $0.id == restore.snapshotID }) ?? restoreChoices.first else { return }
+        restore.snapshotID = snapshot.id
+        restore.phase = apply ? .applying : .previewing
+        restore.lastLine = ""
+        let folder = folder
+        Task.detached {
+            var helper: URL?
+            defer { if let helper { try? FileManager.default.removeItem(at: helper) } }
+            do {
+                let manifest = try SnapshotStore(root: folder).manifest(of: snapshot)
+                var askpass: String?
+                if apply {
+                    let h = try Askpass.helper()
+                    askpass = h.path
+                    helper = h.folder
+                }
+                let result = try LinuxRestoreRun(manifest: manifest).run(apply: apply, askpass: askpass) { line in
+                    guard line.hasPrefix("  ") else { return }
+                    onMainLoop { restore.lastLine = line }
+                }
+                onMainLoop {
+                    restore.report = result.report
+                    restore.doByHand = result.doByHand
+                    restore.phase = apply ? .applied : .previewed
+                    if apply {
+                        toastText = result.report.failed.isEmpty ? "Restore finished" : "Restore finished with problems"
+                        toast.signal()
+                    }
+                }
+            } catch {
+                let message = "Couldn't run the restore: \(error.localizedDescription)"
+                onMainLoop { restore.phase = .failed(message) }
             }
         }
     }

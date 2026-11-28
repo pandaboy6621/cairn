@@ -130,3 +130,20 @@ enum Askpass {
         if let loop = ctx.loop { g_main_loop_quit(loop) }
     }
 }
+
+extension Askpass {
+    /// SUDO_ASKPASS must be a program sudo runs without options, so this writes a
+    /// tiny script (in a private folder) that runs Cairn with `--askpass`.
+    /// Returns its path and the folder to delete afterwards.
+    static func helper() throws -> (path: String, folder: URL) {
+        let exe = URL(fileURLWithPath: "/proc/self/exe").resolvingSymlinksInPath().path
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("cairn-askpass-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let script = dir.appendingPathComponent("askpass")
+        let quoted = "'" + exe.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+        try "#!/bin/sh\nexec \(quoted) --askpass \"$@\" 2>/dev/null\n".write(to: script, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        return (script.path, dir)
+    }
+}

@@ -67,6 +67,19 @@ import Testing
         #expect(r.changeCount == 4)
     }
 
+    @Test func linesInPlainWords() {
+        let r = KitReport.parse(Self.dryRun)
+        func words(_ s: Int, _ i: Int) -> String { r.sections[s].items[i].title + " | " + r.sections[s].items[i].detail }
+        #expect(words(0, 1) == "chat-repo | Will add this software source")
+        #expect(words(1, 1) == "nettool | Will install")
+        #expect(words(1, 2) == "chat-app | Will install from chat-repo")
+        #expect(words(4, 0) == "show-hidden (org.gtk.gtk4.Settings.FileChooser) | Already false")
+        #expect(words(4, 1) == "color-scheme | Will change from 'default' to 'prefer-dark'")
+        #expect(words(5, 0) == ".gitconfig | Will replace it (your file is kept as .before-cairn)")
+        let done = KitReport.parse("Packages from apt (2)\n  installing nettool\n  installing chat-app\nDidn't work: chat-app")
+        #expect(done.sections[0].items.map(\.detail) == ["Installed", "Couldn't install"])
+    }
+
     @Test func everythingAlreadyThereHasNoChanges() {
         let r = KitReport.parse("Snaps (1)\n  notes is already installed\nConfig files (1)\n  .gitconfig already matches\nDry run: nothing changed.")
         #expect(r.changeCount == 0 && r.sections.allSatisfy { $0.changes.isEmpty })

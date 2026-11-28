@@ -113,6 +113,54 @@ public struct KitReport: Equatable, Sendable {
     public struct Item: Equatable, Sendable {
         public var status: Status
         public var text: String
+
+        /// What the line is about: "would install nettool" → "nettool".
+        public var title: String { Self.split(text, status).title }
+        /// The line in words for a window: "Will install", "Changed from 'a' to 'b'".
+        public var detail: String { Self.split(text, status).detail }
+
+        static func split(_ text: String, _ status: Status) -> (title: String, detail: String) {
+            func after(_ prefix: String) -> String { text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : text }
+            func change(_ rest: String, _ verb: String) -> (String, String) {
+                guard let r = rest.range(of: " from ") else { return (rest, verb) }
+                return (String(rest[..<r.lowerBound]), verb + " from " + rest[r.upperBound...])
+            }
+            func dropParens(_ s: String) -> String {
+                guard let open = s.range(of: " (") else { return s }
+                return String(s[..<open.lowerBound])
+            }
+            switch status {
+            case .willAdd: return (dropParens(after("would add ")), "Will add this software source")
+            case .willInstall:
+                let rest = after("would install ")
+                if let open = rest.range(of: " (from "), let comma = rest.range(of: ",", range: open.upperBound..<rest.endIndex) {
+                    return (String(rest[..<open.lowerBound]), "Will install from " + rest[open.upperBound..<comma.lowerBound])
+                }
+                return (rest, "Will install")
+            case .willChange: return change(after("would change "), "Will change")
+            case .willWrite:
+                if text.hasPrefix("would write ") { return (after("would write "), "Will write") }
+                return (dropParens(after("would replace ")), "Will replace it (your file is kept as .before-cairn)")
+            case .done, .failed:
+                let failed = status == .failed
+                if text.hasPrefix("adding ") { return (dropParens(after("adding ")), failed ? "Couldn't add" : "Added") }
+                if text.hasPrefix("installing ") { return (after("installing "), failed ? "Couldn't install" : "Installed") }
+                if text.hasPrefix("changing ") { return change(after("changing "), failed ? "Couldn't change" : "Changed") }
+                if text.hasPrefix("wrote ") { return (after("wrote "), failed ? "Couldn't write" : "Written (the old file is kept as .before-cairn)") }
+                return (text, failed ? "Didn't work" : "Done")
+            case .already:
+                for marker in [" is already ", " already matches", " already set up"] {
+                    if let r = text.range(of: marker) {
+                        return (String(text[..<r.lowerBound]), "Already " + text[r.upperBound...].trimmingCharacters(in: .whitespaces))
+                    }
+                }
+                return (text, "Already there")
+            case .skipped: return (text, "Skipped")
+            case .unavailable:
+                let name = text.split(separator: " ").first.map(String.init) ?? text
+                return (name, "Not available from the package manager here")
+            }
+        }
     }
 
     public struct Section: Equatable, Sendable {
