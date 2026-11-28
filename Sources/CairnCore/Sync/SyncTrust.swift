@@ -122,6 +122,23 @@ public struct SyncFolder: Codable, Equatable, Sendable {
         return c.string
     }
 
+    /// GNOME mounts shares under `/run/user/<uid>/gvfs/smb-share:server=nas,share=home`:
+    /// that path's share address (`smb://nas/home`), or nil for an ordinary folder.
+    public static func gvfsShare(_ path: String) -> String? {
+        guard let r = path.range(of: "/gvfs/") else { return nil }
+        let mount = path[r.upperBound...].split(separator: "/").first.map(String.init) ?? ""
+        guard let colon = mount.firstIndex(of: ":") else { return nil }
+        let scheme = mount[..<colon].replacingOccurrences(of: "-share", with: "")
+        var fields: [String: String] = [:]
+        for part in mount[mount.index(after: colon)...].split(separator: ",") {
+            let kv = part.split(separator: "=", maxSplits: 1).map(String.init)
+            if kv.count == 2 { fields[kv[0]] = kv[1].removingPercentEncoding ?? kv[1] }
+        }
+        guard let server = fields["server"], !server.isEmpty else { return nil }
+        let address = "\(scheme)://" + (fields["user"].map { $0 + "@" } ?? "") + server + (fields["share"].map { "/" + $0 } ?? "")
+        return withoutPassword(address)
+    }
+
     /// What `NetFS` can mount.
     public static let shareSchemes: Set<String> = ["smb", "afp", "nfs", "webdav", "http", "https"]
 }

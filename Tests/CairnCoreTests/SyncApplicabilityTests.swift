@@ -49,4 +49,11 @@ import Testing
         #expect(m.device.os == "macos")
         #expect(PlatformExport.make(m, for: .linux).dotfiles[0].text.contains("helper = !gh auth"))
     }
+
+    @Test func gnomeShareFoldersKnowTheirShare() {
+        #expect(SyncFolder.gvfsShare("/run/user/1000/gvfs/smb-share:server=nas.local,share=home/Backups/Cairn") == "smb://nas.local/home")
+        #expect(SyncFolder.gvfsShare("/run/user/1000/gvfs/smb-share:domain=WG,server=nas,share=data,user=me") == "smb://me@nas/data")
+        #expect(SyncFolder.gvfsShare("/home/me/Backups") == nil)
+        #expect(SyncFolder.gvfsShare("/run/user/1000/gvfs/mtp:host=Phone") == nil)
+    }
 }

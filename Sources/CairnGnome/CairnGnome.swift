@@ -35,13 +35,14 @@ struct CairnGnome: App {
 
 /// A page in the sidebar.
 enum Destination: Hashable, Identifiable {
-    case home, restore, snapshots
+    case home, restore, sync, snapshots
     case category(ChecklistCategory)
 
     var id: String {
         switch self {
         case .home: return "home"
         case .restore: return "restore"
+        case .sync: return "sync"
         case .snapshots: return "snapshots"
         case .category(let c): return c.rawValue
         }
@@ -51,6 +52,7 @@ enum Destination: Hashable, Identifiable {
         switch self {
         case .home: return "Home"
         case .restore: return "Restore"
+        case .sync: return "Sync"
         case .snapshots: return "Snapshots"
         case .category(let c): return Style.title(c)
         }
@@ -60,6 +62,7 @@ enum Destination: Hashable, Identifiable {
         switch self {
         case .home: return "user-home-symbolic"
         case .restore: return "document-revert-symbolic"
+        case .sync: return "emblem-synchronizing-symbolic"
         case .snapshots: return "document-open-recent-symbolic"
         case .category(let c): return Style.icon(c)
         }
@@ -69,6 +72,7 @@ enum Destination: Hashable, Identifiable {
         switch self {
         case .home: return "tint-blue"
         case .restore: return "tint-teal"
+        case .sync: return "tint-purple"
         case .snapshots: return "tint-green"
         case .category(let c): return Style.tint(c)
         }
@@ -79,25 +83,27 @@ struct MainView: View {
     var app: AdwaitaApp
     var window: AdwaitaWindow
 
-    @State private var selection: Destination = .home
-    @State private var checklist: Checklist?
-    @State private var apps: [String: DesktopEntry] = [:]
-    @State private var warnings: [String] = []
-    @State private var scanning = false
-    @State private var scannedAt: Date?
-    @State private var saving = false
-    @State private var folder = AppFolder.backupFolder
-    @State private var snapshots: [Snapshot] = []
-    @State private var chooseFolder: Signal = .init()
-    @State private var toast: Signal = .init()
-    @State private var toastText = ""
-    @State private var wide = true
-    @State private var showContent = false
-    @State private var restore = RestoreState()
+    @State var selection: Destination = .home
+    @State var checklist: Checklist?
+    @State var apps: [String: DesktopEntry] = [:]
+    @State var warnings: [String] = []
+    @State var scanning = false
+    @State var scannedAt: Date?
+    @State var saving = false
+    @State var folder = AppFolder.backupFolder
+    @State var snapshots: [Snapshot] = []
+    @State var chooseFolder: Signal = .init()
+    @State var toast: Signal = .init()
+    @State var toastText = ""
+    @State var wide = true
+    @State var showContent = false
+    @State var restore = RestoreState()
+    @State var sync = SyncState()
+    @State var chooseSyncFolder: Signal = .init()
 
     var destinations: [Destination] {
         let categories = checklist.map { LinuxChecklist.categories(in: $0) } ?? []
-        return [.home, .restore] + categories.map { .category($0) } + [.snapshots]
+        return [.home, .restore, .sync] + categories.map { .category($0) } + [.snapshots]
     }
 
     var view: Body {
@@ -117,6 +123,13 @@ struct MainView: View {
                      body: "Cairn will make the \(restore.report?.changeCount ?? 0) changes in the preview: add software sources, install apps and change settings. It asks for your password first. A file it replaces is kept with .before-cairn added to its name.")
         .response("Cancel", role: .close) { }
         .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runRestore(apply: true) } }
+        .alertDialog(visible: Binding { sync.confirm } set: { sync.confirm = $0 },
+                     heading: "Apply Changes from Your Other Computers?",
+                     body: "Cairn will make the \(sync.report?.changeCount ?? 0) changes in the preview on this computer. It asks for your password first.")
+        .response("Cancel", role: .close) { }
+        .response("Apply", appearance: .suggested, role: .default) { onMainLoop { runSyncRestore(apply: true) } }
+        .folderImporter(open: $chooseSyncFolder, initialFolder: sync.folder ?? folder, title: "Choose the Sync Folder",
+                        acceptLabel: "Sync Through This Folder") { url in setSyncFolder(url) }
         .css { Style.css }
         .folderImporter(open: $chooseFolder, initialFolder: folder, title: "Choose a Backup Folder",
                         acceptLabel: "Use This Folder") { url in
@@ -131,6 +144,7 @@ struct MainView: View {
             onMainLoop {
                 loadSnapshots()
                 scan()
+                loadSync()
             }
         }
     }
@@ -207,6 +221,7 @@ struct MainView: View {
     func badge(_ d: Destination) -> String {
         switch d {
         case .home, .restore: return ""
+        case .sync: return sync.enabled ? (sync.incomingCount > 0 ? "\(sync.incomingCount)" : "") : "Off"
         case .snapshots: return snapshots.isEmpty ? "" : "\(snapshots.count)"
         case .category(let c): return checklist.map { "\($0.count(in: c).total)" } ?? ""
         }
@@ -254,6 +269,8 @@ struct MainView: View {
                         preview: { onMainLoop { runRestore(apply: false) } },
                         askToApply: { restore.confirm = true })
                 .visible(selection == .restore)
+            SyncPage(state: sync, actions: syncActions)
+                .visible(selection == .sync)
         }
         .vexpand()
         .topToolbar {
@@ -278,6 +295,7 @@ struct MainView: View {
         switch selection {
         case .home: return scannedAt.map { "Scanned at " + Style.time($0) } ?? ""
         case .restore: return restore.running ? (restore.phase == .applying ? "Applying…" : "Previewing…") : ""
+        case .sync: return sync.enabled ? (sync.folder.map { BackupFolder.displayPath($0) } ?? "") : "Off"
         case .snapshots: return BackupFolder.displayPath(folder)
         case .category(let c):
             let n = list.count(in: c)

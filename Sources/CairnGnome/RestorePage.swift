@@ -141,24 +141,55 @@ struct RestorePage: View {
 
     @ViewBuilder var results: Body {
         if let report = state.report, !state.running {
+            ReportView(report: report, doByHandText: state.doByHand, applied: state.phase == .applied)
+        }
+    }
+
+    var footnote: AnyView {
+        HStack(spacing: 8) {
+            Symbol(icon: .custom(name: "security-high-symbolic"))
+                .pixelSize(14)
+                .dimLabel()
+                .valign(.start)
+            Text("Restore installs software and changes settings only after you press Apply and enter your password. Your password goes to the system's sudo and is never saved.")
+                .wrap()
+                .caption()
+                .dimLabel()
+                .halign(.start)
+                .hexpand()
+        }
+    }
+}
+
+/// A kit run's result: a summary, each group's changes (the rest folded into
+/// "already there") and the Do by Hand list. Used by Restore and Sync.
+struct ReportView: View {
+    var report: KitReport
+    var doByHandText: String
+    var applied: Bool
+    /// Words for the summary: "Restored", "Changes Applied".
+    var appliedWord = "Restored"
+
+    var view: Body {
+        VStack(spacing: 24) {
             summaryBanner(report)
             ForEach(report.sections.map(\.title), id: \.self) { title in
                 section(report.sections.first { $0.title == title }!)
             }
-            if !state.doByHand.isEmpty || !report.downloads.isEmpty {
+            if !doByHandText.isEmpty || !report.downloads.isEmpty {
                 doByHand(report)
             }
         }
     }
 
     func summaryBanner(_ report: KitReport) -> AnyView {
-        let applied = state.phase == .applied
+        
         let changes = report.changeCount
         let failed = report.sections.reduce(0) { $0 + $1.count(.failed) }
         let title: String
         let detail: String
         if applied {
-            title = failed > 0 ? "Restored, with \(failed) problem\(failed == 1 ? "" : "s")" : "Restored"
+            title = failed > 0 ? "\(appliedWord), with \(failed) problem\(failed == 1 ? "" : "s")" : appliedWord
             detail = changes == 0 ? "Nothing needed changing." : "\(changes) change\(changes == 1 ? "" : "s") made. Details below."
         } else {
             title = changes == 0 ? "Already Set Up" : "\(changes) Change\(changes == 1 ? "" : "s") to Make"
@@ -251,7 +282,7 @@ struct RestorePage: View {
                         .prefix { icon("folder-download-symbolic", "tint-orange") }
                         .suffix {
                             if let url = PackageCatalog.debDownloads[name] {
-                                Button("Open Website") { RestorePage.open(url) }
+                                Button("Open Website") { ReportView.open(url) }
                                     .valign(.center)
                                     .flat()
                             }
@@ -262,7 +293,7 @@ struct RestorePage: View {
                         .subtitle("Not available from the package manager here: install it another way")
                         .prefix { icon("dialog-question-symbolic", "tint-gray") }
                 }
-                ForEach(Self.otherSteps(state.doByHand), id: \.self) { step in
+                ForEach(Self.otherSteps(doByHandText), id: \.self) { step in
                     ActionRow(step.title)
                         .subtitle(step.detail)
                         .subtitleLines(3)
@@ -295,18 +326,4 @@ struct RestorePage: View {
         g_app_info_launch_default_for_uri(url, nil, nil)
     }
 
-    var footnote: AnyView {
-        HStack(spacing: 8) {
-            Symbol(icon: .custom(name: "security-high-symbolic"))
-                .pixelSize(14)
-                .dimLabel()
-                .valign(.start)
-            Text("Restore installs software and changes settings only after you press Apply and enter your password. Your password goes to the system's sudo and is never saved.")
-                .wrap()
-                .caption()
-                .dimLabel()
-                .halign(.start)
-                .hexpand()
-        }
-    }
 }
