@@ -47,3 +47,66 @@ import Testing
         #expect(Updates.Platform.linuxDeb.assetName(version: "0.3.1") == "cairn_0.3.1_amd64.deb")
     }
 }
+
+/// The AppImage replacing itself with a newer release. Made-up release and bytes.
+@Suite struct AppImageUpdaterTests {
+    static let fakeImage: Data = Data([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0x41, 0x49, 0x02]) + Data("new version".utf8)
+    static func sha(_ d: Data) -> String { AppImageUpdater.sha256Hex(d) }
+
+    static func release(version: String, sha: String) -> Data {
+        let base = "https://github.com/pandaboy6621/cairn/releases/download/v\(version)/"
+        let name = "Cairn-\(version)-x86_64.AppImage"
+        return Data("""
+        {"tag_name": "v\(version)", "draft": false, "prerelease": false, "html_url": "https://github.com/pandaboy6621/cairn/releases/tag/v\(version)",
+         "body": "notes", "assets": [
+           {"name": "\(name)", "browser_download_url": "\(base)\(name)", "size": 22},
+           {"name": "\(name).sha256", "browser_download_url": "\(base)\(name).sha256", "size": 90}]}
+        """.utf8)
+    }
+
+    static func setUp(served: Data, checksum: String) throws -> (AppImageUpdater, URL, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let image = dir.appendingPathComponent("Cairn.AppImage")
+        try Data("old version".utf8).write(to: image)
+        let rel = release(version: "9.0.0", sha: checksum)
+        let updater = AppImageUpdater(appImage: image) { url in
+            if url == Updates.latestURL { return rel }
+            if url.lastPathComponent.hasSuffix(".sha256") { return Data("\(checksum)  Cairn-9.0.0-x86_64.AppImage\n".utf8) }
+            return served
+        }
+        return (updater, image, dir)
+    }
+
+    @Test func replacesItselfWithAVerifiedNewVersion() async throws {
+        let (updater, image, dir) = try Self.setUp(served: Self.fakeImage, checksum: Self.sha(Self.fakeImage))
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let update = try #require(try await updater.check(current: "0.3.0"))
+        #expect(update.version.text == "9.0.0")
+        try await updater.install(update)
+        #expect(try Data(contentsOf: image) == Self.fakeImage)
+        let mode = try FileManager.default.attributesOfItem(atPath: image.path)[.posixPermissions] as? Int
+        #expect(mode == 0o755)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["Cairn.AppImage"]) // no leftovers
+        #expect(try await updater.check(current: "9.0.0") == nil)
+    }
+
+    @Test func aBadDownloadLeavesTheOldOneAlone() async throws {
+        let (bad, image, dir) = try Self.setUp(served: Self.fakeImage, checksum: String(repeating: "0", count: 64))
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let update = try #require(try await bad.check(current: "0.3.0"))
+        await #expect(throws: Updates.Failure.badChecksum) { try await bad.install(update) }
+        #expect(try Data(contentsOf: image) == Data("old version".utf8))
+
+        let notImage = Data("just text".utf8)
+        let (wrong, image2, dir2) = try Self.setUp(served: notImage, checksum: Self.sha(notImage))
+        defer { try? FileManager.default.removeItem(at: dir2) }
+        await #expect(throws: Updates.Failure.notTheApp("not an AppImage")) { try await wrong.install(update) }
+        #expect(try Data(contentsOf: image2) == Data("old version".utf8))
+    }
+
+    @Test func onlyWhenRunningAsAnAppImage() {
+        #expect(AppImageUpdater.current(environment: [:]) == nil)
+        #expect(AppImageUpdater.current(environment: ["APPIMAGE": "/home/someone/Cairn.AppImage"])?.appImage.path == "/home/someone/Cairn.AppImage")
+    }
+}
