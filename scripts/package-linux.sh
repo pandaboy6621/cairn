@@ -35,6 +35,23 @@ stage() { # root folder: the files both packages share, below <root>/usr
     done
     sed "s/@VERSION@/$version/; s/@DATE@/$(date -u +%Y-%m-%d)/" linux/dev.cairn.Cairn.metainfo.xml \
         | install -Dm644 /dev/stdin "$root/usr/share/metainfo/dev.cairn.Cairn.metainfo.xml"
+    # Debian's machine-readable copyright file; the full license is on every Debian system.
+    install -Dm644 /dev/stdin "$root/usr/share/doc/cairn/copyright" <<COPYRIGHT
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Cairn
+Source: https://github.com/pandaboy6621/cairn
+
+Files: *
+Copyright: Cairn contributors
+License: GPL-3.0+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 3 of the License, or (at your option)
+ any later version.
+ .
+ On Debian systems, the full text of the GNU General Public License version 3
+ can be found in /usr/share/common-licenses/GPL-3.
+COPYRIGHT
 }
 
 sha() { (cd dist && sha256sum "$1" > "$1.sha256"); }

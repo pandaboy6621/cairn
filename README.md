@@ -344,6 +344,10 @@ never creates a missing folder under `/Volumes`.
 
 </details>
 
+## License
+
+Cairn is free software under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later).
+
 <div align="center">
 <sub>A cairn is a stack of stones that marks the trail, so whoever comes next finds the way.</sub>
 </div>
