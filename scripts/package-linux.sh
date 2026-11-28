@@ -5,13 +5,15 @@
 #                                     app grid the first time it's opened
 # plus a .sha256 for each. Runs on Ubuntu 26.04 (the release workflow uses the
 # swift:latest image), needs libadwaita-1-dev, libgtk-4-dev, libsqlite3-dev,
-# librsvg2-bin, dpkg-dev and desktop-file-utils, and for the AppImage `appimagetool` on PATH.
+# librsvg2-bin, dpkg-dev, desktop-file-utils and gnupg, and for the AppImage `appimagetool` on PATH.
 # Usage: scripts/package-linux.sh [deb|appimage|all]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 what=${1:-all}
 version="$(sed -n 's/.*version = "\(.*\)".*/\1/p' Sources/CairnCore/Cairn.swift)"
 arch=amd64
+# Where Cairn's apt repository is published (GitHub Pages, by linux.yml).
+APT_URL=https://pandaboy6621.github.io/cairn/apt
 mkdir -p dist
 
 # Static Swift runtime: the binaries need only the system's own libraries.
@@ -47,8 +49,26 @@ if [ "$what" = deb ] || [ "$what" = all ]; then
     depends="$(cd "$work" && dpkg-shlibdeps -O -e "$root/usr/bin/cairn-gnome" -e "$root/usr/bin/cairn" 2>/dev/null \
         | sed -n 's/^shlibs:Depends=//p')"
     [ -n "$depends" ] || { echo "dpkg-shlibdeps found no dependencies" >&2; exit 1; }
-    size="$(du -sk "$root/usr" | cut -f1)"
+    # Cairn's apt repository, so the installed .deb updates with Software Updater
+    # (like Chrome's and Brave's): its public key and a sources file. The sources file
+    # is a conffile, so a user who removes or edits it keeps their choice.
+    if [ -f linux/cairn-archive-keyring.asc ]; then
+        install -d "$root/usr/share/keyrings" "$root/etc/apt/sources.list.d"
+        gpg --dearmor < linux/cairn-archive-keyring.asc > "$root/usr/share/keyrings/cairn-archive-keyring.gpg"
+        chmod 644 "$root/usr/share/keyrings/cairn-archive-keyring.gpg"
+        cat > "$root/etc/apt/sources.list.d/cairn.sources" <<SOURCES
+Types: deb
+URIs: $APT_URL
+Suites: stable
+Components: main
+Architectures: $arch
+Signed-By: /usr/share/keyrings/cairn-archive-keyring.gpg
+SOURCES
+        chmod 644 "$root/etc/apt/sources.list.d/cairn.sources"
+    fi
+    size="$(du -sk "$root" | cut -f1)"
     mkdir -p "$root/DEBIAN"
+    [ -f "$root/etc/apt/sources.list.d/cairn.sources" ] && echo /etc/apt/sources.list.d/cairn.sources > "$root/DEBIAN/conffiles"
     cat > "$root/DEBIAN/control" <<CONTROL
 Package: cairn
 Version: $version

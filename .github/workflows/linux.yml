@@ -38,7 +38,7 @@ jobs:
           swift --version
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            libadwaita-1-dev libgtk-4-dev libsqlite3-dev pkg-config librsvg2-bin dpkg-dev desktop-file-utils file curl git >/dev/null
+            libadwaita-1-dev libgtk-4-dev libsqlite3-dev pkg-config librsvg2-bin dpkg-dev desktop-file-utils gnupg file curl git >/dev/null
 
       - name: Install appimagetool
         run: |
@@ -63,6 +63,10 @@ jobs:
           test -f /usr/share/applications/dev.cairn.Cairn.desktop
           test -f /usr/share/icons/hicolor/scalable/apps/dev.cairn.Cairn.svg
           ! ldd /usr/bin/cairn-gnome | grep "not found"
+          if [ -f linux/cairn-archive-keyring.asc ]; then
+            test -f /usr/share/keyrings/cairn-archive-keyring.gpg
+            grep -q "pandaboy6621.github.io/cairn/apt" /etc/apt/sources.list.d/cairn.sources
+          fi
           file dist/*.AppImage
 
       - uses: actions/upload-artifact@v7
@@ -87,3 +91,73 @@ jobs:
             gh release create "$tag" --title "Cairn $tag" --notes "Cairn $tag. Notes follow when the Mac build finishes." --verify-tag || sleep 20
           fi
           gh release upload "$tag" dist/* --clobber
+
+  # Cairn's apt repository on GitHub Pages: the installed .deb's source list points
+  # here, so Software Updater brings new versions. Built (and checked with apt) on
+  # every run from this build's .deb plus the newest releases' ones; published only
+  # for a release. Needs the APT_SIGNING_KEY secret.
+  apt-repo:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: Cairn-Linux
+          path: new
+
+      - name: Older releases' .debs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p old
+          for tag in $(gh release list --exclude-drafts --exclude-pre-releases --limit 3 --json tagName --jq '.[].tagName'); do
+            [ "$tag" = "$GITHUB_REF_NAME" ] && continue
+            gh release download "$tag" --pattern 'cairn_*_amd64.deb' --dir old 2>/dev/null || true
+          done
+          ls -l new old
+
+      - name: Build and sign the repository
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          sudo apt-get install -y -qq apt-utils gnupg >/dev/null
+          scripts/build-apt-repo.sh site new/cairn_*_amd64.deb $(ls old/cairn_*_amd64.deb 2>/dev/null)
+
+      - name: Check apt reads it
+        run: |
+          # A throwaway apt setup that knows only this repository, served from disk.
+          root="$(mktemp -d)"
+          mkdir -p "$root/etc/apt/sources.list.d" "$root/var/lib/apt/lists/partial" "$root/var/cache/apt/archives/partial" "$root/etc/apt/preferences.d"
+          gpg --dearmor < linux/cairn-archive-keyring.asc > "$root/cairn.gpg"
+          echo "deb [signed-by=$root/cairn.gpg] file://$PWD/site/apt stable main" > "$root/etc/apt/sources.list"
+          touch "$root/var/lib/dpkg-status"
+          opts="-o Dir=$root -o Dir::State::status=$root/var/lib/dpkg-status -o Dir::Etc::SourceParts=$root/etc/apt/sources.list.d"
+          apt-get $opts update
+          apt-cache $opts policy cairn
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  # Publishes the repository, only for a release.
+  pages:
+    needs: apt-repo
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: apt-repo
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
