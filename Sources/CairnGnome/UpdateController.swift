@@ -9,6 +9,8 @@ struct UpdateState {
     }
 
     var install = LinuxInstall.current()
+    /// The .deb added Cairn's apt repository, so Software Updater brings new versions.
+    var viaSoftwareUpdater = FileManager.default.fileExists(atPath: "/etc/apt/sources.list.d/cairn.sources")
     var phase = Phase.idle
     var update: Updates.Update?
 
@@ -19,7 +21,9 @@ struct UpdateState {
         switch phase {
         case .installing: return "Installing Cairn \(update.version)…"
         case .installed: return "Cairn \(update.version) is installed. Restart Cairn to finish."
-        default: return LinuxUpdates.availableText(update)
+        default:
+            if install == .deb && viaSoftwareUpdater { return LinuxUpdates.availableText(update) + " in Software Updater" }
+            return LinuxUpdates.availableText(update)
         }
     }
 
@@ -29,7 +33,9 @@ struct UpdateState {
         switch phase {
         case .installed: return "Restart"
         case .installing: return ""
-        default: if case .appImage = install { return "Update" } else { return "Download" }
+        default:
+            if case .appImage = install { return "Update" }
+            return install == .deb && viaSoftwareUpdater ? "Open Software Updater" : "Download"
         }
     }
 
@@ -94,6 +100,8 @@ extension MainView {
             guard let found = update.update else { return }
             if case .appImage(let file) = update.install {
                 installUpdate(found, appImage: file)
+            } else if update.install == .deb && update.viaSoftwareUpdater {
+                Self.openSoftwareUpdater(fallback: found.page)
             } else {
                 Self.openInFiles(found.page)
             }
@@ -117,6 +125,17 @@ extension MainView {
                 }
             }
         }
+    }
+
+    /// Ubuntu's Software Updater, which installs the new .deb from Cairn's apt repository.
+    static func openSoftwareUpdater(fallback: URL) {
+        let app = "/usr/bin/update-manager"
+        guard FileManager.default.isExecutableFile(atPath: app) else { openInFiles(fallback); return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: app)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        if (try? process.run()) == nil { openInFiles(fallback) }
     }
 
     /// Opens the new AppImage once this window has closed (GNOME allows one Cairn at a time).
