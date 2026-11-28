@@ -1,0 +1,88 @@
+# Builds Cairn's Linux release files on Ubuntu 26.04 (the swift:latest image) and,
+# on a v* tag, adds them to the GitHub Release that release.yml creates:
+#   cairn_<version>_amd64.deb and Cairn-<version>-x86_64.AppImage, each with a .sha256.
+# Both need GNOME 50-era libraries (libadwaita 1.9): Ubuntu 26.04 or newer.
+name: Linux
+
+on:
+  push:
+    branches: [main, claude/linux-packages]
+    tags: ["v*"] # path filters don't apply to tags
+    paths:
+      - "Sources/**"
+      - "linux/**"
+      - "scripts/package-linux.sh"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/linux.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # only used on tags, to add the files to the release
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: swift:latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: |
+          . /etc/os-release && echo "Building on $PRETTY_NAME"
+          swift --version
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            libadwaita-1-dev libgtk-4-dev libsqlite3-dev pkg-config librsvg2-bin dpkg-dev file curl git >/dev/null
+
+      - name: Install appimagetool
+        run: |
+          curl -fsSL -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          sha256sum /usr/local/bin/appimagetool
+          chmod 755 /usr/local/bin/appimagetool
+
+      - name: Test
+        run: swift test
+
+      - name: Package
+        run: scripts/package-linux.sh all
+
+      - name: Check the .deb installs and runs
+        run: |
+          dpkg-deb --info dist/cairn_*.deb
+          dpkg-deb --contents dist/cairn_*.deb
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./dist/cairn_*.deb >/dev/null
+          cairn --version
+          test -f /usr/share/applications/dev.cairn.Cairn.desktop
+          test -f /usr/share/icons/hicolor/scalable/apps/dev.cairn.Cairn.svg
+          ! ldd /usr/bin/cairn-gnome | grep "not found"
+          file dist/*.AppImage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Cairn-Linux
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Add to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apt-get install -y -qq gh >/dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli.gpg
+            echo "deb [signed-by=/usr/share/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+            apt-get update -qq && apt-get install -y -qq gh >/dev/null
+          }
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "Cairn $tag" --notes "Cairn $tag. Notes follow when the Mac build finishes." --verify-tag || sleep 20
+          fi
+          gh release upload "$tag" dist/* --clobber

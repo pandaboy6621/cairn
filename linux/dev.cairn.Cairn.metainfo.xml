@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.cairn.Cairn</id>
+  <name>Cairn</name>
+  <summary>Back up and restore a computer's setup, not its files</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <description>
+    <p>Cairn records which apps, software sources, settings and config files this computer has, and sets up another computer the same way.</p>
+    <p>Backups go to a folder or a NAS. Restoring always shows what would change first, and nothing changes until you choose Apply.</p>
+  </description>
+  <launchable type="desktop-id">dev.cairn.Cairn.desktop</launchable>
+  <url type="homepage">https://github.com/pandaboy6621/cairn</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

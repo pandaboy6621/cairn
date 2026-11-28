@@ -50,10 +50,14 @@ public enum Updates {
 
     public enum Platform: Sendable {
         case macOS, windows
+        /// Linux: the AppImage replaces itself; the .deb is installed by the user (or apt).
+        case linuxAppImage, linuxDeb
         func assetName(version: String) -> String {
             switch self {
             case .macOS: return "Cairn-\(version)-macOS.zip"
             case .windows: return "Cairn-\(version)-Windows-x64.zip"
+            case .linuxAppImage: return "Cairn-\(version)-x86_64.AppImage"
+            case .linuxDeb: return "cairn_\(version)_amd64.deb"
             }
         }
     }

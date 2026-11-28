@@ -19,6 +19,8 @@ struct CairnGnome: App {
     init() {
         // sudo runs `cairn-gnome --askpass` to ask for the password during a restore.
         if CommandLine.arguments.contains("--askpass") { exit(Askpass.run()) }
+        // Opened as an AppImage: put Cairn in the app grid so it needn't be found in a terminal.
+        AppImageIntegration.integrateIfNeeded()
         app = AdwaitaApp(id: "dev.cairn.Cairn")
     }
 
