@@ -368,6 +368,19 @@ import Testing
         #expect(written.contains("name = Test"))
     }
 
+    /// Everything already there: --apply has nothing to do, so it never calls sudo
+    /// (no password prompt, no `apt-get update`).
+    @Test func linuxApplyWithNothingToDoNeedsNoSudo() throws {
+        let everything = #"echo 'install ok installed'"#
+        let r = try Self.runLinuxKit(["--apply"], tools: [
+            "dpkg-query": everything,
+            "flatpak": #"[ "$1" = info ] && exit 0; [ "$1" = remotes ] && echo flathub; exit 0"#,
+            "gsettings": #"case "$1 $3" in "get color-scheme") echo "'prefer-dark'";; "get natural-scroll") echo false;; "writable "*) echo true;; *) exit 1;; esac"#,
+        ])
+        #expect(!r.sudo.contains("apt-get"), "sudo log: \(r.sudo)")
+        #expect(r.out.contains("git is already installed") && r.out.contains("nodejs is already installed"))
+    }
+
     @Test func linuxSkipsFlathubAppsInstalledAnotherWay() throws {
         // Ubuntu's Firefox is a snap: `snap list firefox` succeeds, so no second copy.
         let snap = #"[ "$1 $2" = "list vlc" ]"#

@@ -478,9 +478,14 @@ public struct PlatformExport: Equatable, Sendable {
           [ $# -gt 0 ] || return 0
           echo "Packages from $manager ($#)"
           # Quiet: one line per package. Errors still show (they go to stderr).
-          [ $APPLY = 1 ] && [ "$manager" = apt ] && sudo apt-get update -qq >/dev/null
+          # apt's lists are refreshed only once something needs installing, so a
+          # computer that already has everything isn't asked for a password.
+          local refreshed=0
           for p in "$@"; do
             if installed "$manager" "$p"; then echo "  $p is already installed"; continue; fi
+            if [ $APPLY = 1 ] && [ "$manager" = apt ] && [ $refreshed = 0 ]; then
+              sudo apt-get update -qq >/dev/null; refreshed=1
+            fi
             from=$(repo_of "$p")
             if [ $APPLY = 0 ] && [ -n "$from" ] && [[ " ${newrepos[*]} " == *" $from "* ]]; then
               echo "  would install $p (from $from, once it's added)"; continue
