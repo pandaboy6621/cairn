@@ -316,6 +316,60 @@ public struct GnomeSettingsScanner: SetupScanning {
     }
 }
 
+// MARK: - Network shares
+
+/// Network shares on GNOME: servers bookmarked in Files' sidebar
+/// (`~/.config/gtk-3.0/bookmarks`) and shares mounted right now (gvfs's folders under
+/// /run/user/<uid>/gvfs). Never a password: any in a URL is dropped.
+public struct LinuxSharesScanner: SetupScanning {
+    var home: String
+    var gvfs: String
+
+    public init(home: String = NSHomeDirectory(), gvfs: String = "/run/user/\(getuid())/gvfs") {
+        self.home = home
+        self.gvfs = gvfs
+    }
+
+    public func scan(using runner: CommandRunner) throws -> ScanContribution {
+        var out = ScanContribution()
+        var byURL: [String: ShareItem] = [:]
+        let bookmarks = (try? String(contentsOfFile: home + "/.config/gtk-3.0/bookmarks", encoding: .utf8)) ?? ""
+        for share in Self.bookmarked(bookmarks) { byURL[share.url] = share }
+        for share in Self.mounted(names: (try? FileManager.default.contentsOfDirectory(atPath: gvfs)) ?? []) where byURL[share.url] == nil {
+            byURL[share.url] = share
+        }
+        out.shares = byURL.values.sorted { $0.url < $1.url }
+        return out
+    }
+
+    /// Bookmark lines are `<uri> [label]`; network ones become favorite shares.
+    static func bookmarked(_ text: String) -> [ShareItem] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            let uri = line.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+            let normalized = uri.hasPrefix("dav://") || uri.hasPrefix("davs://") ? "webdav" + uri.drop { $0 != ":" } : uri
+            guard let parts = NetworkSharesScanner.split(normalized) else { return nil }
+            return ShareItem(url: parts.url, username: parts.user, favorite: true)
+        }
+    }
+
+    /// gvfs mount folders: `smb-share:server=nas.local,share=home,user=alex`.
+    static func mounted(names: [String]) -> [ShareItem] {
+        names.compactMap { name in
+            guard name.hasPrefix("smb-share:") || name.hasPrefix("afp-volume:") || name.hasPrefix("nfs:") else { return nil }
+            var fields: [String: String] = [:]
+            for pair in name.drop(while: { $0 != ":" }).dropFirst().split(separator: ",") {
+                let kv = pair.split(separator: "=", maxSplits: 1).map(String.init)
+                if kv.count == 2 { fields[kv[0]] = kv[1].removingPercentEncoding ?? kv[1] }
+            }
+            guard let server = fields["server"]?.lowercased(), !server.isEmpty else { return nil }
+            let scheme = name.hasPrefix("smb") ? "smb" : name.hasPrefix("afp") ? "afp" : "nfs"
+            let share = fields["share"] ?? fields["volume"] ?? ""
+            let url = "\(scheme)://\(server)" + (share.isEmpty ? "" : "/" + share)
+            return ShareItem(url: url, username: fields["user"])
+        }
+    }
+}
+
 // MARK: - Login items and default apps
 
 /// Apps that start at login (`~/.config/autostart`) and which app opens which kind of

@@ -366,4 +366,48 @@ import Testing
         #expect(r.sections.first?.items.last?.status == .already)
         #expect(KitReport.parse("Software sources (1)\n  would add brave (https://x.example.com/apt)").sections[0].items[0].detail == "Will add this software source")
     }
+
+    // MARK: Network shares
+
+    @Test func linuxSharesComeFromFilesBookmarksAndMounts() throws {
+        let home = try Self.temp(), gvfs = try Self.temp()
+        defer { for u in [home, gvfs] { try? FileManager.default.removeItem(at: u) } }
+        try Self.write("""
+        file:///home/someone/Projects Projects
+        smb://alex:secret@NAS.example/home NAS home
+        dav://files.example.com/remote
+        sftp://server.example/x
+        """, to: home.appendingPathComponent(".config/gtk-3.0/bookmarks"))
+        for name in ["smb-share:server=nas.example,share=home,user=alex", "smb-share:server=media.example,share=films", "mtp:host=phone"] {
+            try FileManager.default.createDirectory(at: gvfs.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        let shares = try LinuxSharesScanner(home: home.path, gvfs: gvfs.path).scan(using: FixtureRunner()).shares
+        #expect(shares.map(\.url) == ["smb://media.example/films", "smb://nas.example/home", "webdav://files.example.com/remote"])
+        let nas = try #require(shares.first { $0.url == "smb://nas.example/home" })
+        #expect(nas.username == "alex" && nas.favorite)
+        #expect(!(shares.first { $0.url == "smb://media.example/films" }!.favorite))
+        // No password anywhere.
+        #expect(try !ManifestCoder.encode(Manifest(device: Device(name: "t", os: "linux", osVersion: "1"), created: Date(), shares: shares)).contains("secret"))
+    }
+
+    @Test func favoriteSharesGoBackIntoFilesSidebar() throws {
+        let home = try Self.temp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let m = Manifest(device: Device(name: "test-laptop", os: "linux", osVersion: "26.04"), created: Date(timeIntervalSince1970: 0), shares: [
+            ShareItem(url: "smb://nas.example/home", username: "alex", favorite: true),
+            ShareItem(url: "webdav://files.example.com/remote", favorite: true),
+            ShareItem(url: "smb://media.example/films"),
+            ShareItem(url: "smb://bad.example/it's", favorite: true),
+        ])
+        #expect(PlatformExport.filesBookmark(m.shares[0]) == "smb://alex@nas.example/home")
+        #expect(PlatformExport.filesBookmark(m.shares[1]) == "dav://files.example.com/remote")
+        #expect(PlatformExport.filesBookmark(m.shares[3]) == nil)
+        let dry = try Self.runKit(m, fontsFrom: nil, home: home, apply: false)
+        #expect(dry.contains("Network shares (2)"))
+        #expect(dry.contains("would add smb://alex@nas.example/home"))
+        _ = try Self.runKit(m, fontsFrom: nil, home: home, apply: true)
+        let marks = try String(contentsOf: home.appendingPathComponent(".config/gtk-3.0/bookmarks"), encoding: .utf8)
+        #expect(marks == "smb://alex@nas.example/home\ndav://files.example.com/remote\n")
+        #expect(try Self.runKit(m, fontsFrom: nil, home: home, apply: false).contains("smb://alex@nas.example/home is already in Files"))
+    }
 }

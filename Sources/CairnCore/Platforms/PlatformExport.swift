@@ -578,6 +578,7 @@ public struct PlatformExport: Equatable, Sendable {
         \(bashSnaps())\
         \(bashFonts())\
         \(bashStartup())\
+        \(bashShares())\
         set_setting() { # schema, key, value, [tolerance for uint32 values], [name to show]
           local now name=${5:-$2}
           if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $name (not on this desktop)"; return; fi
@@ -663,6 +664,43 @@ public struct PlatformExport: Equatable, Sendable {
             fi
           done
         fi
+
+        """
+        return s
+    }
+
+    /// The address GNOME's Files uses for a share, with the username, or nil if it has
+    /// characters a bookmark line can't hold.
+    static func filesBookmark(_ share: ShareItem) -> String? {
+        guard let sep = share.url.range(of: "://") else { return nil }
+        var scheme = String(share.url[..<sep.lowerBound])
+        if scheme == "webdav" { scheme = "dav" }
+        if scheme == "cifs" { scheme = "smb" }
+        guard ["smb", "afp", "nfs", "dav", "davs", "ftp"].contains(scheme) else { return nil }
+        let rest = String(share.url[sep.upperBound...])
+        let user = share.username.flatMap { $0.addingPercentEncoding(withAllowedCharacters: .urlUserAllowed) }.map { $0 + "@" } ?? ""
+        let address = "\(scheme)://\(user)\(rest)"
+        let ok = address.unicodeScalars.allSatisfy { $0.isASCII && $0.value > 0x20 && !"'\"\\`$".unicodeScalars.contains($0) }
+        return ok && address.count <= 512 ? address : nil
+    }
+
+    /// Favorite shares as bookmarks in Files' sidebar (connecting asks for the password then).
+    func bashShares() -> String {
+        guard target == .linux else { return "" }
+        let marks = shares.filter(\.favorite).compactMap(Self.filesBookmark)
+        guard !marks.isEmpty else { return "" }
+        var s = "SHARES=(\(marks.map(sh).joined(separator: " ")))\n"
+        s += """
+        echo "Network shares (${#SHARES[@]})"
+        marks="$HOME/.config/gtk-3.0/bookmarks"
+        for u in "${SHARES[@]}"; do
+          if [ -f "$marks" ] && grep -qF -- "$u" "$marks"; then echo "  $u is already in Files"; continue; fi
+          if [ $APPLY = 1 ]; then
+            mkdir -p "$(dirname "$marks")" && printf '%s\\n' "$u" >> "$marks" && echo "  adding $u" || failed+=("$u")
+          else
+            echo "  would add $u"
+          fi
+        done
 
         """
         return s
