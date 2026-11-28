@@ -146,7 +146,7 @@ public struct SetupScanner: Sendable {
         case .apt: return AptScanner()
         case .flatpak: return FlatpakScanner()
         case .snap: return SnapScanner()
-        case .gnome: return GnomeSettingsScanner()
+        case .gnome: return GnomeSettingsScanner(home: home)
         }
     }
 

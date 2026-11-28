@@ -295,10 +295,12 @@ public struct SnapScanner: SetupScanning {
 /// The GNOME settings Cairn has portable names for (`GnomeSettings.mappings`).
 /// Ones whose schema isn't installed (no Ubuntu Dock, say) are skipped quietly.
 public struct GnomeSettingsScanner: SetupScanning {
-    public init() {}
+    var home: String
+    public init(home: String = NSHomeDirectory()) { self.home = home }
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
-        var out = ScanContribution()
+        // Login items and default apps are files, not gsettings, but belong with these.
+        var out = (try? GnomeStartupScanner(home: home).scan(using: runner)) ?? ScanContribution()
         for m in GnomeSettings.mappings + GnomeSettings.nativeMappings {
             let value: String
             do {
@@ -311,6 +313,77 @@ public struct GnomeSettingsScanner: SetupScanning {
             if let item = GnomeSettings.item(m, output: value) { out.settings.append(item) }
         }
         return out
+    }
+}
+
+// MARK: - Login items and default apps
+
+/// Apps that start at login (`~/.config/autostart`) and which app opens which kind of
+/// file or link (`~/.config/mimeapps.list`), GNOME's versions of the Mac's login items
+/// and default apps. Read-only; stored as two settings.
+public struct GnomeStartupScanner: SetupScanning {
+    public static let autostartKey = "login_items.autostart"
+    public static let defaultAppsKey = "default_apps.handlers"
+    /// Bigger launcher files are generated, not the user's.
+    static let maxBytes = 16 * 1024
+
+    var home: String
+    public init(home: String = NSHomeDirectory()) { self.home = home }
+
+    public func scan(using runner: CommandRunner) throws -> ScanContribution {
+        var out = ScanContribution()
+        let fm = FileManager.default
+        let dir = home + "/.config/autostart"
+        var entries: [SettingValue] = []
+        for file in ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).sorted() where Self.isDesktopID(file) {
+            let path = dir + "/" + file
+            guard let size = (try? fm.attributesOfItem(atPath: path))?[.size] as? Int, size <= Self.maxBytes,
+                  let text = try? String(contentsOfFile: path, encoding: .utf8),
+                  let redacted = Dotfiles.redact(text) else { continue }
+            entries.append(.dict(["file": .string(file), "content": .string(redacted.text)]))
+        }
+        if !entries.isEmpty {
+            out.settings.append(SettingItem(key: Self.autostartKey, value: .array(entries), platforms: ["linux"],
+                                            adapter: SettingAdapters()))
+        }
+        if let text = try? String(contentsOfFile: home + "/.config/mimeapps.list", encoding: .utf8) {
+            let handlers = Self.defaultApps(mimeapps: text)
+            if !handlers.isEmpty {
+                out.settings.append(SettingItem(key: Self.defaultAppsKey, value: .dict(handlers.mapValues { .string($0) }),
+                                                platforms: ["linux"],
+                                                adapter: SettingAdapters()))
+            }
+        }
+        return out
+    }
+
+    /// `[Default Applications]` in mimeapps.list: type → the first app listed for it.
+    static func defaultApps(mimeapps: String) -> [String: String] {
+        var inSection = false
+        var out: [String: String] = [:]
+        for raw in mimeapps.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") { inSection = line == "[Default Applications]"; continue }
+            guard inSection, !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { continue }
+            let type = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
+            let app = line[line.index(after: eq)...].split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+            if isMimeType(type), isDesktopID(app) { out[type] = app }
+        }
+        return out
+    }
+
+    /// `org.gnome.Nautilus.desktop`, `firefox_firefox.desktop`: plain names only.
+    public static func isDesktopID(_ s: String) -> Bool {
+        s.hasSuffix(".desktop") && s.count <= 255 && !s.hasPrefix(".")
+            && s.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }
+    }
+
+    /// `text/html`, `x-scheme-handler/mailto`.
+    public static func isMimeType(_ s: String) -> Bool {
+        let parts = s.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 2 && s.count <= 255 && parts.allSatisfy { p in
+            !p.isEmpty && p.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || ".+-_".unicodeScalars.contains($0)) }
+        }
     }
 }
 

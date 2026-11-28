@@ -57,6 +57,11 @@ public struct PlatformExport: Equatable, Sendable {
     public var debFiles: [String] = []
     /// Linux: user fonts to put in ~/.local/share/fonts (TrueType/OpenType only).
     public var fonts: [FontItem] = []
+    /// Linux: login items (`~/.config/autostart` files, by name) and default apps (type → app).
+    public struct LoginItem: Equatable, Sendable { public var file: String; public var content: String }
+    public var autostart: [LoginItem] = []
+    public struct DefaultApp: Equatable, Sendable { public var type: String; public var app: String }
+    public var defaultApps: [DefaultApp] = []
     /// Repositories that can't be added by the script (no signing key, or odd values).
     public var reposByHand: [String] = []
     /// apt packages from a Linux backup: they have no dnf names, which isn't worth listing one by one.
@@ -160,6 +165,23 @@ public struct PlatformExport: Equatable, Sendable {
         e.winget = unique(e.winget); e.apt = unique(e.apt); e.dnf = unique(e.dnf); e.flatpak = unique(e.flatpak)
         e.appStore = m.apps.filter(\.include).map(\.name)
         for s in m.settings where s.include {
+            if target == .linux, s.key == GnomeStartupScanner.autostartKey, case .array(let list) = s.value {
+                for case .dict(let d) in list {
+                    if case .string(let f)? = d["file"], case .string(let c)? = d["content"], GnomeStartupScanner.isDesktopID(f),
+                       c.utf8.count <= 16 * 1024, !c.contains("\0") {
+                        e.autostart.append(LoginItem(file: f, content: c))
+                    }
+                }
+                continue
+            }
+            if target == .linux, s.key == GnomeStartupScanner.defaultAppsKey, case .dict(let d) = s.value {
+                for (t, v) in d.sorted(by: { $0.key < $1.key }) {
+                    if case .string(let a) = v, GnomeStartupScanner.isMimeType(t), GnomeStartupScanner.isDesktopID(a) {
+                        e.defaultApps.append(DefaultApp(type: t, app: a))
+                    }
+                }
+                continue
+            }
             switch target {
             case .windows:
                 let w = PortableSettings.windows(s)
@@ -245,6 +267,7 @@ public struct PlatformExport: Equatable, Sendable {
                    "Cairn Setup.cmd": windowLauncher(), "winget.json": wingetJSON(), "CHECKLIST.md": checklist()]
         case .linux:
             out = ["setup.sh": bash(), "CHECKLIST.md": checklist()]
+            for a in autostart { out["autostart/" + a.file] = a.content }
         }
         for d in dotfiles { out["dotfiles/" + d.name] = d.text }
         return out
@@ -554,6 +577,7 @@ public struct PlatformExport: Equatable, Sendable {
 
         \(bashSnaps())\
         \(bashFonts())\
+        \(bashStartup())\
         set_setting() { # schema, key, value, [tolerance for uint32 values], [name to show]
           local now name=${5:-$2}
           if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $name (not on this desktop)"; return; fi
@@ -641,6 +665,63 @@ public struct PlatformExport: Equatable, Sendable {
         fi
 
         """
+        return s
+    }
+
+    /// Login items into ~/.config/autostart (only when the program they start is
+    /// installed, and never over the user's own), then default apps with xdg-mime.
+    func bashStartup() -> String {
+        guard target == .linux, !autostart.isEmpty || !defaultApps.isEmpty else { return "" }
+        var s = ""
+        if !autostart.isEmpty {
+            s += "AUTOSTART=(\(autostart.map { sh($0.file) }.joined(separator: " ")))\n"
+            s += """
+            echo "Login items (${#AUTOSTART[@]})"
+            for f in "${AUTOSTART[@]}"; do
+              src="$KIT/autostart/$f" dst="$HOME/.config/autostart/$f"
+              if [ -f "$dst" ] && cmp -s "$src" "$dst"; then echo "  $f is already set up"; continue; fi
+              if [ -e "$dst" ]; then echo "  $f is already set up differently here, so left alone"; continue; fi
+              run=$(sed -n 's/^Exec=//p' "$src" | head -1)
+              prog=$(printf '%s\n' "$run" | awk '{ for (i = 1; i <= NF; i++) if ($i != "env" && $i !~ /=/) { print $i; exit } }' | tr -d '"')
+              if [ -n "$prog" ] && ! command -v "$prog" >/dev/null 2>&1; then echo "  skipped $f: $prog isn't installed here"; continue; fi
+              if [ $APPLY = 1 ]; then
+                mkdir -p "$HOME/.config/autostart" && install -m 644 "$src" "$dst" && echo "  added $f" || failed+=("$f")
+              else
+                echo "  would add $f (opens: $run)"
+              fi
+            done
+
+            """
+        }
+        if !defaultApps.isEmpty {
+            s += "DEFAULT_TYPES=(\(defaultApps.map { sh($0.type) }.joined(separator: " ")))\n"
+            s += "DEFAULT_APPS=(\(defaultApps.map { sh($0.app) }.joined(separator: " ")))\n"
+            s += """
+            app_here() { # desktop id
+              local d
+              for d in "$HOME/.local/share/applications" /usr/share/applications /usr/local/share/applications \\
+                       /var/lib/flatpak/exports/share/applications "$HOME/.local/share/flatpak/exports/share/applications" \\
+                       /var/lib/snapd/desktop/applications; do
+                [ -f "$d/$1" ] && return 0
+              done
+              return 1
+            }
+            echo "Default apps (${#DEFAULT_TYPES[@]})"
+            if ! command -v xdg-mime >/dev/null 2>&1; then
+              echo "  skipped: xdg-mime isn't on this system"
+            else
+              for i in "${!DEFAULT_TYPES[@]}"; do
+                t=${DEFAULT_TYPES[$i]} a=${DEFAULT_APPS[$i]}
+                now=$(xdg-mime query default "$t" 2>/dev/null)
+                if [ "$now" = "$a" ]; then echo "  $t already opens with $a"
+                elif ! app_here "$a"; then echo "  skipped $t: $a isn't installed here"
+                elif [ $APPLY = 1 ]; then xdg-mime default "$a" "$t" && echo "  $t now opens with $a" || failed+=("$t")
+                else echo "  would open $t with $a${now:+ (now $now)}"; fi
+              done
+            fi
+
+            """
+        }
         return s
     }
 

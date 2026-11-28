@@ -1,6 +1,6 @@
 /// Sorts settings into checklist categories by abstract key or source domain.
 public enum SettingCategory {
-    static let lookPrefixes = ["dock.", "finder.", "mission_control.", "appearance.", "menubar.", "screenshots.",
+    static let lookPrefixes = ["dock.", "finder.", "login_items.", "default_apps.", "mission_control.", "appearance.", "menubar.", "screenshots.",
                                "desktop.", "stage_manager.", "windows."]
     static let systemPrefixes = ["keyboard.", "trackpad.", "mouse.", "sound.", "region.", "display.", "energy.", "accessibility."]
 
@@ -49,6 +49,8 @@ public enum SettingCategory {
         "mouse": "Mouse",
         "sound": "Sound",
         "region": "Language & region",
+        "login_items": "Login items",
+        "default_apps": "Default apps",
     ]
 
     static let friendlyDomainNames: [String: String] = [

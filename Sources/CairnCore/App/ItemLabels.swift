@@ -42,6 +42,8 @@ public enum ItemLabels {
         "energy.blank_screen_after": "Blank the screen after",
         "energy.sleep_plugged_in": "Sleep when plugged in",
         "energy.sleep_on_battery": "Sleep on battery",
+        "login_items.autostart": "Apps that open at login",
+        "default_apps.handlers": "Apps that open each kind of file and link",
     ]
 
     /// A known setting's name, otherwise its key's last part made readable

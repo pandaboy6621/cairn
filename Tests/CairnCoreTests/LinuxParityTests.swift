@@ -148,4 +148,80 @@ import Testing
         #expect(try run(false).contains("would change picture-uri from 'file:///old.png' to \(uri)"))
         #expect(try run(true).contains("SET picture-uri \(uri)"))
     }
+
+    // MARK: Login items and default apps
+
+    static let mimeapps = """
+    [Added Associations]
+    text/plain=org.gnome.TextEditor.desktop;
+
+    [Default Applications]
+    x-scheme-handler/http=brave-browser.desktop;firefox_firefox.desktop;
+    text/html=brave-browser.desktop
+    bad type=evil.desktop
+    image/png=../../evil.desktop
+    """
+
+    @Test func loginItemsAndDefaultAppsAreRead() throws {
+        let home = try Self.temp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Self.write("[Desktop Entry]\nName=Chat\nExec=chat-app --hidden\n", to: home.appendingPathComponent(".config/autostart/chat-app.desktop"))
+        try Self.write("[Desktop Entry]\nExec=x\n", to: home.appendingPathComponent(".config/autostart/notes.txt"))
+        try Self.write(Self.mimeapps, to: home.appendingPathComponent(".config/mimeapps.list"))
+        let found = try GnomeStartupScanner(home: home.path).scan(using: FixtureRunner()).settings
+        #expect(found.map(\.key) == ["login_items.autostart", "default_apps.handlers"])
+        #expect(found[0].value == .array([.dict(["file": .string("chat-app.desktop"),
+                                                  "content": .string("[Desktop Entry]\nName=Chat\nExec=chat-app --hidden\n")])]))
+        #expect(found[1].value == .dict(["x-scheme-handler/http": .string("brave-browser.desktop"), "text/html": .string("brave-browser.desktop")]))
+        #expect(SettingCategory.classify(found[0]) == .lookAndLayout)
+        #expect(SettingCategory.groupName(for: found[1], in: .lookAndLayout) == "Default apps")
+    }
+
+    @Test func kitAddsLoginItemsAndDefaultAppsOnlyWhereTheAppIsHere() throws {
+        let home = try Self.temp(), bin = try Self.temp()
+        defer { for u in [home, bin] { try? FileManager.default.removeItem(at: u) } }
+        let log = bin.appendingPathComponent("xdg.log").path
+        try Self.write("#!/bin/bash\n[ \"$1\" = query ] && { echo firefox_firefox.desktop; exit 0; }\necho \"$*\" >> '\(log)'\n",
+                       to: bin.appendingPathComponent("xdg-mime"))
+        try Self.write("#!/bin/bash\nexit 0\n", to: bin.appendingPathComponent("chat-app"))
+        for t in ["xdg-mime", "chat-app"] { try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent(t).path) }
+        try Self.write("[Desktop Entry]\n", to: home.appendingPathComponent(".local/share/applications/brave-browser.desktop"))
+
+        let m = Manifest(device: Device(name: "test-laptop", os: "linux", osVersion: "26.04"), created: Date(timeIntervalSince1970: 0), settings: [
+            SettingItem(key: "login_items.autostart", value: .array([
+                .dict(["file": .string("chat-app.desktop"), "content": .string("[Desktop Entry]\nExec=env A=1 chat-app --hidden\n")]),
+                .dict(["file": .string("gone.desktop"), "content": .string("[Desktop Entry]\nExec=/opt/gone/run\n")]),
+                .dict(["file": .string("../escape.desktop"), "content": .string("x")]),
+            ]), platforms: ["linux"], adapter: SettingAdapters()),
+            SettingItem(key: "default_apps.handlers", value: .dict([
+                "x-scheme-handler/http": .string("brave-browser.desktop"), "text/plain": .string("missing.desktop"),
+            ]), platforms: ["linux"], adapter: SettingAdapters()),
+        ])
+        let kit = PlatformExport.make(m, for: .linux)
+        #expect(kit.autostart.map(\.file) == ["chat-app.desktop", "gone.desktop"])
+        #expect(kit.settingsLeft == 0)
+        func run(_ apply: Bool) throws -> String {
+            let dir = try Self.temp()
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let folder = try kit.write(into: dir)
+            let p = Process(), pipe = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/bin/bash")
+            p.arguments = [folder.appendingPathComponent("setup.sh").path] + (apply ? ["--apply"] : [])
+            p.environment = ["PATH": bin.path + ":" + (try PlatformExportTests.systemTools(in: dir)).path, "HOME": home.path]
+            p.standardOutput = pipe; p.standardError = pipe
+            try p.run(); p.waitUntilExit()
+            return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        }
+        let dry = try run(false)
+        #expect(dry.contains("would add chat-app.desktop (opens: env A=1 chat-app --hidden)"))
+        #expect(dry.contains("skipped gone.desktop: /opt/gone/run isn't installed here"))
+        #expect(dry.contains("would open x-scheme-handler/http with brave-browser.desktop (now firefox_firefox.desktop)"))
+        #expect(dry.contains("skipped text/plain: missing.desktop isn't installed here"))
+
+        let applied = try run(true)
+        #expect(applied.contains("added chat-app.desktop"))
+        #expect(FileManager.default.fileExists(atPath: home.appendingPathComponent(".config/autostart/chat-app.desktop").path))
+        #expect(try String(contentsOfFile: log, encoding: .utf8).contains("default brave-browser.desktop x-scheme-handler/http"))
+        #expect(try run(false).contains("chat-app.desktop is already set up"))
+    }
 }
