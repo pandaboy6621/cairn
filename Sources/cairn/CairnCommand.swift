@@ -7,8 +7,8 @@ private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.sel
                                                 Dock.self, Displays.self, VaultCommand.self, SyncCommand.self, Export.self,
                                                 UpdateCommand.self]
 #else
-// Linux: backing up, restoring (through the setup kit) and exporting. Sync, the vault and the Mac layout commands are macOS-only for now.
-private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, LinuxRestore.self, VaultCommand.self, Export.self]
+// Linux: backing up, restoring (through the setup kit), the vault, folder sync and exporting. The Mac layout commands are macOS-only.
+private let commands: [ParsableCommand.Type] = [Scan.self, Diff.self, Backup.self, Snapshots.self, LinuxRestore.self, VaultCommand.self, SyncCommand.self, Export.self]
 #endif
 
 @main

@@ -1,8 +1,9 @@
-#if os(macOS)
 import ArgumentParser
 import CairnCore
 import Foundation
+#if os(macOS)
 import Network
+#endif
 
 struct SyncCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -22,10 +23,20 @@ struct SyncCommand: ParsableCommand {
             after the plan is shown, and an app removed elsewhere is only uninstalled
             here with `cairn sync resolve <id> --uninstall --apply`.
             """,
-        subcommands: [Status.self, On.self, Off.self, Now.self, Scope.self, Resolve.self, Devices.self, Folder.self,
-                      Mode.self, ID.self, Pair.self, Requests.self, Accept.self, Ignore.self, Unpair.self],
+        subcommands: SyncCommand.subcommandList,
         defaultSubcommand: Status.self
     )
+
+    #if os(macOS)
+    static let subcommandList: [ParsableCommand.Type] = [Status.self, On.self, Off.self, Now.self, Scope.self, Resolve.self,
+                                                         Devices.self, Folder.self, Mode.self, ID.self, Pair.self, Requests.self,
+                                                         Accept.self, Ignore.self, Unpair.self]
+    #else
+    // Linux syncs through a shared folder; direct sync over the network is Mac-only for now.
+    static let subcommandList: [ParsableCommand.Type] = [Status.self, On.self, Off.self, Now.self, Scope.self, Resolve.self,
+                                                         Devices.self, Folder.self, ID.self, Pair.self, Requests.self,
+                                                         Accept.self, Ignore.self, Unpair.self]
+    #endif
 
     struct Options: ParsableArguments {
         @Option(name: .long, help: "The backup folder. Default: the one set in the app.")
@@ -53,6 +64,7 @@ struct SyncCommand: ParsableCommand {
         return (run, scan, secrets, run.plan(local: scan, secrets: secrets))
     }
 
+    #if os(macOS)
     /// Other Macs running Cairn on the network, found within `seconds`.
     static func discover(seconds: Double, device: String) async -> [(SyncPeer, NWEndpoint)] {
         let found = FoundPeers()
@@ -69,6 +81,7 @@ struct SyncCommand: ParsableCommand {
         return DirectSyncContext(identity: try local.identity(), name: device.name, local: local,
                                  store: options.store, exchange: options.mode == .direct)
     }
+    #endif
 
     static func requireOn(_ store: SyncStore, _ device: String) throws {
         guard store.config(device: device).enabled else {
@@ -189,6 +202,7 @@ struct SyncCommand: ParsableCommand {
             try p.run.publish(p.plan)
             if !p.plan.outgoing.isEmpty { print("Published \(p.plan.outgoing.count) change(s) from this Mac.") }
 
+            #if os(macOS)
             if options.mode == .direct {
                 let trust = options.local.trust()
                 let context = try SyncCommand.context(options, device: p.scan.device)
@@ -206,6 +220,7 @@ struct SyncCommand: ParsableCommand {
                 // Plan again with what came in.
                 p.plan = p.run.plan(local: p.scan, secrets: p.secrets)
             }
+            #endif
             print(SyncCommand.render(p.plan), terminator: "")
 
             let incoming = p.plan.incoming.filter { only.isEmpty || only.contains($0.id) }
@@ -217,6 +232,31 @@ struct SyncCommand: ParsableCommand {
         }
     }
 
+    #if !os(macOS)
+    /// Linux: incoming changes go through the Linux restore (setup kit); ones Linux
+    /// can't apply are listed with why. Shown first; applied only with `apply`.
+    static func applyIncoming(_ incoming: [SyncIncoming], run: SyncRun, before: Manifest, backupFolder folder: URL,
+                              apply: Bool, passwordStdin: Bool) throws {
+        let os = Dictionary(run.store.devices().map { ($0.info.name, $0.info.os) }, uniquingKeysWith: { a, _ in a })
+        let split = SyncApplicability.forLinux(incoming, device: before.device, os: { os[$0] })
+        for s in split.skipped { print("  skipped \(s.item.title): \(s.reason)") }
+        guard !split.apply.isEmpty else { return }
+        let (manifest, secrets) = SyncApplicability.restore(for: split.apply, device: before.device, os: { os[$0] }, now: Date())
+        var key: VaultKey?
+        if !secrets.secrets.isEmpty, let envelope = try? VaultStore.read(in: folder) {
+            key = Vault.cachedKey(for: envelope, cache: PlatformVaultKeyCache.make())
+            if key == nil, apply {
+                key = try? Vault.unlock(envelope, password: readPassword("Vault password (to restore secrets, Enter to skip): ", stdin: passwordStdin))
+            }
+        }
+        print("\nTo bring in:")
+        let result = try LinuxRestoreRun(manifest: manifest, secrets: secrets, vaultKey: key).run(apply: apply) { print($0) }
+        guard apply else { return }
+        let after = SetupScanner().scan().manifest
+        try run.taken(split.apply, after: after, secrets: VaultStore.readSecrets(in: folder, device: before.device.name))
+        if result.status != 0 { throw ExitCode(result.status) }
+    }
+    #else
     /// Restores incoming changes: plan, then (with `apply`) write, check, and record what landed.
     static func applyIncoming(_ incoming: [SyncIncoming], run: SyncRun, before: Manifest, backupFolder folder: URL,
                               apply: Bool, passwordStdin: Bool) throws {
@@ -258,6 +298,7 @@ struct SyncCommand: ParsableCommand {
         try run.taken(incoming, after: after, secrets: VaultStore.readSecrets(in: folder, device: before.device.name))
         if checks.contains(where: { $0.status == .mismatch || $0.status == .failed }) { throw ExitCode(1) }
     }
+    #endif
 
     struct Scope: ParsableCommand {
         static let configuration = CommandConfiguration(
@@ -356,6 +397,7 @@ struct SyncCommand: ParsableCommand {
                 guard let r = p.plan.removedElsewhere.first(where: { $0.id == id }), let value = r.current else {
                     throw ValidationError("\(id) wasn't removed on another Mac (see `cairn sync now`).")
                 }
+                #if os(macOS)
                 let remover = SoftwareRemover()
                 guard let removal = remover.removal(for: value) else {
                     throw ValidationError("Cairn can only remove Homebrew formulae and casks and App Store apps; remove \(r.title) yourself.")
@@ -365,6 +407,10 @@ struct SyncCommand: ParsableCommand {
                 try remover.remove(removal)
                 try store.saveBase(SyncEngine.dismissRemoval(id, base: store.base(device: device)), device: device)
                 print("Removed \(r.title).")
+                #else
+                _ = value
+                throw ValidationError("Sync doesn't uninstall on Linux yet. Remove \(r.title) yourself, then `cairn sync resolve \(id) --skip`.")
+                #endif
                 return
             }
             if skip, p.plan.removedElsewhere.contains(where: { $0.id == id }) {
@@ -419,6 +465,7 @@ struct SyncCommand: ParsableCommand {
         }
     }
 
+    #if os(macOS)
     struct Mode: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Sync through a shared folder (NAS) or directly between Macs.")
         @OptionGroup var options: Options
@@ -437,6 +484,7 @@ struct SyncCommand: ParsableCommand {
             print("\(mode.title). \(mode.summary)")
         }
     }
+    #endif
 
     struct Folder: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
@@ -472,11 +520,15 @@ struct SyncCommand: ParsableCommand {
             if !`default` {
                 var url: URL
                 if let connect {
+                    #if os(macOS)
                     guard SyncFolder.withoutPassword(connect) != nil else { throw ValidationError("\(connect) isn't a share address, e.g. smb://nas.local/Backups.") }
                     let mount = try await withCheckedThrowingContinuation { (c: CheckedContinuation<URL, Error>) in
                         NetworkShareMounter.mount(connect) { c.resume(with: $0) }
                     }
                     url = path.map { mount.appendingPathComponent($0, isDirectory: true) } ?? mount
+                    #else
+                    throw ValidationError("On Linux, open \(connect) in Files first, then give its folder (under /run/user/\(getuid())/gvfs).")
+                    #endif
                 } else {
                     url = URL(fileURLWithPath: (path! as NSString).expandingTildeInPath, isDirectory: true)
                 }
@@ -486,7 +538,11 @@ struct SyncCommand: ParsableCommand {
                     throw ValidationError("\(url.path) isn't a folder (create it first).")
                 }
                 if url != options.backupFolder.standardizedFileURL {
+                    #if os(macOS)
                     chosen = SyncFolder(path: url.path, share: NetworkShareMounter.share(containing: url)?.address)
+                    #else
+                    chosen = SyncFolder(path: url.path, share: SyncFolder.gvfsShare(url.path))
+                    #endif
                 }
             }
             // Keep this Mac's choices in the new folder.
@@ -540,6 +596,7 @@ struct SyncCommand: ParsableCommand {
                 print("Paired with \(id) on this side. Add this Mac's ID on the other one too: \(try local.identity().deviceID)")
                 return
             }
+            #if os(macOS)
             let scan = SetupScanner().scan().manifest
             print("Looking for Macs running Cairn…")
             let found = await SyncCommand.discover(seconds: 4, device: scan.device.name)
@@ -561,6 +618,10 @@ struct SyncCommand: ParsableCommand {
                 print("Check that \(peer.device) shows the same code, and accept there. Waiting…")
             }
             print("Paired with \(device.name) (\(device.id)).")
+            #else
+            _ = to
+            throw ValidationError("On Linux, pair by ID: run `cairn sync id` on each computer and `cairn sync pair <ID>` on the other.")
+            #endif
         }
     }
 
@@ -624,6 +685,7 @@ struct SyncCommand: ParsableCommand {
     }
 }
 
+#if os(macOS)
 /// Peers found by a short Bonjour browse (set from the main queue).
 final class FoundPeers: @unchecked Sendable {
     private var peers: [SyncPeer] = []
@@ -631,7 +693,7 @@ final class FoundPeers: @unchecked Sendable {
     func set(_ p: [SyncPeer]) { lock.lock(); peers = p; lock.unlock() }
     func get() -> [SyncPeer] { lock.lock(); defer { lock.unlock() }; return peers }
 }
+#endif
 
 extension SyncPreset: ExpressibleByArgument {}
 extension SyncMode: ExpressibleByArgument {}
-#endif

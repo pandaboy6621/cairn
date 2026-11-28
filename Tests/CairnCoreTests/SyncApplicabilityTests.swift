@@ -56,4 +56,19 @@ import Testing
         #expect(SyncFolder.gvfsShare("/home/me/Backups") == nil)
         #expect(SyncFolder.gvfsShare("/run/user/1000/gvfs/mtp:host=Phone") == nil)
     }
+
+    @Test func secretsAndFavoriteSharesNowApplyOnLinux() {
+        let items = [
+            Self.incoming("secret:ssh", SyncValue(secret: SensitiveRef(type: "ssh", ref: SSHKeyScanner.ref(file: "id_test")))),
+            Self.incoming("secret:wifi", SyncValue(secret: SensitiveRef(type: "wifi", ref: WiFiPasswords.ref(ssid: "Home Network")))),
+            Self.incoming("secret:vpn", SyncValue(secret: SensitiveRef(type: "vpn", ref: "vault://vpn/x"))),
+            Self.incoming("share:fav", SyncValue(share: ShareItem(url: "smb://nas.example/home", username: "alex", favorite: true))),
+            Self.incoming("share:plain", SyncValue(share: ShareItem(url: "smb://media.example/films"))),
+        ]
+        let split = SyncApplicability.forLinux(items, device: Self.laptop, os: Self.os)
+        #expect(split.apply.map(\.id) == ["secret:ssh", "secret:wifi", "share:fav"])
+        let reasons = Dictionary(uniqueKeysWithValues: split.skipped.map { ($0.item.id, $0.reason) })
+        #expect(reasons["secret:vpn"] == "This kind of secret isn't restored on Linux")
+        #expect(reasons["share:plain"] == "Connect to it in Files (Other Locations)")
+    }
 }

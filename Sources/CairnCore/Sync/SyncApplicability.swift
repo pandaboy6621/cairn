@@ -28,18 +28,27 @@ public enum SyncApplicability {
     /// The manifest to restore from for the applicable changes. Its device takes
     /// the OS of where they came from (a Mac if any did), for the kit's portability rules.
     public static func manifest(for incoming: [SyncIncoming], device: Device, os: (String) -> String?, now: Date) -> Manifest {
-        var (m, _) = SyncEngine.manifest(for: incoming, device: device, now: now)
+        restore(for: incoming, device: device, os: os, now: now).manifest
+    }
+
+    /// The manifest and the encrypted secrets that came with the changes, for `LinuxRestoreRun`.
+    public static func restore(for incoming: [SyncIncoming], device: Device, os: (String) -> String?, now: Date) -> (manifest: Manifest, secrets: SecretsFile) {
+        var (m, secrets) = SyncEngine.manifest(for: incoming, device: device, now: now)
         if incoming.contains(where: { os($0.entry.device) == "macos" }) { m.device.os = "macos" }
-        return m
+        return (m, secrets)
     }
 
     static func reason(_ item: SyncIncoming, device: Device, os: String) -> String? {
         guard let value = item.entry.value, !item.entry.removed else { return "Removed on the other computer (sync never uninstalls)" }
-        if value.secret != nil { return "Passwords and keys aren't restored on Linux yet" }
+        if let secret = value.secret, !["ssh", "token", WiFiPasswords.type].contains(secret.type) {
+            return "This kind of secret isn't restored on Linux"
+        }
         if value.app != nil { return "A Mac App Store app" }
         if value.dock != nil || value.displays != nil { return "Mac layout (Dock, displays)" }
         if value.wallpaper != nil { return "Desktop pictures aren't restored on Linux yet" }
-        if value.share != nil { return "Network shares aren't restored on Linux yet" }
+        if let share = value.share, !share.favorite || PlatformExport.filesBookmark(share) == nil {
+            return "Connect to it in Files (Other Locations)"
+        }
 
         var source = device
         source.os = os
@@ -47,7 +56,8 @@ public enum SyncApplicability {
         value.add(to: &m)
         let kit = PlatformExport.make(m.normalized(), for: .linux)
         let acts = kit.apt.count + kit.flatpak.count + kit.snaps.count + kit.repos.count + kit.gsettings.count
-            + kit.dotfiles.filter(\.installs).count
+            + kit.dotfiles.filter(\.installs).count + kit.autostart.count + kit.defaultApps.count
+            + kit.shares.filter(\.favorite).count + (value.secret != nil ? 1 : 0)
         if acts > 0 { return nil }
         if !kit.macOnly.isEmpty { return "Mac only" }
         if let r = kit.redundant.first { return r.reason }
