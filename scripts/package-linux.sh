@@ -5,7 +5,7 @@
 #                                     app grid the first time it's opened
 # plus a .sha256 for each. Runs on Ubuntu 26.04 (the release workflow uses the
 # swift:latest image), needs libadwaita-1-dev, libgtk-4-dev, libsqlite3-dev,
-# librsvg2-bin and dpkg-dev, and for the AppImage `appimagetool` on PATH.
+# librsvg2-bin, dpkg-dev and desktop-file-utils, and for the AppImage `appimagetool` on PATH.
 # Usage: scripts/package-linux.sh [deb|appimage|all]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -82,7 +82,7 @@ APPRUN
     chmod 755 "$appdir/AppRun"
     image="Cairn-${version}-x86_64.AppImage"
     # No FUSE in a container: appimagetool (itself an AppImage) extracts and runs.
-    APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 appimagetool --no-appstream "$appdir" "dist/$image" >/dev/null
+    APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 appimagetool --no-appstream "$appdir" "dist/$image"
     sha "$image"
     echo "Built dist/$image"
 fi

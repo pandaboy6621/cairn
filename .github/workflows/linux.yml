@@ -38,13 +38,14 @@ jobs:
           swift --version
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            libadwaita-1-dev libgtk-4-dev libsqlite3-dev pkg-config librsvg2-bin dpkg-dev file curl git >/dev/null
+            libadwaita-1-dev libgtk-4-dev libsqlite3-dev pkg-config librsvg2-bin dpkg-dev desktop-file-utils file curl git >/dev/null
 
       - name: Install appimagetool
         run: |
           curl -fsSL -o /usr/local/bin/appimagetool \
             https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
-          sha256sum /usr/local/bin/appimagetool
+          # Pinned: a changed download fails the build.
+          echo "46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1  /usr/local/bin/appimagetool" | sha256sum -c -
           chmod 755 /usr/local/bin/appimagetool
 
       - name: Test
