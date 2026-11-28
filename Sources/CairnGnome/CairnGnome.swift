@@ -98,6 +98,7 @@ struct MainView: View {
     @State var preferences = false
     @State var backUpToFolder: Signal = .init()
     @State var chooseBackupFile: Signal = .init()
+    @State var update = UpdateState()
 
     var destinations: [Destination] {
         let categories = checklist.map { LinuxChecklist.categories(in: $0) } ?? []
@@ -172,6 +173,16 @@ struct MainView: View {
                                 .valign(.center)
                         }
                 }
+                .group("Updates") {
+                    ActionRow("Cairn updates")
+                        .subtitle(update.preferencesText)
+                        .suffix {
+                            Button("Check for Updates") { onMainLoop { checkForUpdates() } }
+                                .flat()
+                                .valign(.center)
+                                .insensitive([.checking, .installing].contains(update.phase))
+                        }
+                }
         }
         .folderImporter(open: $chooseSyncFolder, initialFolder: sync.folder ?? folder, title: "Choose the Sync Folder",
                         acceptLabel: "Sync Through This Folder") { url in setSyncFolder(url) }
@@ -199,6 +210,7 @@ struct MainView: View {
                 loadSnapshots()
                 scan()
                 loadSync()
+                checkForUpdatesOnLaunch()
                 // Three cards across from about 900 pixels of window.
                 WindowWidth.watch { width in
                     let wide = width >= 900
@@ -309,6 +321,8 @@ struct MainView: View {
 
     @ViewBuilder var content: Body {
         VStack {
+            Banner(update.bannerText, visible: update.bannerVisible)
+                .button(update.bannerButton) { onMainLoop { updateBannerClicked() } }
             HomePage(data: homeData, actions: homeActions)
                 .visible(selection == .home)
             ForEach(destinations.compactMap { d -> ChecklistCategory? in

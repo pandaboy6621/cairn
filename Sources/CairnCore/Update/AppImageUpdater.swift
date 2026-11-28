@@ -35,8 +35,7 @@ public struct AppImageUpdater: Sendable {
 
     /// The newer release, or nil when this one is current.
     public func check(current: String = Cairn.version) async throws -> Updates.Update? {
-        let release = try Updates.Release.decode(try await fetch(Updates.latestURL))
-        return Updates.available(in: release, current: current, platform: .linuxAppImage)
+        try await LinuxUpdates.check(platform: .linuxAppImage, current: current, fetch: fetch)
     }
 
     /// Downloads, checks and swaps in `update`. Throws without touching the old file if anything is off.

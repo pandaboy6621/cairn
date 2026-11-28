@@ -110,3 +110,56 @@ import Testing
         #expect(AppImageUpdater.current(environment: ["APPIMAGE": "/home/someone/Cairn.AppImage"])?.appImage.path == "/home/someone/Cairn.AppImage")
     }
 }
+
+/// How the GNOME app decides to check for and offer updates. Made-up paths and releases.
+@Suite struct LinuxUpdatesTests {
+    @Test func howItWasInstalled() {
+        #expect(LinuxInstall.current(environment: ["APPIMAGE": "/home/someone/Applications/Cairn.AppImage"], executable: "/tmp/.mount_x/usr/bin/cairn-gnome")
+                == .appImage(URL(fileURLWithPath: "/home/someone/Applications/Cairn.AppImage")))
+        #expect(LinuxInstall.current(environment: [:], executable: "/usr/bin/cairn-gnome") == .deb)
+        #expect(LinuxInstall.current(environment: [:], executable: "/home/someone/.local/bin/cairn-gnome") == .source)
+        #expect(LinuxInstall.deb.platform == .linuxDeb && LinuxInstall.deb.checksAutomatically)
+        #expect(!LinuxInstall.source.checksAutomatically)
+    }
+
+    @Test func checksAtMostOnceADay() {
+        let now = Date(timeIntervalSince1970: 1_795_000_000)
+        #expect(LinuxUpdates.due(lastCheck: nil, now: now))
+        #expect(!LinuxUpdates.due(lastCheck: now.addingTimeInterval(-3600), now: now))
+        #expect(LinuxUpdates.due(lastCheck: now.addingTimeInterval(-25 * 3600), now: now))
+        #expect(LinuxUpdates.due(lastCheck: now.addingTimeInterval(3600), now: now)) // clock went back
+
+        let defaults = UserDefaults(suiteName: "cairn-tests-\(UUID().uuidString)")
+        #expect(LinuxUpdates.lastCheck(in: defaults) == nil)
+        LinuxUpdates.recordCheck(in: defaults, at: now)
+        #expect(LinuxUpdates.lastCheck(in: defaults) == now)
+    }
+
+    @Test func theDebFindsItsOwnFile() async throws {
+        let base = "https://github.com/pandaboy6621/cairn/releases/download/v9.0.0/"
+        let release = Data("""
+        {"tag_name": "v9.0.0", "draft": false, "prerelease": false, "html_url": "https://github.com/pandaboy6621/cairn/releases/tag/v9.0.0",
+         "assets": [{"name": "cairn_9.0.0_amd64.deb", "browser_download_url": "\(base)cairn_9.0.0_amd64.deb", "size": 1},
+                    {"name": "cairn_9.0.0_amd64.deb.sha256", "browser_download_url": "\(base)cairn_9.0.0_amd64.deb.sha256", "size": 1}]}
+        """.utf8)
+        let update = try #require(try await LinuxUpdates.check(platform: .linuxDeb, current: "0.3.0") { _ in release })
+        #expect(LinuxUpdates.availableText(update) == "Cairn 9.0.0 is available")
+        #expect(update.page.absoluteString.hasSuffix("/releases/tag/v9.0.0"))
+        // The AppImage's file isn't in this release, so an AppImage isn't offered it.
+        #expect(try await LinuxUpdates.check(platform: .linuxAppImage, current: "0.3.0") { _ in release } == nil)
+    }
+
+    @Test func aLocalStandInForGitHub() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("list".utf8).write(to: dir.appendingPathComponent("latest"))
+        #expect(try await LinuxUpdates.localFetch(folder: dir)(Updates.latestURL) == Data("list".utf8))
+    }
+
+    @Test func relaunchWaitsThenOpensTheAppImage() {
+        let cmd = LinuxUpdates.relaunchCommand(appImage: URL(fileURLWithPath: "/home/someone/Apps/Cairn \"x\".AppImage"), pid: 42)
+        #expect(cmd.first == "/bin/sh" && cmd.count == 6)
+        #expect(cmd[4] == "42" && cmd[5] == "/home/someone/Apps/Cairn \"x\".AppImage") // passed as arguments, never in the script
+    }
+}
