@@ -23,6 +23,8 @@ stage() { # root folder: the files both packages share, below <root>/usr
     local root=$1
     install -Dm755 "$bin/cairn-gnome" "$root/usr/bin/cairn-gnome"
     install -Dm755 "$bin/cairn" "$root/usr/bin/cairn"
+    # Debug symbols are most of their size.
+    strip --strip-unneeded "$root/usr/bin/cairn-gnome" "$root/usr/bin/cairn"
     install -Dm644 linux/dev.cairn.Cairn.desktop "$root/usr/share/applications/dev.cairn.Cairn.desktop"
     install -Dm644 linux/dev.cairn.Cairn.svg "$root/usr/share/icons/hicolor/scalable/apps/dev.cairn.Cairn.svg"
     for size in 48 128 256; do
