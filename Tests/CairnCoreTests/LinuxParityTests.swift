@@ -291,4 +291,79 @@ import Testing
         cache.remove(vaultID: "abc123")
         #expect(cache.load(vaultID: "abc123") == nil)
     }
+
+    // MARK: Restoring secrets
+
+    static func secretsBackup() throws -> (Manifest, SecretsFile, VaultKey) {
+        let key = try Vault.create(password: "not a real password").key
+        let refs = [SSHKeyScanner.ref(file: "id_test"), CredentialFiles.ref(path: ".config/gh/hosts.yml"),
+                    WiFiPasswords.ref(ssid: "Home Network"), WiFiPasswords.ref(ssid: "Already Here"), WiFiPasswords.ref(ssid: "Bad;Name")]
+        var file = SecretsFile()
+        file.secrets[refs[0]] = try key.seal(Data("-----FAKE KEY-----\n".utf8), ref: refs[0])
+        file.secrets[refs[1]] = try key.seal(Data("fake-token".utf8), ref: refs[1])
+        file.secrets[refs[2]] = try key.seal(Data("not-a-real-wifi-pw".utf8), ref: refs[2])
+        file.secrets[refs[3]] = try key.seal(Data("whatever1".utf8), ref: refs[3])
+        file.secrets[refs[4]] = try key.seal(Data("whatever1".utf8), ref: refs[4])
+        let types = ["ssh", "token", "wifi", "wifi", "wifi"]
+        let m = Manifest(device: Device(name: "test-laptop", os: "linux", osVersion: "26.04"), created: Date(timeIntervalSince1970: 0),
+                         sensitive: zip(types, refs).map { SensitiveRef(type: $0, ref: $1, include: true) }
+                            + [SensitiveRef(type: "ssh", ref: SSHKeyScanner.ref(file: "not_saved"), include: true)])
+        return (m, file, key)
+    }
+
+    @Test func secretsComeBackOnlyWithTheVaultAndNeverReplaceAFile() throws {
+        let (m, file, key) = try Self.secretsBackup()
+        let home = try Self.temp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        var privileged: [([String], String?)] = []
+        func step() -> LinuxSecretsRestore {
+            LinuxSecretsRestore(manifest: m, secrets: file, home: home.path, savedNetworks: { ["Already Here"] },
+                                privileged: { args, input in privileged.append((args, input.map { String(decoding: $0, as: UTF8.self) })); return 0 },
+                                makePublicKey: { _ in true })
+        }
+        var lines: [String] = []
+        step().run(apply: false, key: nil) { lines.append($0) }
+        #expect(lines.first == "Secrets (6)")
+        #expect(lines.contains("  skipped ~/.ssh/id_test: unlock the vault to restore it"))
+        #expect(lines.contains("  Wi-Fi network Already Here is already saved"))
+        #expect(lines.contains("  skipped not_saved: it wasn't saved in the backup"))
+
+        lines = []
+        step().run(apply: false, key: key) { lines.append($0) }
+        #expect(lines.contains("  would add ~/.ssh/id_test"))
+        #expect(lines.contains("  would add ~/.config/gh/hosts.yml"))
+        #expect(lines.contains("  would add Wi-Fi network Home Network"))
+        #expect(lines.contains { $0.hasPrefix("  skipped Wi-Fi network Bad;Name: join it by hand") })
+        #expect(privileged.isEmpty)
+
+        lines = []
+        let result = step().run(apply: true, key: key) { lines.append($0) }
+        #expect(result.done.sorted() == ["Wi-Fi network Home Network", "id_test", "~/.config/gh/hosts.yml"])
+        let keyPath = home.appendingPathComponent(".ssh/id_test").path
+        #expect(FileManager.default.contents(atPath: keyPath) == Data("-----FAKE KEY-----\n".utf8))
+        #expect((try FileManager.default.attributesOfItem(atPath: keyPath)[.posixPermissions] as? Int) == 0o600)
+        // The Wi-Fi password went in on stdin, never on the command line.
+        #expect(privileged.count == 2)
+        #expect(privileged[0].0.prefix(7) == ["install", "-m", "600", "-o", "root", "-g", "root"])
+        #expect(privileged[0].1?.contains("psk=not-a-real-wifi-pw") == true)
+        #expect(privileged.allSatisfy { !$0.0.joined(separator: " ").contains("not-a-real-wifi-pw") })
+        #expect(privileged[1].0 == ["nmcli", "connection", "load", privileged[0].0.last!])
+
+        // A second run finds them there; a different file of the same name is left alone.
+        try Data("someone else's key".utf8).write(to: home.appendingPathComponent(".config/gh/hosts.yml"))
+        lines = []
+        step().run(apply: true, key: key) { lines.append($0) }
+        #expect(lines.contains("  ~/.ssh/id_test is already there"))
+        #expect(lines.contains("  skipped ~/.config/gh/hosts.yml: yours differs from the backup, so left alone"))
+        #expect(try String(contentsOf: home.appendingPathComponent(".config/gh/hosts.yml"), encoding: .utf8) == "someone else's key")
+    }
+
+    @Test func secretLinesReadWellInTheRestoreWindow() {
+        let r = KitReport.parse("Secrets (2)\n  would add Wi-Fi network Home\n  ~/.ssh/id_test is already there\nDry run: nothing changed.")
+        #expect(r.sections.first?.title == "Secrets")
+        #expect(r.sections.first?.items.first?.detail == "Will add")
+        #expect(r.sections.first?.items.first?.title == "Wi-Fi network Home")
+        #expect(r.sections.first?.items.last?.status == .already)
+        #expect(KitReport.parse("Software sources (1)\n  would add brave (https://x.example.com/apt)").sections[0].items[0].detail == "Will add this software source")
+    }
 }

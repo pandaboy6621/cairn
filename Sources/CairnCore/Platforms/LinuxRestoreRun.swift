@@ -7,10 +7,16 @@ public struct LinuxRestoreRun {
     public var manifest: Manifest
     /// The backup's fonts folder (`FontStore.folder(near: manifestURL)`), so fonts can be restored.
     public var fontsFolder: URL?
+    /// The backup's encrypted secrets (`VaultStore.secrets(beside:)`) and the unlocked vault
+    /// key; with no key, the secrets are listed as waiting for the vault to be unlocked.
+    public var secrets: SecretsFile
+    public var vaultKey: VaultKey?
 
-    public init(manifest: Manifest, fontsFolder: URL? = nil) {
+    public init(manifest: Manifest, fontsFolder: URL? = nil, secrets: SecretsFile = SecretsFile(), vaultKey: VaultKey? = nil) {
         self.manifest = manifest
         self.fontsFolder = fontsFolder
+        self.secrets = secrets
+        self.vaultKey = vaultKey
     }
 
     public struct Result: Sendable {
@@ -55,9 +61,38 @@ public struct LinuxRestoreRun {
         collected.add(pipe.fileHandleForReading.readDataToEndOfFile())
         collected.finish()
 
+        // Saved secrets last, in the kit's format, so they read as one more section.
+        let askpassPath = askpass
+        let secretsStep = LinuxSecretsRestore(manifest: manifest, secrets: secrets, privileged: { args, input in
+            Self.sudo(args, input: input, askpass: askpassPath)
+        })
+        if !secretsStep.items.isEmpty {
+            secretsStep.run(apply: apply, key: vaultKey) { line in collected.add(Data((line + "\n").utf8)) }
+        }
+
         let list = (try? String(contentsOf: folder.appendingPathComponent("CHECKLIST.md"), encoding: .utf8)) ?? ""
         let byHand = list.range(of: "## Do by hand").map { String(list[$0.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
         return Result(summary: kit.summary, output: collected.text, status: p.terminationStatus, doByHand: byHand)
+    }
+}
+
+extension LinuxRestoreRun {
+    /// `sudo` (with `-A` and the askpass helper when the app runs it) for the secrets step.
+    static func sudo(_ args: [String], input: Data?, askpass: String?) -> Int32 {
+        let p = Process(), inPipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        p.arguments = (askpass != nil ? ["-A"] : []) + args
+        var env = ProcessInfo.processInfo.environment
+        if let askpass { env["SUDO_ASKPASS"] = askpass }
+        p.environment = env
+        p.standardInput = inPipe
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return 127 }
+        if let input { inPipe.fileHandleForWriting.write(input) }
+        try? inPipe.fileHandleForWriting.close()
+        p.waitUntilExit()
+        return p.terminationStatus
     }
 }
 
@@ -135,7 +170,9 @@ public struct KitReport: Equatable, Sendable {
                 return String(s[..<open.lowerBound])
             }
             switch status {
-            case .willAdd: return (dropParens(after("would add ")), "Will add this software source")
+            case .willAdd:
+                let rest = after("would add ")
+                return rest.contains(" (http") ? (dropParens(rest), "Will add this software source") : (rest, "Will add")
             case .willInstall:
                 let rest = after("would install ")
                 if let open = rest.range(of: " (from "), let comma = rest.range(of: ",", range: open.upperBound..<rest.endIndex) {

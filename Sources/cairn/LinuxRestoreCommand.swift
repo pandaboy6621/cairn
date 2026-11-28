@@ -27,10 +27,12 @@ struct LinuxRestore: ParsableCommand {
     func run() throws {
         let manifest: Manifest
         let fonts: URL?
+        let manifestURL: URL
         if let from {
             let url = try Snapshots.resolve(from)
             manifest = try ManifestCoder.read(from: url)
             fonts = FontStore.folder(near: url)
+            manifestURL = url
         } else {
             let store = SnapshotStore(root: appBackupFolder())
             guard let newest = store.list(device: SetupScanner().device().name).first else {
@@ -39,9 +41,19 @@ struct LinuxRestore: ParsableCommand {
             stderr("Using snapshot \(newest.id).")
             manifest = try store.manifest(of: newest)
             fonts = FontStore.folder(near: newest.manifestURL)
+            manifestURL = newest.manifestURL
+        }
+        // Saved secrets: restored only with the vault unlocked (remembered key, or asked when applying).
+        let secrets = VaultStore.secrets(beside: manifestURL)
+        var key: VaultKey?
+        if !secrets.secrets.isEmpty, let envelope = try? VaultStore.read(in: VaultStore.folder(near: manifestURL, fallback: appBackupFolder())) {
+            key = Vault.cachedKey(for: envelope, cache: PlatformVaultKeyCache.make())
+            if key == nil, apply {
+                key = try? Vault.unlock(envelope, password: readPassword("Vault password (Enter to skip secrets): ", stdin: false))
+            }
         }
         print(PlatformExport.make(manifest, for: .linux).summary)
-        let result = try LinuxRestoreRun(manifest: manifest, fontsFolder: fonts).run(apply: apply) { print($0) }
+        let result = try LinuxRestoreRun(manifest: manifest, fontsFolder: fonts, secrets: secrets, vaultKey: key).run(apply: apply) { print($0) }
         if !result.doByHand.isEmpty { print("\n" + result.doByHand) }
         if result.status != 0 { throw ExitCode(result.status) }
     }
