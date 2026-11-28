@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Another OS a backup can set up.
 public enum TargetPlatform: String, CaseIterable, Identifiable, Sendable {
@@ -57,6 +62,8 @@ public struct PlatformExport: Equatable, Sendable {
     public var debFiles: [String] = []
     /// Repositories that can't be added by the script (no signing key, or odd values).
     public var reposByHand: [String] = []
+    /// apt packages from a Linux backup: they have no dnf names, which isn't worth listing one by one.
+    public var fromAptBackup: Set<String> = []
     /// A config file carried in the kit's `dotfiles` folder.
     public struct KitDotfile: Equatable, Sendable {
         /// File name in the kit: `gitconfig`, `ssh-config`.
@@ -71,6 +78,9 @@ public struct PlatformExport: Equatable, Sendable {
         /// macOS-only lines commented out, and secret-looking lines left out of the backup.
         public var commented: Int
         public var redacted: Int
+        /// Linux backups: SHA-256 of the file as backed up, when the kit's copy differs
+        /// from it only by being made portable. A file still like that counts as set up.
+        public var backupSHA: String? = nil
     }
 
     public var registry: [RegistryWrite] = []
@@ -123,6 +133,7 @@ public struct PlatformExport: Equatable, Sendable {
             }
             if target == .linux, p.kind == .apt, let id = valid(p.resolvers["apt"] ?? p.id) {
                 e.apt.append(Install(id: id, label: p.id, repo: valid(p.resolvers["apt-repo"])))
+                if p.resolvers["dnf"] == nil { e.fromAptBackup.insert(p.id) }
                 continue
             }
             let label = p.resolvers["brew"] ?? p.id
@@ -168,8 +179,12 @@ public struct PlatformExport: Equatable, Sendable {
         for d in m.dotfiles where d.include && Dotfiles.isKnown(d.path) {
             let installs = d.kind != .shell
             let p = installs ? Dotfiles.portable(d, windows: target == .windows) : (text: d.content, commented: 0)
-            e.dotfiles.append(KitDotfile(name: Dotfiles.kitName(d.path), target: d.relativePath, kind: d.kind,
-                                         text: p.text, installs: installs, commented: p.commented, redacted: d.redacted))
+            var kit = KitDotfile(name: Dotfiles.kitName(d.path), target: d.relativePath, kind: d.kind,
+                                 text: p.text, installs: installs, commented: p.commented, redacted: d.redacted)
+            if target == .linux, m.device.os == "linux", installs, p.text != d.content {
+                kit.backupSHA = SHA256.hash(data: Data(d.content.utf8)).map { String(format: "%02x", $0) }.joined()
+            }
+            e.dotfiles.append(kit)
         }
         e.hasLayout = m.layout.dock?.include == true || m.layout.displays?.include == true
             || m.layout.wallpaper?.include == true
@@ -520,27 +535,35 @@ public struct PlatformExport: Equatable, Sendable {
         fi
 
         \(bashSnaps())\
-        set_setting() { # schema, key, value, [tolerance for uint32 values]
-          local now
-          if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $2 (not on this desktop)"; return; fi
-          if [ "$now" = "$3" ]; then echo "  $2 is already $3"; return; fi
+        set_setting() { # schema, key, value, [tolerance for uint32 values], [name to show]
+          local now name=${5:-$2}
+          if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $name (not on this desktop)"; return; fi
+          if [ "$now" = "$3" ]; then echo "  $name is already $3"; return; fi
           if [ -n "${4:-}" ]; then
             local a=${now#uint32 } b=${3#uint32 }
             if [[ $a =~ ^[0-9]+$ && $b =~ ^[0-9]+$ ]] && (( a - b <= $4 && b - a <= $4 )); then
-              echo "  $2 is already $now (close enough to $3)"; return
+              echo "  $name is already $now (close enough to $3)"; return
             fi
           fi
-          if [ "$(gsettings writable "$1" "$2" 2>/dev/null)" != true ]; then echo "  skipped $2 (locked on this system)"; return; fi
-          if [ $APPLY = 1 ]; then echo "  changing $2 from $now to $3"; gsettings set "$1" "$2" "$3" || failed+=("$2")
-          else echo "  would change $2 from $now to $3"; fi
+          if [ "$(gsettings writable "$1" "$2" 2>/dev/null)" != true ]; then echo "  skipped $name (locked on this system)"; return; fi
+          if [ $APPLY = 1 ]; then echo "  changing $name from $now to $3"; gsettings set "$1" "$2" "$3" || failed+=("$name")
+          else echo "  would change $name from $now to $3"; fi
         }
 
         """
         if !gsettings.isEmpty {
             s += "if command -v gsettings >/dev/null 2>&1; then\n"
             s += "  echo \"Settings (\(gsettings.count))\"\n"
+            // A key set in two schemas (GTK 3's and GTK 4's file chooser) is named with its schema.
+            let shared = Dictionary(grouping: gsettings, by: \.key).filter { $0.value.count > 1 }.keys
             for g in gsettings {
-                s += "  set_setting \(sh(g.schema)) \(sh(g.key)) \(sh(g.value))" + (g.tolerance > 0 ? " \(g.tolerance)" : "") + "\n"
+                s += "  set_setting \(sh(g.schema)) \(sh(g.key)) \(sh(g.value))"
+                if shared.contains(g.key) {
+                    s += " \(g.tolerance > 0 ? String(g.tolerance) : "''") \(sh("\(g.key) (\(g.schema))"))"
+                } else if g.tolerance > 0 {
+                    s += " \(g.tolerance)"
+                }
+                s += "\n"
             }
             s += "else\n  echo \"Settings skipped: they're for GNOME, and gsettings isn't here.\"\nfi\n"
         }
@@ -761,10 +784,12 @@ public struct PlatformExport: Equatable, Sendable {
         var s = """
 
         KIT="$(cd "$(dirname "$0")" && pwd)"
-        put_config() { # kit file, path below $HOME, mode
+        sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+        put_config() { # kit file, path below $HOME, mode, [SHA-256 of the file as backed up]
           local src="$KIT/dotfiles/$1" dst="$HOME/$2"
           if [ -L "$dst" ]; then echo "  skipped $2: it's a link (a dotfiles tool may manage it)"; return; fi
           if [ -f "$dst" ] && cmp -s "$src" "$dst"; then echo "  $2 already matches"; return; fi
+          if [ -n "${4:-}" ] && [ -f "$dst" ] && [ "$(sha256_of "$dst")" = "$4" ]; then echo "  $2 is already as backed up"; return; fi
           if [ $APPLY = 1 ]; then
             if [ "$3" = 600 ]; then mkdir -p -m 700 "$(dirname "$dst")"; else mkdir -p "$(dirname "$dst")"; fi
             if [ -e "$dst" ]; then cp -p "$dst" "$dst.before-cairn" && echo "  kept your old $2 as $2.before-cairn"; fi
@@ -775,7 +800,9 @@ public struct PlatformExport: Equatable, Sendable {
 
         """
         s += "echo \"Config files (\(files.count))\"\n"
-        for d in files { s += "put_config \(sh(d.name)) \(sh(d.target)) \(d.kind == .ssh ? "600" : "644")\n" }
+        for d in files {
+            s += "put_config \(sh(d.name)) \(sh(d.target)) \(d.kind == .ssh ? "600" : "644")" + (d.backupSHA.map { " \($0)" } ?? "") + "\n"
+        }
         return s
     }
 
@@ -819,7 +846,11 @@ public struct PlatformExport: Equatable, Sendable {
         }
         if target == .linux {
             let onlyDNF = Set(dnf.map(\.label)).subtracting(apt.map(\.label)).sorted()
-            let onlyAPT = Set(apt.map(\.label)).subtracting(dnf.map(\.label)).sorted()
+            let onlyAPT = Set(apt.map(\.label)).subtracting(dnf.map(\.label)).subtracting(fromAptBackup).sorted()
+            if !fromAptBackup.isEmpty {
+                byHand += "### On Fedora\n\nThis backup is from \(Self.oneLine(device.osTitle)), so its \(fromAptBackup.count) apt package\(fromAptBackup.count == 1 ? "" : "s") have no Fedora names. "
+                byHand += "On Debian or Ubuntu the script installs them; on Fedora, look each one up with `dnf search`.\n\n"
+            }
             if !onlyDNF.isEmpty || !onlyAPT.isEmpty {
                 byHand += "### Not in every distro (\(onlyDNF.count + onlyAPT.count))\n\nThe script installs these only where the package manager has them.\n\n"
                 func line(_ label: String, _ missingFrom: String) -> String {

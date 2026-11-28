@@ -215,12 +215,16 @@ import Testing
 
     /// Runs the kit with stand-in tools: nothing is set up yet, so it would add the
     /// repo and then install its package; with --apply, sudo writes the key and sources file.
-    static func run(_ args: [String], repoThere: Bool = false) throws -> (out: String, sudo: String) {
+    static func run(_ args: [String], repoThere: Bool = false, manifest: Manifest = linuxBackup(),
+                    homeFiles: [String: String] = [:]) throws -> (out: String, sudo: String) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }
         let bin = dir.appendingPathComponent("bin"), home = dir.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        for (path, text) in homeFiles {
+            try text.write(to: home.appendingPathComponent(path), atomically: true, encoding: .utf8)
+        }
         let log = dir.appendingPathComponent("sudo.log").path
         let tools = [
             "apt-get": "exit 0",
@@ -237,7 +241,7 @@ import Testing
             try ("#!/bin/bash\n" + body + "\n").write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         }
-        let folder = try PlatformExport.make(linuxBackup(), for: .linux).write(into: dir)
+        let folder = try PlatformExport.make(manifest, for: .linux).write(into: dir)
         let p = Process(), pipe = Pipe()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [folder.appendingPathComponent("setup.sh").path] + args
@@ -278,5 +282,42 @@ import Testing
         let sources = lines.firstIndex { $0.contains("sources.list.d/cairn-example-browser") } ?? .max
         let update = lines.firstIndex { $0.contains("apt-get update") } ?? -1
         #expect(sources < update)
+    }
+
+    // MARK: Restoring onto a machine that already has it
+
+    static let gitconfig = "[credential]\n\thelper = !/usr/bin/gh auth git-credential\n"
+
+    @Test func configStillAsBackedUpCountsAsSetUp() throws {
+        var m = Self.linuxBackup()
+        m.dotfiles = [DotfileItem(path: "~/.gitconfig", kind: .git, content: Self.gitconfig)]
+        let kit = PlatformExport.make(m, for: .linux)
+        #expect(kit.dotfiles[0].text.contains("helper = !gh auth"))
+        #expect(kit.dotfiles[0].backupSHA != nil)
+
+        let same = try Self.run([], manifest: m, homeFiles: [".gitconfig": Self.gitconfig])
+        #expect(same.out.contains(".gitconfig is already as backed up"))
+        let edited = try Self.run([], manifest: m, homeFiles: [".gitconfig": Self.gitconfig + "[core]\n\teditor = nano\n"])
+        #expect(edited.out.contains("would replace .gitconfig"))
+
+        // From a Mac backup, the Mac's own file is never good enough on Linux.
+        m.device = Device(name: "test-mac", os: "macos", osVersion: "26.1")
+        #expect(PlatformExport.make(m, for: .linux).dotfiles[0].backupSHA == nil)
+    }
+
+    @Test func aKeyInTwoSchemasIsNamedWithItsSchema() {
+        var m = Self.linuxBackup()
+        m.settings = [SettingItem(key: "finder.show_hidden_files", value: .bool(true), platforms: ["macos", "linux"],
+                                  adapter: SettingAdapters())]
+        let script = PlatformExport.make(m, for: .linux).bash()
+        #expect(script.contains("set_setting 'org.gtk.gtk4.Settings.FileChooser' 'show-hidden' 'true' '' 'show-hidden (org.gtk.gtk4.Settings.FileChooser)'"))
+        #expect(script.contains("'show-hidden (org.gtk.Settings.FileChooser)'"))
+    }
+
+    @Test func ubuntuBackupDoesntListEveryPackageAsMissingFromFedora() {
+        let list = PlatformExport.make(Self.linuxBackup(), for: .linux).checklist()
+        #expect(list.contains("### On Fedora"))
+        #expect(list.contains("its 2 apt packages have no Fedora names"))
+        #expect(!list.contains("Not in every distro"))
     }
 }
