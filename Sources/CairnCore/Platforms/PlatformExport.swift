@@ -558,6 +558,11 @@ public struct PlatformExport: Equatable, Sendable {
           local now name=${5:-$2}
           if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $name (not on this desktop)"; return; fi
           if [ "$now" = "$3" ]; then echo "  $name is already $3"; return; fi
+          case "$3" in
+            "'file://"*) # a picture: only if it's on this computer too
+              local pic=${3:8}; pic=${pic%?}; pic=$(printf '%b' "${pic//%/\\x}") # drop 'file:// and the closing quote
+              if [ ! -e "$pic" ]; then echo "  skipped $name (the picture isn't on this computer: $pic)"; return; fi;;
+          esac
           if [ -n "${4:-}" ]; then
             local a=${now#uint32 } b=${3#uint32 }
             if [[ $a =~ ^[0-9]+$ && $b =~ ^[0-9]+$ ]] && (( a - b <= $4 && b - a <= $4 )); then

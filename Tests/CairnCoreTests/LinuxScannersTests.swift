@@ -201,8 +201,8 @@ import Testing
             "repeat-interval": "uint32 30", "delay": "uint32 225", "clock-show-date": "true",
             "dock-fixed": "false", "dock-position": "'LEFT'", "overlay-scrolling": "true",
         ]
-        for m in GnomeSettings.mappings {
-            if let out = outputs[m.gsettingsKey] {
+        for m in GnomeSettings.mappings + GnomeSettings.nativeMappings {
+            if let out = outputs[m.gsettingsKey], m.schema != "org.gnome.desktop.peripherals.mouse" {
                 r.stub(Command("gsettings", ["get", m.schema, m.gsettingsKey]), stdout: out + "\n")
             } else {
                 // Like a schema that isn't installed.

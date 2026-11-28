@@ -116,6 +116,8 @@ public enum PortableSettings {
             guard case .string(let v) = s.value, ["left", "bottom", "right"].contains(v) else { return [] }
             return [GSettingsWrite(schema: dashToDock, key: "dock-position", value: "'\(v.uppercased())'")]
         default:
+            // GNOME-only settings from a Linux backup go back exactly as they were.
+            if s.adapter.gnome != nil, let w = GnomeSettings.nativeWrite(s) { return [w] }
             return []
         }
     }

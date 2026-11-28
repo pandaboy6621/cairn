@@ -28,6 +28,10 @@ public enum SettingCategory {
         "finder": "Files",
         "menubar": "Top bar",
         "trackpad": "Touchpad",
+        "desktop": "Background",
+        "windows": "Windows & workspaces",
+        "display": "Displays",
+        "energy": "Power",
     ]
 
     static let prefixGroupNames: [String: String] = [

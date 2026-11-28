@@ -299,7 +299,7 @@ public struct GnomeSettingsScanner: SetupScanning {
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
         var out = ScanContribution()
-        for m in GnomeSettings.mappings {
+        for m in GnomeSettings.mappings + GnomeSettings.nativeMappings {
             let value: String
             do {
                 value = try runner.output(Command("gsettings", ["get", m.schema, m.gsettingsKey]))
