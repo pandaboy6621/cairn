@@ -14,7 +14,13 @@ import Foundation
 
 @main
 struct CairnGnome: App {
-    var app = AdwaitaApp(id: "dev.cairn.Cairn")
+    var app: AdwaitaApp
+
+    init() {
+        // sudo runs `cairn-gnome --askpass` to ask for the password during a restore.
+        if CommandLine.arguments.contains("--askpass") { exit(Askpass.run()) }
+        app = AdwaitaApp(id: "dev.cairn.Cairn")
+    }
 
     var scene: Scene {
         Window(id: "main") { window in
