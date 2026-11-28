@@ -192,6 +192,27 @@ import Testing
         #expect(list.contains("### Software sources to add yourself (2)"))
     }
 
+    /// Some vendors' sources say `... * *` (apt reads the star literally). That's
+    /// kept, quoted in the script; a star inside a word or anything shell-like isn't.
+    @Test func kitKeepsAStarSuiteButNothingShellLike() {
+        let key = Data([0x99, 0x01, 0x0d, 0x04]).base64EncodedString()
+        func repo(_ id: String, suites: String, components: String) -> PackageItem {
+            PackageItem(id: id, kind: .aptrepo, resolvers: ["uris": "https://\(id).example.com/apt/", "suites": suites,
+                                                            "components": components, "key": key])
+        }
+        var m = Self.linuxBackup()
+        m.packages = [repo("vpn-client", suites: "*", components: "*"),
+                      repo("globby", suites: "st*ble", components: "main"),
+                      repo("sneaky-star", suites: "*", components: "* $(reboot)")]
+        let e = PlatformExport.make(m, for: .linux)
+        #expect(e.repos.map(\.id) == ["vpn-client"])
+        #expect(e.reposByHand.sorted() == ["globby", "sneaky-star"])
+        let script = e.bash()
+        #expect(script.contains("REPO_SUITES=('*')") && script.contains("REPO_COMPONENTS=('*')"))
+        #expect(script.contains(#""${REPO_SUITES[$i]}""#)) // always used quoted
+        #expect(!script.contains("reboot"))
+    }
+
     /// Runs the kit with stand-in tools: nothing is set up yet, so it would add the
     /// repo and then install its package; with --apply, sudo writes the key and sources file.
     static func run(_ args: [String], repoThere: Bool = false) throws -> (out: String, sudo: String) {

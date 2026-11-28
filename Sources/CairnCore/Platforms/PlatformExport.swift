@@ -190,10 +190,16 @@ public struct PlatformExport: Equatable, Sendable {
                 $0.isASCII && (CharacterSet.alphanumerics.contains($0) || ("._/~+- " + extra).unicodeScalars.contains($0))
             }
         }
+        // A suite or component may also be a lone `*`: Twingate's repo is `... * *`,
+        // which apt reads literally. The script always quotes these, so it can't glob.
+        func plainOrStar(_ s: String?) -> Bool {
+            guard let s else { return true }
+            return s.split(separator: " ").allSatisfy { $0 == "*" || plain(String($0)) }
+        }
         guard let id = valid(p.id), let uris = r["uris"], let suites = r["suites"], let key = r["key"], !key.isEmpty,
               !uris.isEmpty, !suites.isEmpty,
               uris.split(separator: " ").allSatisfy({ $0.hasPrefix("https://") || $0.hasPrefix("http://") }),
-              plain(uris, extra: ":%@"), plain(suites), plain(r["components"]), plain(r["architectures"]),
+              plain(uris, extra: ":%@"), plainOrStar(suites), plainOrStar(r["components"]), plain(r["architectures"]),
               key.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+/=".unicodeScalars.contains($0)) }),
               Data(base64Encoded: key) != nil
         else { return nil }
@@ -514,10 +520,16 @@ public struct PlatformExport: Equatable, Sendable {
         fi
 
         \(bashSnaps())\
-        set_setting() { # schema, key, value
+        set_setting() { # schema, key, value, [tolerance for uint32 values]
           local now
           if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $2 (not on this desktop)"; return; fi
           if [ "$now" = "$3" ]; then echo "  $2 is already $3"; return; fi
+          if [ -n "${4:-}" ]; then
+            local a=${now#uint32 } b=${3#uint32 }
+            if [[ $a =~ ^[0-9]+$ && $b =~ ^[0-9]+$ ]] && (( a - b <= $4 && b - a <= $4 )); then
+              echo "  $2 is already $now (close enough to $3)"; return
+            fi
+          fi
           if [ "$(gsettings writable "$1" "$2" 2>/dev/null)" != true ]; then echo "  skipped $2 (locked on this system)"; return; fi
           if [ $APPLY = 1 ]; then echo "  changing $2 from $now to $3"; gsettings set "$1" "$2" "$3" || failed+=("$2")
           else echo "  would change $2 from $now to $3"; fi
@@ -527,7 +539,9 @@ public struct PlatformExport: Equatable, Sendable {
         if !gsettings.isEmpty {
             s += "if command -v gsettings >/dev/null 2>&1; then\n"
             s += "  echo \"Settings (\(gsettings.count))\"\n"
-            for g in gsettings { s += "  set_setting \(sh(g.schema)) \(sh(g.key)) \(sh(g.value))\n" }
+            for g in gsettings {
+                s += "  set_setting \(sh(g.schema)) \(sh(g.key)) \(sh(g.value))" + (g.tolerance > 0 ? " \(g.tolerance)" : "") + "\n"
+            }
             s += "else\n  echo \"Settings skipped: they're for GNOME, and gsettings isn't here.\"\nfi\n"
         }
         s += bashDotfiles()
