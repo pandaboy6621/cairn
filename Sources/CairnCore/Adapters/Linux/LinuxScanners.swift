@@ -36,7 +36,12 @@ public struct AptScanner: SetupScanning {
             installerList = Self.installed(statusFile: list)
         }
         let rows = Self.dpkgRows(try runner.output(Command("dpkg-query", ["-W", Self.dpkgFormat])))
-        let asked = Self.requested(history: history(using: runner))
+        let log = history(using: runner)
+        let asked = Self.requested(history: log)
+        // Ubuntu 26.04's installer leaves no initial-status.gz, but its own apt runs are in the history.
+        installerList.formUnion(Self.installedBySetup(history: log))
+        // What only another app's helper installed comes back when that app runs (Steam's libraries).
+        installerList.formUnion(Self.installedByHelpers(history: log).subtracting(asked))
         out.packages = Self.userPackages(manual: manual, rows: rows, installerList: installerList, asked: asked)
             .sorted().map { PackageItem(id: $0, kind: .apt, resolvers: ["apt": $0]) }
         return out
@@ -125,19 +130,69 @@ public struct AptScanner: SetupScanning {
     /// entry with a `Requested-By:` line. The installer's own runs have none, and
     /// reinstalls (fixing something) aren't asking for it. Local files
     /// (`./app.deb`) and options are skipped.
+    /// One `Start-Date:` block of apt's history.
+    struct HistoryEntry {
+        var day: String
+        var requested: Bool
+        var words: [String]
+
+        /// apt or apt-get (or aptitude) installing named packages: not a
+        /// reinstall, not local .deb files. Nil for anything else.
+        var installed: [String]? {
+            guard let program = words.first,
+                  ["apt", "apt-get", "aptitude"].contains(program.split(separator: "/").last.map(String.init) ?? ""),
+                  let verb = words.firstIndex(of: "install"), !words.contains("--reinstall") else { return nil }
+            return words[(verb + 1)...].compactMap { w in
+                guard !w.hasPrefix("-"), !w.contains("/"), !w.hasSuffix(".deb") else { return nil }
+                return AptScanner.names(w.split(separator: "=").first.map(String.init) ?? w).first
+            }
+        }
+
+        /// Another program's helper installing what it needs (Steam's steamdeps
+        /// runs `apt-get install --no-remove ...`), not a person asking.
+        var isHelper: Bool { words.contains("--no-remove") }
+    }
+
+    static func entries(history: String) -> [HistoryEntry] {
+        history.components(separatedBy: "\n\n").compactMap { entry in
+            let lines = entry.split(whereSeparator: \.isNewline)
+            guard let line = lines.first(where: { $0.hasPrefix("Commandline:") }) else { return nil }
+            let day = lines.first { $0.hasPrefix("Start-Date:") }
+                .map { $0.dropFirst("Start-Date:".count).trimmingCharacters(in: .whitespaces) }
+                .map { String($0.prefix(10)) } ?? ""
+            return HistoryEntry(day: day, requested: lines.contains { $0.hasPrefix("Requested-By:") },
+                                words: line.dropFirst("Commandline:".count).split(separator: " ").map(String.init))
+        }
+    }
+
+    /// What someone asked apt to install (`Requested-By` names a user), minus
+    /// what another program's helper installed in their name.
     static func requested(history: String) -> Set<String> {
         var found = Set<String>()
-        for entry in history.components(separatedBy: "\n\n") {
-            let lines = entry.split(whereSeparator: \.isNewline)
-            guard lines.contains(where: { $0.hasPrefix("Requested-By:") }),
-                  let line = lines.first(where: { $0.hasPrefix("Commandline:") }) else { continue }
-            let words = line.dropFirst("Commandline:".count).split(separator: " ").map(String.init)
-            guard let program = words.first, ["apt", "apt-get", "aptitude"].contains(program.split(separator: "/").last.map(String.init) ?? ""),
-                  let verb = words.firstIndex(of: "install"), !words.contains("--reinstall") else { continue }
-            for w in words[(verb + 1)...] where !w.hasPrefix("-") && !w.contains("/") && !w.hasSuffix(".deb") {
-                let name = w.split(separator: "=").first.map(String.init) ?? w
-                if let n = names(name).first { found.insert(n) }
-            }
+        for e in entries(history: history) where e.requested && !e.isHelper {
+            found.formUnion(e.installed ?? [])
+        }
+        return found
+    }
+
+    /// What other programs' helpers installed (see `HistoryEntry.isHelper`).
+    static func installedByHelpers(history: String) -> Set<String> {
+        var found = Set<String>()
+        for e in entries(history: history) where e.isHelper {
+            found.formUnion(e.installed ?? [])
+        }
+        return found
+    }
+
+    /// What the installer put on the disk: apt runs on the history's first day
+    /// that no user asked for. (Later runs without `Requested-By`, from a root
+    /// shell say, are left alone.)
+    static func installedBySetup(history: String) -> Set<String> {
+        let all = entries(history: history)
+        guard let first = all.map(\.day).filter({ !$0.isEmpty }).min() else { return [] }
+        var found = Set<String>()
+        for e in all where e.day == first && !e.requested {
+            found.formUnion(e.installed ?? [])
         }
         return found
     }

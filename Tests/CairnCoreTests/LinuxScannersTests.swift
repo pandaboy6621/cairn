@@ -81,6 +81,48 @@ import Testing
         #expect(found[0].kind == .apt && found[0].resolvers == ["apt": "brave-browser"])
     }
 
+    /// Ubuntu 26.04: the installer's apt runs and Steam's helper are in the
+    /// history; what they installed isn't the user's, even if asked for again.
+    @Test func aptLeavesOutWhatTheInstallerAndHelpersInstalled() throws {
+        let manual = "htop\nlibegl1\nlibinput-bin\nnmap\nsteam-launcher\nsteam-libs-amd64\n"
+        let dpkg = [
+            "ii \thtop\toptional\t, libc6",
+            "ii \tlibegl1:amd64\toptional\t, libc6",
+            "ii \tlibinput-bin\toptional\t, libc6",
+            "ii \tnmap\toptional\t, libc6",
+            "ii \tsteam-launcher\toptional\t, curl",
+            "ii \tsteam-libs-amd64:amd64\toptional\t, libc6",
+        ].joined(separator: "\n") + "\n"
+        let logs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: logs) }
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try """
+        Start-Date: 2026-08-26  05:28:57
+        Commandline: apt-get --yes -oDebug::pkgDepCache::AutoInstall=yes install bash libegl1 libinput-bin
+        End-Date: 2026-08-26  05:31:00
+
+        Start-Date: 2026-11-15  09:00:00
+        Commandline: apt install libinput-bin nmap
+        Requested-By: someone (1000)
+
+        Start-Date: 2026-11-15  19:34:04
+        Commandline: apt-get install --no-remove -oAPT::Get::AutomaticRemove=false libegl1:amd64 libegl1:i386 steam-libs-amd64:amd64
+        Requested-By: someone (1000)
+
+        Start-Date: 2026-11-20  08:00:00
+        Commandline: apt-get install htop
+
+        """.write(to: logs.appendingPathComponent("history.log"), atomically: true, encoding: .utf8)
+
+        let r = FixtureRunner()
+        r.stub(Command("apt-mark", ["showmanual"]), stdout: manual)
+        r.stub(Command("dpkg-query", ["-W", AptScanner.dpkgFormat]), stdout: dpkg)
+        let found = try AptScanner(aptLogs: logs.path).scan(using: r).packages.map(\.id)
+        // libegl1 and libinput-bin came with Ubuntu, steam-libs-amd64 with Steam's helper.
+        // htop was installed later from a root shell (no Requested-By), so it stays.
+        #expect(found == ["htop", "nmap", "steam-launcher"])
+    }
+
     @Test func aptSubtractsTheOldInstallersList() {
         let status = "Package: ubuntu-desktop\nStatus: install ok installed\n\nPackage: firefox:amd64\nStatus: install ok installed\n"
         #expect(AptScanner.installed(statusFile: status) == ["ubuntu-desktop", "firefox"])
@@ -122,6 +164,9 @@ import Testing
         Commandline: aptdaemon role='role-commit-packages' sender=':1.139'
         """
         #expect(AptScanner.requested(history: history) == ["gh", "hugo"])
+        // The first day's unrequested runs are the installer's.
+        #expect(AptScanner.installedBySetup(history: history)
+                == ["accountsservice", "language-pack-en", "mythes-en-us", "efibootmgr", "grub-efi-amd64", "shim-signed"])
         #expect(AptScanner.isRotatedHistory("history.log.1") && AptScanner.isRotatedHistory("history.log.12.gz"))
         #expect(!AptScanner.isRotatedHistory("history.log") && !AptScanner.isRotatedHistory("history.log.gz") && !AptScanner.isRotatedHistory("term.log.1.gz"))
     }
