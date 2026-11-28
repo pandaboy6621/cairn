@@ -5,8 +5,13 @@ import Foundation
 /// `apply`). Shared by `cairn restore` and Cairn's GNOME app.
 public struct LinuxRestoreRun {
     public var manifest: Manifest
+    /// The backup's fonts folder (`FontStore.folder(near: manifestURL)`), so fonts can be restored.
+    public var fontsFolder: URL?
 
-    public init(manifest: Manifest) { self.manifest = manifest }
+    public init(manifest: Manifest, fontsFolder: URL? = nil) {
+        self.manifest = manifest
+        self.fontsFolder = fontsFolder
+    }
 
     public struct Result: Sendable {
         public var summary: String
@@ -25,7 +30,7 @@ public struct LinuxRestoreRun {
         let tmp = fm.temporaryDirectory.appendingPathComponent("cairn-restore-\(UUID().uuidString)")
         try fm.createDirectory(at: tmp, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? fm.removeItem(at: tmp) }
-        let folder = try kit.write(into: tmp)
+        let folder = try kit.write(into: tmp, fontsFrom: fontsFolder)
 
         let p = Process(), pipe = Pipe()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")

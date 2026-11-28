@@ -55,6 +55,8 @@ public struct PlatformExport: Equatable, Sendable {
     public var snaps: [SnapInstall] = []
     /// Apps installed from a downloaded `.deb` file: no repository has them.
     public var debFiles: [String] = []
+    /// Linux: user fonts to put in ~/.local/share/fonts (TrueType/OpenType only).
+    public var fonts: [FontItem] = []
     /// Repositories that can't be added by the script (no signing key, or odd values).
     public var reposByHand: [String] = []
     /// apt packages from a Linux backup: they have no dnf names, which isn't worth listing one by one.
@@ -168,6 +170,10 @@ public struct PlatformExport: Equatable, Sendable {
             }
         }
         e.shares = m.shares.filter(\.include)
+        if target == .linux {
+            var names = Set<String>()
+            e.fonts = m.fonts.filter { $0.include && $0.isSafe && $0.isPortable && names.insert($0.file).inserted }
+        }
         for d in m.dotfiles where d.include && Dotfiles.isKnown(d.path) {
             let installs = d.kind != .shell
             // A Linux backup's git and SSH config already worked on Linux: it goes back
@@ -246,9 +252,21 @@ public struct PlatformExport: Equatable, Sendable {
 
     /// Writes the kit into a new folder inside `parent` and returns that folder.
     @discardableResult
-    public func write(into parent: URL) throws -> URL {
+    /// `fontsFrom` is the backup's fonts folder (`FontStore.folder(near:)`): its copies go
+    /// into the kit's `fonts` folder under their own names. Without it the script says
+    /// the fonts weren't found.
+    public func write(into parent: URL, fontsFrom: URL? = nil) throws -> URL {
         let folder = parent.appendingPathComponent(folderName, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let fontsFrom, !fonts.isEmpty {
+            let dest = folder.appendingPathComponent("fonts", isDirectory: true)
+            try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+            for f in fonts {
+                let src = fontsFrom.appendingPathComponent(f.storedName)
+                guard let hash = try? FontStore.sha256Hex(of: src), hash == f.sha256 else { continue }
+                try? FileManager.default.copyItem(at: src, to: dest.appendingPathComponent(f.file))
+            }
+        }
         for (name, text) in files() {
             let url = folder.appendingPathComponent(name)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -436,6 +454,7 @@ public struct PlatformExport: Equatable, Sendable {
         # Dry run by default: lists what it would do. To make the changes, run:
         #   bash setup.sh --apply
         APPLY=0
+        KIT="$(cd "$(dirname "$0")" && pwd)"
         [ "${1:-}" = "--apply" ] && APPLY=1
         failed=()
         # Root rights through sudo. Cairn's app has no terminal to ask in, so it sets
@@ -534,6 +553,7 @@ public struct PlatformExport: Equatable, Sendable {
         fi
 
         \(bashSnaps())\
+        \(bashFonts())\
         set_setting() { # schema, key, value, [tolerance for uint32 values], [name to show]
           local now name=${5:-$2}
           if ! now=$(gsettings get "$1" "$2" 2>/dev/null); then echo "  skipped $name (not on this desktop)"; return; fi
@@ -614,6 +634,30 @@ public struct PlatformExport: Equatable, Sendable {
             fi
           done
         fi
+
+        """
+        return s
+    }
+
+    /// User fonts into ~/.local/share/fonts, skipping any already installed.
+    func bashFonts() -> String {
+        guard target == .linux, !fonts.isEmpty else { return "" }
+        var s = "FONTS=(\(fonts.map { sh($0.file) }.joined(separator: " ")))\n"
+        s += """
+        echo "Fonts (${#FONTS[@]})"
+        fontdir="$HOME/.local/share/fonts" newfonts=0
+        for f in "${FONTS[@]}"; do
+          if [ -f "$fontdir/$f" ] || { command -v fc-list >/dev/null 2>&1 && fc-list : file 2>/dev/null | grep -qF "/$f:"; }; then
+            echo "  $f is already installed"; continue
+          fi
+          if [ ! -f "$KIT/fonts/$f" ]; then echo "  $f isn't in the backup's fonts folder"; missing+=("$f"); continue; fi
+          if [ $APPLY = 1 ]; then
+            mkdir -p "$fontdir" && cp "$KIT/fonts/$f" "$fontdir/$f" && echo "  installed $f" && newfonts=1 || failed+=("$f")
+          else
+            echo "  would install $f"
+          fi
+        done
+        if [ $newfonts = 1 ] && command -v fc-cache >/dev/null 2>&1; then fc-cache -f "$fontdir" >/dev/null 2>&1; fi
 
         """
         return s

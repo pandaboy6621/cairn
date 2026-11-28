@@ -3,24 +3,38 @@ import Foundation
 import CoreText
 #endif
 
-/// Lists the fonts the user installed (`~/Library/Fonts`), never the system's. Read-only:
-/// the files are copied into the backup only when a snapshot is saved.
+/// Lists the fonts the user installed, never the system's: `~/Library/Fonts` on a Mac,
+/// `~/.local/share/fonts` and the older `~/.fonts` on Linux (with their subfolders).
+/// Read-only: the files are copied into the backup only when a snapshot is saved.
 public struct FontsScanner: SetupScanning {
-    public var folder: String
+    public var folders: [String]
     /// Fonts bigger than this are left out (a warning says so).
     public static let maxBytes = 50 * 1024 * 1024
     static let extensions = FontsScannerExtensions.all
 
-    public init(home: String = NSHomeDirectory()) {
-        folder = home + "/Library/Fonts"
+    public init(home: String = NSHomeDirectory(), linux: Bool = false) {
+        folders = linux ? [home + "/.local/share/fonts", home + "/.fonts"] : [home + "/Library/Fonts"]
+    }
+
+    /// Font files in `folder`, then its subfolders (Linux keeps fonts in family folders).
+    static func files(in folder: String) -> [URL] {
+        let base = URL(fileURLWithPath: folder)
+        guard let e = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isRegularFileKey],
+                                                     options: [.skipsHiddenFiles]) else { return [] }
+        var out: [URL] = []
+        for case let url as URL in e where extensions.contains(url.pathExtension.lowercased()) {
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true { out.append(url) }
+        }
+        return out.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     public func scan(using runner: CommandRunner) throws -> ScanContribution {
         var c = ScanContribution()
         let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: folder) else { return c }
-        for file in names.sorted() where !file.hasPrefix(".") && Self.extensions.contains((file as NSString).pathExtension.lowercased()) {
-            let url = URL(fileURLWithPath: folder).appendingPathComponent(file)
+        var seen = Set<String>()
+        for url in folders.flatMap(Self.files(in:)) {
+            let file = url.lastPathComponent
+            guard seen.insert(file).inserted else { continue } // the same file in two folders
             guard let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int else { continue }
             guard size <= Self.maxBytes else {
                 c.warnings.append("\(file): skipped, larger than \(Self.maxBytes / 1024 / 1024) MB")

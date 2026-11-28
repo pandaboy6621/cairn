@@ -13,7 +13,7 @@ public struct SetupScanner: Sendable {
         case apt, flatpak, snap, gnome
 
         public static let mac: [Source] = allCases.filter { !$0.isLinux }
-        public static let linux: [Source] = [.apt, .flatpak, .snap, .gnome, .dotfiles]
+        public static let linux: [Source] = [.apt, .flatpak, .snap, .gnome, .dotfiles, .fonts]
 
         /// The scanners for the system Cairn is running on.
         public static var here: [Source] {
@@ -138,7 +138,7 @@ public struct SetupScanner: Sendable {
         case .defaults: return DefaultsScanner(extraDomains: extraDomains, isSandboxed: isSandboxed)
         case .shares: return NetworkSharesScanner()
         case .dotfiles: return DotfilesScanner(home: home)
-        case .fonts: return FontsScanner(home: home)
+        case .fonts: return FontsScanner(home: home, linux: os == "linux")
         case .wifi: return WiFiScanner()
         case .ssh: return SSHKeyScanner(home: home)
         case .tokens: return CredentialFilesScanner(home: home)
