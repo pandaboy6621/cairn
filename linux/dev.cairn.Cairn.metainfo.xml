@@ -4,6 +4,9 @@
   <name>Cairn</name>
   <summary>Back up and restore a computer's setup, not its files</summary>
   <metadata_license>CC0-1.0</metadata_license>
+  <developer id="dev.cairn">
+    <name>Cairn</name>
+  </developer>
   <description>
     <p>Cairn records which apps, software sources, settings and config files this computer has, and sets up another computer the same way.</p>
     <p>Backups go to a folder or a NAS. Restoring always shows what would change first, and nothing changes until you choose Apply.</p>

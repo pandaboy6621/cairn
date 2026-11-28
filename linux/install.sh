@@ -11,6 +11,9 @@ ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
 
 if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$BIN/cairn-gnome" "$APPS/dev.cairn.Cairn.desktop" "$ICONS/dev.cairn.Cairn.svg"
+    # Otherwise GTK's icon cache still lists the deleted icon.
+    gtk4-update-icon-cache -q -t -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    update-desktop-database -q "$APPS" 2>/dev/null || true
     echo "Removed Cairn from the app grid."
     exit 0
 fi
